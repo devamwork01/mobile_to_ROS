@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sensorstream"
+version = "0.1.0"
+description = "Laptop-side receiver, synchronization, logging and browser dashboard for the real-time mobile sensor streaming system."
+requires-python = ">=3.10"
+dependencies = [
+    "websockets>=12.0",
+    "zeroconf>=0.132",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+sensorstream = "sensorstream.app:main"
+
+[tool.setuptools.packages.find]
+include = ["sensorstream*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"

@@ -1,0 +1,103 @@
+package com.sensorstream.service
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import com.sensorstream.stream.Selection
+import com.sensorstream.stream.StreamHolder
+
+/**
+ * Foreground service that owns the streaming lifecycle. Started via [start] with
+ * the connection target + selected sensors; promotes itself to a foreground
+ * (dataSync) service with an ongoing notification so the OS keeps the process
+ * alive while streaming, then drives the singleton [StreamHolder] engine.
+ */
+class StreamingService : Service() {
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_START -> {
+                val host = intent.getStringExtra(EXTRA_HOST)
+                val port = intent.getIntExtra(EXTRA_PORT, 0)
+                val handles = intent.getIntArrayExtra(EXTRA_HANDLES) ?: IntArray(0)
+                val periods = intent.getIntArrayExtra(EXTRA_PERIODS) ?: IntArray(0)
+                if (host == null || handles.isEmpty()) {
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+                val selections = handles.indices.map { Selection(handles[it], periods.getOrElse(it) { 0 }) }
+                startForegroundNotification(host, port)
+                StreamHolder.engine(this).start(host, port, selections)
+            }
+            ACTION_STOP -> {
+                StreamHolder.engine(this).stop()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+        }
+        // Redeliver the last START intent if the service is restarted after a kill.
+        return START_REDELIVER_INTENT
+    }
+
+    override fun onDestroy() {
+        StreamHolder.engine(this).stop()
+    }
+
+    private fun startForegroundNotification(host: String, port: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = getSystemService(NotificationManager::class.java)
+            if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(CHANNEL_ID, "Sensor streaming", NotificationManager.IMPORTANCE_LOW)
+                )
+            }
+        }
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Streaming sensors")
+            .setContentText("→ $host:$port")
+            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setOngoing(true)
+            .build()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(NOTIF_ID, notification)
+        }
+    }
+
+    companion object {
+        const val NOTIF_ID = 1
+        const val CHANNEL_ID = "streaming"
+        const val ACTION_START = "com.sensorstream.action.START"
+        const val ACTION_STOP = "com.sensorstream.action.STOP"
+        const val EXTRA_HOST = "host"
+        const val EXTRA_PORT = "port"
+        const val EXTRA_HANDLES = "handles"
+        const val EXTRA_PERIODS = "periods"
+
+        fun start(context: Context, host: String, port: Int, selections: List<Selection>) {
+            val intent = Intent(context, StreamingService::class.java)
+                .setAction(ACTION_START)
+                .putExtra(EXTRA_HOST, host)
+                .putExtra(EXTRA_PORT, port)
+                .putExtra(EXTRA_HANDLES, selections.map { it.handle }.toIntArray())
+                .putExtra(EXTRA_PERIODS, selections.map { it.periodUs }.toIntArray())
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun stop(context: Context) {
+            context.startService(
+                Intent(context, StreamingService::class.java).setAction(ACTION_STOP)
+            )
+        }
+    }
+}
