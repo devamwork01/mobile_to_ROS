@@ -1,87 +1,75 @@
 # Session handoff — Sensor Stream
 
 Living status/handoff doc. Project: real-time phone→laptop multi-sensor telemetry +
-visualization ("mobile_to_ROS_app"). Full plan/tests in `docs/test-plan.md`; wire format in
-`docs/protocol.md`; coordinate math in `docs/coordinate-systems.md`.
+visualization ("mobile_to_ROS_app"). Repo: **github.com/devamwork01/mobile_to_ROS** (branch `main`).
+Plan/tests: `docs/test-plan.md`; wire format: `docs/protocol.md`; coordinate math: `docs/coordinate-systems.md`.
 
-## Where we are (2026-09-11)
+## Where we are
 
 | Phase | State |
 |---|---|
 | 1 — Accelerometer → UDP → live values | ✅ verified on S25 Ultra |
-| 2 — Multi-sensor + WebSocket control channel + **foreground service** | ✅ built/verified (FGS: compiles+launches; background-survival = user to confirm) |
-| 3 — 3D phone orientation (Three.js) | ✅ verified on device (rotates correctly) |
+| 2 — Multi-sensor + WebSocket control channel + foreground service | ✅ verified on device (incl. **background + screen-off** streaming) |
+| 3 — 3D phone orientation (Three.js) | ✅ verified on device |
 | 4 — Real-time rolling graphs (uPlot) | ✅ verified on device |
-| 5 — Sync layer: latency (min-filter) + loss% + reorder | ✅ built + tested (dashboard shows it) |
+| 5 — Sync: latency (min-filter) + loss% + reorder | ✅ built + tested; shown on dashboard |
 | 6 — Logging (CSV+binary) + replay + Record button | ✅ built + tested end-to-end |
-| 7 — Perf/latency instrumentation + soak | ⏳ TODO |
-| 8 — Discovery (mDNS/beacon) + auto-reconnect | ⏳ TODO |
+| 7 — Perf/latency instrumentation + soak | ⏳ **TODO (next)** |
+| 8 — Discovery (mDNS + UDP beacon) + auto-reconnect | ✅ laptop verified + tested; Android compiles (**on-device pending**) |
 
-**Tests:** laptop `pytest` = **23 passing**; JS via `node --check` + `node webtests/orient.test.js`;
-Android `gradlew :app:testDebugUnitTest` (codec golden vector) passes. Android app builds, installs,
-launches clean on the S25 Ultra (Android 15).
+**Tests:** laptop `pytest` = **26 passing**; JS `node --check` + `node webtests/orient.test.js`;
+Android `gradlew :app:testDebugUnitTest` (codec golden) passes; app builds/installs/launches clean.
+
+## Immediate: verify Phase 8 on device (phone was unplugged at session end)
+1. Reconnect the phone; reinstall: `gradlew :app:assembleDebug` then `adb install -r` the debug APK.
+2. Start the laptop receiver (`python -m sensorstream.app`) on the same Wi-Fi.
+3. On the phone tap **"Find laptop automatically"** → IP + control port should auto-fill (via mDNS or
+   the UDP beacon). Then **Connect & Stream**.
+4. **Reconnect test:** while streaming, Ctrl+C the laptop app and restart it → the phone should
+   reconnect on its own (backoff 0.5–8 s) and resume streaming.
 
 ## Environment / key facts (this Windows PC)
-- **Android build:** `JAVA_HOME=C:\Users\devam\.jdks\jbr-21.0.11`; `adb` at
-  `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`; SDK android-35; Gradle 8.9 wrapper (regenerated).
-- **Laptop side:** Python venv at `laptop\.venv`; deps in `requirements.txt` (websockets, zeroconf,
-  numpy, pytest). Runtime target OS = **Linux** (home Wi-Fi); code is cross-platform.
-- **Phone:** Galaxy **S25 Ultra (SM-S938B)** verified; **M36 5G not yet tested**. Phone reaches this
-  PC over Wi-Fi (IP like `10.11.146.38`, changes). App connects to **control port 8081**; UDP 5005 is
-  negotiated automatically.
-- **Ports:** dashboard HTTP `8080`, control+dashboard WS `8081`, telemetry UDP `5005`.
+- Android build: `JAVA_HOME=C:\Users\devam\.jdks\jbr-21.0.11`; `adb` at
+  `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe`; SDK android-35; Gradle 8.9 wrapper.
+- Laptop: Python venv `laptop\.venv`; deps `requirements.txt`. Runtime target OS = Linux (home Wi-Fi).
+- Phone: **S25 Ultra (SM-S938B)** verified; **M36 5G not yet tested**. App connects to **control port
+  8081**; UDP 5005 auto-negotiated. Discovery beacon port **5006**.
+- Git: pushed over SSH (ed25519 key at `~/.ssh/id_ed25519`, no passphrase) — `git push` just works.
+  `laptop.7z` (18 MB backup at repo root) is gitignored.
 
-## Build & run commands
+## Build & run
 ```bash
-# Laptop tests (from laptop\, or with PYTHONPATH=laptop):
-laptop\.venv\Scripts\python.exe -m pytest            # 23 tests
-node --check laptop\web\*.js ; node laptop\webtests\orient.test.js
-
-# Laptop app:
-laptop\.venv\Scripts\python.exe -m sensorstream.app                 # normal
-laptop\.venv\Scripts\python.exe -m sensorstream.app --selftest      # no phone (synthetic)
-laptop\.venv\Scripts\python.exe -m sensorstream.app --record        # record from start
+# Laptop tests + app
+laptop\.venv\Scripts\python.exe -m pytest                       # 26 tests
+laptop\.venv\Scripts\python.exe -m sensorstream.app             # normal (mDNS+beacon on)
+laptop\.venv\Scripts\python.exe -m sensorstream.app --selftest  # no phone
+laptop\.venv\Scripts\python.exe -m sensorstream.app --record    # record from start
 laptop\.venv\Scripts\python.exe -m sensorstream.replay recordings\<file>.ssbin
-
-# Android (bash; set JAVA_HOME first):
-JAVA_HOME=C:/Users/devam/.jdks/jbr-21.0.11 \
-  cmd //c "C:\mobile_to_ROS_app\android\gradlew.bat -p C:\mobile_to_ROS_app\android :app:assembleDebug --offline --console=plain"
+node --check laptop\web\*.js ; node laptop\webtests\orient.test.js
+# Android (bash; set JAVA_HOME)
+JAVA_HOME=C:/Users/devam/.jdks/jbr-21.0.11 cmd //c "C:\mobile_to_ROS_app\android\gradlew.bat -p C:\mobile_to_ROS_app\android :app:assembleDebug --offline --console=plain"
 <adb> install -r android\app\build\outputs\apk\debug\app-debug.apk
-<adb> shell am start -n com.sensorstream/.MainActivity
 ```
-Dashboard: <http://localhost:8080> (hard-refresh `Ctrl+Shift+R` after web edits — static served live).
+Dashboard: <http://localhost:8080> (hard-refresh `Ctrl+Shift+R` after web edits — served live).
 
-## Immediate: verify the foreground service (on device)
-1. Start the laptop receiver; on the phone enter Laptop IP + **Ctrl port 8081**, select sensors, tap
-   **Connect & Stream** (grant the notification permission prompt).
-2. A persistent "Streaming sensors" notification should appear.
-3. **Press Home / turn the screen off** → the dashboard should keep receiving data (streaming survives
-   backgrounding). Tap **Stop** to end; notification clears.
+## Next TODO (priority)
+1. **Verify Phase 8** on device (discovery auto-fill + reconnect — steps above).
+2. **Phase 7 — Perf/latency**: wire the protocol's stage timestamps (`t_acquire_ns`, `t_serialize_ns`,
+   `FLAG_STAGE_TS`) end-to-end; benchmark p50/p95/p99; 60-min soak on the phone (rate/memory/leaks);
+   then ByteBuffer pooling + datagram coalescing.
+3. **Error handling (§26)** hardening; **M36 5G** validation (enumerate + coord tests 1–4).
+4. Developer/Debug panel (§29) on the phone (requested-vs-actual rate, queue depth).
+5. Deferred by design: iOS client, **ROS2 bridge** (`Ros2Sink` behind the `OutputSink` seam in
+   `laptop/sensorstream/sinks.py`), Protobuf option.
 
-## Next session TODO (priority order)
-1. **Confirm FGS background streaming** on the S25 Ultra (above); also try screen-off + a few minutes.
-2. **Phase 8 — Discovery + reconnect** (removes manual IP): laptop advertises via `zeroconf` (mDNS)
-   + a periodic UDP broadcast beacon; Android discovers via `NsdManager` + a beacon listener, with a
-   manual-IP fallback (+ optional QR). Auto-reconnect in `WsControlClient` (backoff on close/failure).
-   Needs `CHANGE_WIFI_MULTICAST_STATE` + a `MulticastLock`.
-3. **Phase 7 — Perf/latency**: wire the stage timestamps already in the protocol (`t_acquire_ns`,
-   `t_serialize_ns`, FLAG_STAGE_TS) end-to-end; a benchmark script (p50/p95/p99); 60-min soak on the
-   phone (rate stability, flat memory, no leaks); then ByteBuffer pooling + datagram coalescing.
-4. **Error handling (§26)** hardening: sensor unavailable, socket failure, Wi-Fi switch, unsupported-rate
-   clamp messaging; graceful reconnect UI.
-5. **M36 5G validation**: enumerate its sensors (record catalog), run coord tests 1–4.
-6. **Developer/Debug panel (§29)** on the phone: requested vs actual rate, samples tx, queue depth
-   (phone already shows RTT + sent/dropped; add the rest).
-7. Deferred by design: iOS client, **ROS2 bridge** (add `Ros2Sink` behind the existing `OutputSink`
-   seam in `laptop/sensorstream/sinks.py`), Protobuf option.
-
-## Gotchas learned (don't rediscover)
-- Android unit tests: run via **Gradle**, not the IntelliJ runner (NoClassDefFoundError for main classes).
-- Windows console is **cp1252** — keep `app.py` banner ASCII-only (box-drawing chars crash it).
-- **uPlot**: `opts.series` MUST be set or no lines draw (only axes).
-- WebGL/uPlot canvases: constrain with `renderer.setSize(w,h)` + `position:absolute` + grid `min-width:0`,
-  else the page gets infinite horizontal scroll.
-- OkHttp WebSocket URL must be `http://` (not `ws://`) — it upgrades itself.
-- FGS on Android 14/15: needs `foregroundServiceType="dataSync"` + `FOREGROUND_SERVICE_DATA_SYNC`;
-  can only be started from the app's **foreground** (adb `shell` start is denied — that's expected).
-- `ActivityResultContracts` is in package `androidx.activity.result.contract` (singular).
+## Gotchas (don't rediscover)
+- Android unit tests run via **Gradle**, not the IntelliJ runner (NoClassDefFoundError for main classes).
+- Windows console is **cp1252** — keep `app.py` output ASCII-only.
+- **uPlot**: `opts.series` MUST be set or no lines draw.
+- WebGL/uPlot canvases: `renderer.setSize(w,h)` + `position:absolute` + grid `min-width:0`, or the page
+  gets infinite horizontal scroll.
+- OkHttp WebSocket URL must be `http://` (it upgrades itself).
+- FGS (Android 14/15): `foregroundServiceType="dataSync"` + `FOREGROUND_SERVICE_DATA_SYNC`; can only be
+  started from the app's foreground (adb `shell` start is denied — expected).
+- `ActivityResultContracts` is in `androidx.activity.result.contract` (singular).
+- Discovery: NsdManager + UDP beacon (port 5006); needs `CHANGE_WIFI_MULTICAST_STATE` + a MulticastLock.
