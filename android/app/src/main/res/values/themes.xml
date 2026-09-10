@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Compose supplies the real theming (Material3); this XML theme only needs
+         to be a no-action-bar host. -->
+    <style name="Theme.SensorStream" parent="android:Theme.Material.NoActionBar" />
+</resources>

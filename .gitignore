@@ -1,0 +1,30 @@
+# Python (laptop)
+laptop/.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Recordings / logs
+recordings/
+*.ssbin
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+*.apk
+*.aab
+*.keystore
+
+# Archives / backups (not source)
+*.7z
+*.zip
+*.tar.gz
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/

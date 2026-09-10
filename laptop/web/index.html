@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sensor Stream — Telemetry Dashboard</title>
+  <link rel="stylesheet" href="vendor/uPlot.min.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="title">PHONE SENSOR TELEMETRY</div>
+    <div class="header-right">
+      <button id="rec-btn" class="rec-btn">● Record</button>
+      <div id="status" class="status disconnected"><span class="dot"></span><span id="status-text">disconnected</span></div>
+    </div>
+  </header>
+
+  <section class="statsbar" id="statsbar">
+    <div><span class="k">Device</span><span class="v" id="s-device">—</span></div>
+    <div><span class="k">Packets/s</span><span class="v" id="s-pps">0</span></div>
+    <div><span class="k">Data</span><span class="v" id="s-bps">0 B/s</span></div>
+    <div><span class="k">Records</span><span class="v" id="s-records">0</span></div>
+    <div><span class="k">Decode err</span><span class="v" id="s-derr">0</span></div>
+    <div><span class="k">Active sensors</span><span class="v" id="s-active">0</span></div>
+    <div><span class="k">Latency p50/p95</span><span class="v" id="s-latency">— ms</span></div>
+    <div><span class="k">Loss</span><span class="v" id="s-loss">0%</span></div>
+    <div><span class="k">Jitter</span><span class="v" id="s-jitter">— ms</span></div>
+  </section>
+
+  <main>
+    <section class="panel">
+      <h2>Sensors</h2>
+      <table id="sensors">
+        <thead>
+          <tr><th>Sensor</th><th>Values</th><th>|·|</th><th class="num">Hz</th><th class="num">Acc</th><th class="num">Lost</th></tr>
+        </thead>
+        <tbody id="sensor-rows"></tbody>
+      </table>
+      <p class="empty" id="empty-note">Waiting for a device… start streaming from the phone, or run the receiver with <code>--selftest</code>.</p>
+    </section>
+
+    <section class="panel">
+      <h2>3D Orientation</h2>
+      <div class="viz-toolbar">
+        <label><input type="checkbox" id="t-device" checked> Device axes (X/Y/Z)</label>
+        <label><input type="checkbox" id="t-world" checked> World (E/N/U)</label>
+        <label><input type="checkbox" id="t-accel" checked> Gravity vector</label>
+        <label><input type="checkbox" id="t-mag"> Mag vector</label>
+      </div>
+      <div id="viz3d" class="viz3d"></div>
+      <div class="orient-readout" id="orient-readout">q = —  (enable Rotation vector on the phone)</div>
+    </section>
+
+    <section class="panel">
+      <h2>Real-Time Graphs</h2>
+      <div class="win-toolbar" id="plots-toolbar"></div>
+      <div id="plots"></div>
+    </section>
+  </main>
+
+  <script src="vendor/three.min.js"></script>
+  <script src="vendor/uPlot.iife.min.js"></script>
+  <script src="orient.js"></script>
+  <script src="net.js"></script>
+  <script src="phone3d.js"></script>
+  <script src="plots.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>

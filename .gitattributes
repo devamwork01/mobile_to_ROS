@@ -1,0 +1,12 @@
+# Normalize line endings to LF in the repo (runtime target is Linux; also keeps
+# gradlew and shell scripts LF).
+* text=auto eol=lf
+
+# Binary files — never touch line endings.
+*.jar   binary
+*.bin   binary
+*.png   binary
+*.jpg   binary
+*.keystore binary
+*.7z    binary
+*.zip   binary
