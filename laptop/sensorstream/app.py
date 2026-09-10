@@ -21,6 +21,7 @@ import time
 from . import protocol as p
 from .control import ControlServer
 from .dashboard import DashboardServer
+from .discovery import Advertiser, BEACON_PORT
 from .logging_sink import Recorder
 from .receiver import start_receiver
 from .sinks import DashboardSink
@@ -96,6 +97,18 @@ async def run(args: argparse.Namespace) -> None:
 
     dash.on_ui_command = ui_command
 
+    advertiser = None
+    if not args.no_discovery:
+        adv_ips = _local_ips()
+        advertiser = Advertiser(
+            adv_ips[0] if adv_ips else "", dash.ws_port, udp_port,
+            beacon_port=args.beacon_port, broadcast_addr=args.beacon_addr,
+        )
+        try:
+            advertiser.start_mdns()
+        except Exception as exc:  # mDNS may be blocked; the UDP beacon still runs
+            print(f"   (mDNS advertise unavailable, beacon still on: {exc})")
+
     ips = _local_ips()
     bar = "=" * 64
     print(bar)
@@ -106,6 +119,8 @@ async def run(args: argparse.Namespace) -> None:
     for ip in ips or ["<this PC's Wi-Fi IP>"]:
         print(f"        Laptop IP  {ip}      Ctrl port  {dash.ws_port}")
     print("   (the phone learns the UDP port from the control channel - don't type it)")
+    if advertiser is not None:
+        print(f"   discovery : mDNS + UDP beacon :{args.beacon_port}   (phone can auto-find this PC)")
     if args.selftest:
         print("   MODE      : SELF-TEST (synthetic accelerometer)")
     if args.record:
@@ -135,7 +150,15 @@ async def run(args: argparse.Namespace) -> None:
             )
             dash.broadcast(sync.snapshot())
 
+    async def beacon_task() -> None:
+        while True:
+            if advertiser is not None:
+                advertiser.send_beacon()
+            await asyncio.sleep(1.0)
+
     tasks = [asyncio.create_task(stats_task())]
+    if advertiser is not None:
+        tasks.append(asyncio.create_task(beacon_task()))
     if args.selftest:
         tasks.append(asyncio.create_task(_selftest_generator(udp_port, args.selftest_hz)))
 
@@ -145,6 +168,8 @@ async def run(args: argparse.Namespace) -> None:
         for t in tasks:
             t.cancel()
         recorder.stop()
+        if advertiser is not None:
+            advertiser.stop()
         transport.close()
         await dash.stop()
 
@@ -162,6 +187,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--selftest-hz", type=float, default=100.0)
     ap.add_argument("--log-dir", default="./recordings", help="directory for recordings")
     ap.add_argument("--record", action="store_true", help="record the session from start")
+    ap.add_argument("--no-discovery", action="store_true", help="disable mDNS + UDP beacon advertising")
+    ap.add_argument("--beacon-port", type=int, default=BEACON_PORT, help="UDP discovery beacon port")
+    ap.add_argument("--beacon-addr", default="255.255.255.255", help="UDP beacon destination (broadcast)")
     return ap
 
 
