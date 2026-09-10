@@ -68,6 +68,9 @@ class StreamEngine(context: Context) {
     private var selections: List<Selection> = emptyList()
     @Volatile private var desired = false
     private var reconnectAttempts = 0
+    // Increments on every (re)connect; callbacks from superseded/closed sockets
+    // carry a stale generation and are ignored, preventing a reconnect storm.
+    private var connGen = 0
 
     fun start(host: String, controlPort: Int, selections: List<Selection>) {
         stop()
@@ -116,19 +119,22 @@ class StreamEngine(context: Context) {
     }
 
     private fun connectControl() {
+        val gen = ++connGen
         _state.value = _state.value.copy(connecting = true, error = null)
         control.connect(host, controlPort, buildHello(), object : WsControlClient.Listener {
             override fun onConnected() {}
             override fun onHelloAck(deviceId: Int, udpPort: Int) {
+                if (gen != connGen) return
                 reconnectAttempts = 0
                 controller.deviceId = deviceId
                 _state.value = _state.value.copy(connecting = false, connected = true, deviceId = deviceId, udpPort = udpPort)
                 startTelemetry(udpPort)
             }
             override fun onConfigure(msg: JSONObject) { /* laptop-driven config: Phase 2b */ }
-            override fun onRtt(ms: Float) { _state.value = _state.value.copy(rttMs = ms) }
-            override fun onClosed(reason: String?) { onDropped() }
+            override fun onRtt(ms: Float) { if (gen == connGen) _state.value = _state.value.copy(rttMs = ms) }
+            override fun onClosed(reason: String?) { if (gen == connGen) onDropped() }
             override fun onFailure(t: Throwable) {
+                if (gen != connGen) return
                 _state.value = _state.value.copy(error = t.message ?: t.toString())
                 onDropped()
             }
@@ -199,6 +205,7 @@ class StreamEngine(context: Context) {
 
     fun stop() {
         desired = false
+        connGen++  // invalidate in-flight callbacks so nothing reconnects after stop
         controller.onUiSample = null
         controller.stop()
         control.close()
