@@ -64,12 +64,18 @@ class StreamEngine(context: Context) {
     fun hzFor(handle: Int): Float = hz[handle] ?: 0f
 
     private var host: String = ""
+    private var controlPort: Int = 0
     private var selections: List<Selection> = emptyList()
+    @Volatile private var desired = false
+    private var reconnectAttempts = 0
 
     fun start(host: String, controlPort: Int, selections: List<Selection>) {
         stop()
         this.host = host
+        this.controlPort = controlPort
         this.selections = selections
+        desired = true
+        reconnectAttempts = 0
         latest.clear(); hz.clear(); lastTs.clear()
         _state.value = EngineState(connecting = true)
         val s = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -87,20 +93,7 @@ class StreamEngine(context: Context) {
         }
         controller.onError = { e -> _state.value = _state.value.copy(error = e.message ?: e.toString()) }
 
-        control.connect(host, controlPort, buildHello(), object : WsControlClient.Listener {
-            override fun onConnected() {}
-            override fun onHelloAck(deviceId: Int, udpPort: Int) {
-                controller.deviceId = deviceId
-                _state.value = _state.value.copy(connecting = false, connected = true, deviceId = deviceId, udpPort = udpPort)
-                startTelemetry(udpPort)
-            }
-            override fun onConfigure(msg: JSONObject) { /* laptop-driven config: Phase 2b */ }
-            override fun onRtt(ms: Float) { _state.value = _state.value.copy(rttMs = ms) }
-            override fun onClosed(reason: String?) { _state.value = _state.value.copy(connected = false, streaming = false) }
-            override fun onFailure(t: Throwable) {
-                _state.value = _state.value.copy(connecting = false, connected = false, streaming = false, error = t.message ?: t.toString())
-            }
-        })
+        connectControl()
 
         s.launch {
             var hb = 0
@@ -119,6 +112,44 @@ class StreamEngine(context: Context) {
                 )
                 delay(1000)
             }
+        }
+    }
+
+    private fun connectControl() {
+        _state.value = _state.value.copy(connecting = true, error = null)
+        control.connect(host, controlPort, buildHello(), object : WsControlClient.Listener {
+            override fun onConnected() {}
+            override fun onHelloAck(deviceId: Int, udpPort: Int) {
+                reconnectAttempts = 0
+                controller.deviceId = deviceId
+                _state.value = _state.value.copy(connecting = false, connected = true, deviceId = deviceId, udpPort = udpPort)
+                startTelemetry(udpPort)
+            }
+            override fun onConfigure(msg: JSONObject) { /* laptop-driven config: Phase 2b */ }
+            override fun onRtt(ms: Float) { _state.value = _state.value.copy(rttMs = ms) }
+            override fun onClosed(reason: String?) { onDropped() }
+            override fun onFailure(t: Throwable) {
+                _state.value = _state.value.copy(error = t.message ?: t.toString())
+                onDropped()
+            }
+        })
+    }
+
+    // Control channel dropped: stop telemetry and, if still desired, reconnect with backoff.
+    private fun onDropped() {
+        controller.stop()
+        _state.value = _state.value.copy(connected = false, streaming = false)
+        if (!desired) {
+            _state.value = _state.value.copy(connecting = false)
+            return
+        }
+        val attempt = reconnectAttempts.coerceAtMost(4)
+        reconnectAttempts += 1
+        val delayMs = (500L shl attempt).coerceAtMost(8000L) // 0.5, 1, 2, 4, 8s
+        _state.value = _state.value.copy(connecting = true)
+        scope?.launch {
+            delay(delayMs)
+            if (desired && isActive) connectControl()
         }
     }
 
@@ -167,6 +198,7 @@ class StreamEngine(context: Context) {
     }
 
     fun stop() {
+        desired = false
         controller.onUiSample = null
         controller.stop()
         control.close()

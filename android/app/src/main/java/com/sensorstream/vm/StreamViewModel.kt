@@ -5,6 +5,7 @@ import android.hardware.Sensor
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.sensorstream.core.SensorInfo
+import com.sensorstream.net.Discovery
 import com.sensorstream.service.StreamingService
 import com.sensorstream.stream.EngineState
 import com.sensorstream.stream.Selection
@@ -24,6 +25,7 @@ import kotlinx.coroutines.launch
 class StreamViewModel(app: Application) : AndroidViewModel(app) {
 
     private val engine = StreamHolder.engine(app)
+    private val discovery = Discovery(app)
 
     val catalog: List<SensorInfo> = engine.catalog
     val engineState: StateFlow<EngineState> = engine.state
@@ -47,6 +49,9 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _live = MutableStateFlow<Map<Int, Live>>(emptyMap())
     val live: StateFlow<Map<Int, Live>> = _live.asStateFlow()
+
+    private val _discovering = MutableStateFlow(false)
+    val discovering: StateFlow<Boolean> = _discovering.asStateFlow()
 
     init {
         val defaultTypes = setOf(
@@ -102,6 +107,25 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         StreamingService.start(getApplication(), _sel.value.host.trim(), port, selections)
     }
 
-    // No onCleared() stop: streaming is owned by StreamingService and must survive
-    // Activity/ViewModel recreation; the service stops it on user action or teardown.
+    fun discover() {
+        if (_discovering.value) return
+        _discovering.value = true
+        discovery.start(Discovery.Listener { host, controlPort ->
+            _sel.value = _sel.value.copy(host = host, port = controlPort.toString())
+            discovery.stop()
+            _discovering.value = false
+        })
+        viewModelScope.launch {
+            delay(8000)
+            if (_discovering.value) {
+                discovery.stop()
+                _discovering.value = false
+            }
+        }
+    }
+
+    // Streaming is owned by StreamingService (survives recreation); only stop discovery here.
+    override fun onCleared() {
+        discovery.stop()
+    }
 }

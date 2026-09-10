@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -97,6 +98,10 @@ private fun ConnectionCard(vm: StreamViewModel, engine: com.sensorstream.stream.
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.width(110.dp),
                 )
+            }
+            val discovering by vm.discovering.collectAsState()
+            TextButton(onClick = vm::discover, enabled = !active && !discovering) {
+                Text(if (discovering) "Searching for laptop…" else "Find laptop automatically")
             }
             Button(onClick = vm::toggleStreaming, modifier = Modifier.fillMaxWidth()) {
                 Text(if (active) "Stop" else "Connect & Stream")
