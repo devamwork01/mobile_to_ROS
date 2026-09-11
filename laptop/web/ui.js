@@ -104,6 +104,7 @@
     el("s-latency").textContent = m.latency_ms_p50 + "/" + m.latency_ms_p95 + " ms";
     el("s-loss").textContent = m.loss_pct + "%";
     el("s-jitter").textContent = m.jitter_ms + " ms";
+    if ("phone_latency_ms_p50" in m) el("s-phonelat").textContent = m.phone_latency_ms_p50 + "/" + m.phone_latency_ms_p95 + " ms";
     if (m.active_sensors != null) el("s-active").textContent = String(m.active_sensors);
   });
 })();

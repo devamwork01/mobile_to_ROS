@@ -64,8 +64,9 @@ class StreamController(sm: SensorManager) {
                 one.clear()
                 one.add(sample)
                 try {
-                    val bytes = BinaryPacketCodec.encode(deviceId, one, 0)
+                    // Stamp serialize time before encoding so stage timestamps are in the packet.
                     sample.tSerializeNs = SystemClock.elapsedRealtimeNanos()
+                    val bytes = BinaryPacketCodec.encode(deviceId, one, BinaryPacketCodec.FLAG_STAGE_TS)
                     sender.send(bytes)
                     sentPackets.incrementAndGet()
                 } catch (t: Throwable) {

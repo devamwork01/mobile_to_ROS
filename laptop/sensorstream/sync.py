@@ -38,6 +38,7 @@ class SyncTracker:
     def __init__(self, latency_window: int = 1024):
         self._sensors: Dict[Key, SensorStat] = {}
         self._deltas: Deque[int] = deque(maxlen=latency_window)  # t_recv_ns - t_sensor_ns
+        self._phone_lat: Deque[int] = deque(maxlen=latency_window)  # t_serialize_ns - t_acquire_ns (phone)
         self.total_received = 0
         self.total_lost = 0
         self.total_reordered = 0
@@ -67,6 +68,10 @@ class SyncTracker:
                 st.last_t = r.t_sensor_ns
 
             self._deltas.append(t_recv_ns - r.t_sensor_ns)
+            if r.t_acquire_ns is not None and r.t_serialize_ns is not None:
+                on_phone = r.t_serialize_ns - r.t_acquire_ns
+                if 0 <= on_phone < 5_000_000_000:  # sane bound (< 5 s)
+                    self._phone_lat.append(on_phone)
 
     def _latency_ms(self) -> Tuple[float, float, float]:
         if not self._deltas:
@@ -78,8 +83,17 @@ class SyncTracker:
         p95 = lat[min(n - 1, int(0.95 * n))]
         return (round(p50, 2), round(p95, 2), round(p95 - p50, 2))
 
+    def _phone_latency_ms(self) -> Tuple[float, float]:
+        """Median/p95 of on-phone acquisition->serialization latency (ms)."""
+        if not self._phone_lat:
+            return (0.0, 0.0)
+        lat = sorted(d / 1e6 for d in self._phone_lat)
+        n = len(lat)
+        return (round(lat[n // 2], 3), round(lat[min(n - 1, int(0.95 * n))], 3))
+
     def snapshot(self) -> dict:
         p50, p95, jitter = self._latency_ms()
+        ph50, ph95 = self._phone_latency_ms()
         total = self.total_received + self.total_lost
         return {
             "kind": "debug",
@@ -92,5 +106,7 @@ class SyncTracker:
             "latency_ms_p95": p95,
             "jitter_ms": jitter,
             "offset_ns": min(self._deltas) if self._deltas else 0,
+            "phone_latency_ms_p50": ph50,
+            "phone_latency_ms_p95": ph95,
             "samples": len(self._deltas),
         }

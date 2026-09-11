@@ -54,9 +54,11 @@ async def _selftest_generator(udp_port: int, hz: float) -> None:
             ax = 9.81 * math.sin(t * 0.5)
             az = 9.81 * math.cos(t * 0.5)
             ay = 0.5 * math.sin(t * 3.0)
+            tn = time.monotonic_ns()
             dg = p.Datagram(
                 device_id=SELFTEST_DEVICE_ID,
-                records=[p.Record(1, 0, seq, time.monotonic_ns(), 3, [ax, ay, az])],
+                flags=p.FLAG_STAGE_TS,
+                records=[p.Record(1, 0, seq, tn, 3, [ax, ay, az], t_acquire_ns=tn, t_serialize_ns=tn + 250_000)],
             )
             sock.sendto(p.encode_datagram(dg), dest)
             seq += 1
