@@ -14,10 +14,10 @@ Plan/tests: `docs/test-plan.md`; wire format: `docs/protocol.md`; coordinate mat
 | 4 — Real-time rolling graphs (uPlot) | ✅ verified on device |
 | 5 — Sync: latency (min-filter) + loss% + reorder | ✅ built + tested; shown on dashboard |
 | 6 — Logging (CSV+binary) + replay + Record button | ✅ built + tested end-to-end |
-| 7 — Perf/latency instrumentation + soak | ⏳ **TODO (next)** |
-| 8 — Discovery (mDNS + UDP beacon) + auto-reconnect | ✅ laptop verified + tested; Android compiles (**on-device pending**) |
+| 7 — Perf/latency instrumentation | ✅ phone-side (acq→send) + network latency on dashboard; 60-min soak + micro-opts optional |
+| 8 — Discovery (mDNS + UDP beacon) + auto-reconnect | ✅ built; reconnect-flicker fixed; installed on device |
 
-**Tests:** laptop `pytest` = **26 passing**; JS `node --check` + `node webtests/orient.test.js`;
+**Tests:** laptop `pytest` = **27 passing**; JS `node --check` + `node webtests/orient.test.js`;
 Android `gradlew :app:testDebugUnitTest` (codec golden) passes; app builds/installs/launches clean.
 
 ## Immediate: verify Phase 8 on device (phone was unplugged at session end)
