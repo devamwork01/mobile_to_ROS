@@ -43,6 +43,20 @@ def test_latency_min_filter():
     assert snap["jitter_ms"] == 15.0
 
 
+def test_phone_latency():
+    st = SyncTracker()
+    for i, ms in enumerate([1, 2, 3, 4, 5]):  # on-phone acq->send latencies
+        acq = 1_000_000 + i * 10_000_000
+        ser = acq + int(ms * 1e6)
+        st.observe(
+            _dg([p.Record(1, 0, i, acq, 3, [0.0], t_acquire_ns=acq, t_serialize_ns=ser)]),
+            t_recv_ns=acq + 1_000_000_000,
+        )
+    snap = st.snapshot()
+    assert snap["phone_latency_ms_p50"] == 3.0  # median of [1,2,3,4,5]
+    assert snap["phone_latency_ms_p95"] == 5.0
+
+
 def test_multi_sensor_independent_loss():
     st = SyncTracker()
     # accel (handle 0) clean; gyro (handle 1) drops one
