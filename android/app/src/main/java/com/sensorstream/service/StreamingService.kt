@@ -6,8 +6,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.sensorstream.stream.Selection
@@ -20,6 +22,9 @@ import com.sensorstream.stream.StreamHolder
  * alive while streaming, then drives the singleton [StreamHolder] engine.
  */
 class StreamingService : Service() {
+
+    private var wifiLock: WifiManager.WifiLock? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -36,10 +41,12 @@ class StreamingService : Service() {
                 }
                 val selections = handles.indices.map { Selection(handles[it], periods.getOrElse(it) { 0 }) }
                 startForegroundNotification(host, port)
+                acquireLocks()
                 StreamHolder.engine(this).start(host, port, selections)
             }
             ACTION_STOP -> {
                 StreamHolder.engine(this).stop()
+                releaseLocks()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -50,6 +57,35 @@ class StreamingService : Service() {
 
     override fun onDestroy() {
         StreamHolder.engine(this).stop()
+        releaseLocks()
+    }
+
+    /** Keep Wi-Fi and the CPU awake while streaming so screen-off / Doze / battery
+     *  saver don't drop the link. Released on stop / destroy. */
+    private fun acquireLocks() {
+        if (wifiLock == null) {
+            val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+            } else {
+                @Suppress("DEPRECATION")
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            }
+            wifiLock = wifi.createWifiLock(mode, "sensorstream:wifi").apply { setReferenceCounted(false) }
+        }
+        if (wifiLock?.isHeld == false) wifiLock?.acquire()
+
+        if (wakeLock == null) {
+            val power = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "sensorstream:cpu")
+                .apply { setReferenceCounted(false) }
+        }
+        if (wakeLock?.isHeld == false) wakeLock?.acquire()
+    }
+
+    private fun releaseLocks() {
+        if (wifiLock?.isHeld == true) wifiLock?.release()
+        if (wakeLock?.isHeld == true) wakeLock?.release()
     }
 
     private fun startForegroundNotification(host: String, port: Int) {

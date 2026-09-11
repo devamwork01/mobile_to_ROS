@@ -1,9 +1,15 @@
 package com.sensorstream
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -31,11 +37,29 @@ class MainActivity : ComponentActivity() {
         ) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        requestBatteryExemption()
         setContent {
             SensorStreamTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     StreamScreen(viewModel)
                 }
+            }
+        }
+    }
+
+    /** Ask the OS to exempt the app from Doze / battery optimization so long
+     *  screen-off streaming isn't throttled. One-time system dialog until granted. */
+    @SuppressLint("BatteryLife")
+    private fun requestBatteryExemption() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            runCatching {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        Uri.parse("package:$packageName"),
+                    )
+                )
             }
         }
     }
