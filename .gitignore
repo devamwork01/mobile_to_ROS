@@ -19,6 +19,11 @@ android/captures/
 *.aab
 *.keystore
 
+# Node / React dashboard build
+laptop/webapp/node_modules/
+laptop/webapp/dist/
+*.tsbuildinfo
+
 # Archives / backups (not source)
 *.7z
 *.zip

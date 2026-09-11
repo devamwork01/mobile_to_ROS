@@ -27,7 +27,11 @@ from .receiver import start_receiver
 from .sinks import DashboardSink
 from .sync import SyncTracker
 
-WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
+_HERE = os.path.dirname(__file__)
+_REACT_DIST = os.path.abspath(os.path.join(_HERE, "..", "webapp", "dist"))
+_LEGACY_WEB = os.path.abspath(os.path.join(_HERE, "..", "web"))
+# Serve the built React dashboard when present; otherwise the legacy static one.
+WEB_DIR = _REACT_DIST if os.path.isdir(_REACT_DIST) else _LEGACY_WEB
 SELFTEST_DEVICE_ID = 0x53454C46  # "SELF"
 
 
