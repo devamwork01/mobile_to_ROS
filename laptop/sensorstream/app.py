@@ -50,22 +50,37 @@ async def _selftest_generator(udp_port: int, hz: float) -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     dest = ("127.0.0.1", udp_port)
     period = 1.0 / hz
-    seq = 0
+    seqs = [0, 0, 0, 0]  # accel, gyro, mag, rotation-vector
     t0 = time.monotonic()
     try:
         while True:
             t = time.monotonic() - t0
-            ax = 9.81 * math.sin(t * 0.5)
-            az = 9.81 * math.cos(t * 0.5)
-            ay = 0.5 * math.sin(t * 3.0)
+            yaw = t * 0.6
+            pitch = 0.35 * math.sin(t * 0.5)
+            cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+            cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+            qx, qy, qz, qw = cy * sp, sy * sp, sy * cp, cy * cp  # rotation vector
+            ax, ay, az = 9.81 * math.sin(pitch), 0.6 * math.sin(t * 3), 9.81 * math.cos(pitch)
+            gx, gy, gz = 0.15 * math.sin(t * 2), 0.35 * math.cos(t * 0.5), 0.6
+            mx, my, mz = 28 * math.cos(yaw), 28 * math.sin(yaw), -40 + 3 * math.sin(t)
             tn = time.monotonic_ns()
+
+            def rec(handle, stype, vals):
+                r = p.Record(stype, handle, seqs[handle], tn, 3, vals, t_acquire_ns=tn, t_serialize_ns=tn + 250_000)
+                seqs[handle] += 1
+                return r
+
             dg = p.Datagram(
                 device_id=SELFTEST_DEVICE_ID,
                 flags=p.FLAG_STAGE_TS,
-                records=[p.Record(1, 0, seq, tn, 3, [ax, ay, az], t_acquire_ns=tn, t_serialize_ns=tn + 250_000)],
+                records=[
+                    rec(0, 1, [ax, ay, az]),     # Acceleration
+                    rec(1, 4, [gx, gy, gz]),     # Angular Velocity
+                    rec(2, 2, [mx, my, mz]),     # Magnetic Field
+                    rec(3, 11, [qx, qy, qz, qw]),  # Orientation (rotation vector)
+                ],
             )
             sock.sendto(p.encode_datagram(dg), dest)
-            seq += 1
             await asyncio.sleep(period)
     finally:
         sock.close()

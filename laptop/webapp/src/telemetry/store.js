@@ -28,19 +28,39 @@ function setMeta(patch) {
 const signals = new Map(); // handle -> latest record
 const signalListeners = new Map(); // handle -> Set<listener>
 const activeHandles = new Map(); // handle -> type
+const latestByType = new Map(); // sensor type -> latest record
+const typeListeners = new Map(); // type -> Set<cb(record)>
 
 function onRecord(r) {
   signals.set(r.handle, r);
-  const s = signalListeners.get(r.handle);
-  if (s) s.forEach((l) => l());
+  const sl = signalListeners.get(r.handle);
+  if (sl) sl.forEach((l) => l());
+  latestByType.set(r.type, r);
+  const tl = typeListeners.get(r.type);
+  if (tl) tl.forEach((cb) => cb(r));
   if (!activeHandles.has(r.handle)) {
     activeHandles.set(r.handle, r.type);
     setMeta({ active: [...activeHandles.entries()].map(([handle, type]) => ({ handle, type })) });
   }
 }
 
+// Imperative access for animation loops (3D / graphs) — no React re-render.
+export function getByType(type) {
+  return latestByType.get(type);
+}
+export function subscribeType(type, cb) {
+  let set = typeListeners.get(type);
+  if (!set) {
+    set = new Set();
+    typeListeners.set(type, set);
+  }
+  set.add(cb);
+  return () => set.delete(cb);
+}
+
 function clearActive() {
   activeHandles.clear();
+  latestByType.clear();
   setMeta({ active: [] });
 }
 

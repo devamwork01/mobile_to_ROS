@@ -3,10 +3,7 @@ import { Icons } from "../icons.js";
 const NAV = [
   ["Dashboard", "LayoutDashboard"],
   ["Sensors", "Radar"],
-  ["3D Visualization", "Box"],
-  ["Graphs", "LineChart"],
-  ["Data Logger", "Database"],
-  ["Analysis", "BarChart3"],
+  ["Recordings", "Database"],
   ["Diagnostics", "Activity"],
   ["Settings", "Settings"],
 ];
