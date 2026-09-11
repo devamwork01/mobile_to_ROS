@@ -2,9 +2,11 @@ import { useState, useEffect } from "react";
 import { Icons } from "./icons.js";
 import NavRail from "./components/NavRail.jsx";
 import SignalCard from "./components/SignalCard.jsx";
+import Phone3D from "./components/Phone3D.jsx";
+import GraphPanel from "./components/GraphPanel.jsx";
+import SensorModal from "./components/SensorModal.jsx";
 import { useTelemetry, sendCommand } from "./telemetry/store.js";
-
-const TABS = ["Live View", "Graphs", "Data Table", "Diagnostics", "Recording"];
+import { signalMeta } from "./telemetry/signals.js";
 
 function Clock() {
   const [t, setT] = useState(() => new Date());
@@ -29,23 +31,11 @@ function StatusPill({ meta }) {
   );
 }
 
-function TopBar({ meta, tab, onTab }) {
+function TopBar({ meta, view }) {
   const rec = meta.recording?.active;
   return (
-    <header className="h-14 shrink-0 flex items-center gap-1 px-4 border-b border-line bg-surface/70 backdrop-blur">
-      <div className="flex items-center gap-1">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => onTab(t)}
-            className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
-              tab === t ? "bg-surface-2 text-fg" : "text-muted hover:text-fg"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
+    <header className="h-14 shrink-0 flex items-center gap-3 px-5 border-b border-line bg-surface/70 backdrop-blur">
+      <h1 className="text-sm font-semibold">{view}</h1>
       <div className="ml-auto flex items-center gap-3">
         <button
           onClick={() => sendCommand({ cmd: rec ? "record_stop" : "record_start" })}
@@ -61,49 +51,73 @@ function TopBar({ meta, tab, onTab }) {
   );
 }
 
-function Panel({ title, action, children, className = "" }) {
+function Panel({ title, children, className = "" }) {
   return (
     <section className={`panel p-4 ${className}`}>
-      {(title || action) && (
-        <div className="flex items-center justify-between mb-3">
-          {title && <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">{title}</h2>}
-          {action}
-        </div>
-      )}
+      {title && <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted mb-3">{title}</h2>}
       {children}
     </section>
   );
 }
 
-function Placeholder({ icon, label }) {
+function Empty({ icon, title, sub }) {
   const I = Icons[icon] || Icons.CircleDot;
   return (
-    <div className="h-full min-h-[260px] grid place-items-center text-center text-faint">
-      <div>
-        <I size={30} className="mx-auto mb-2 opacity-50" />
-        <div className="text-sm">{label}</div>
+    <div className="min-h-[200px] grid place-items-center text-center">
+      <div className="text-faint">
+        <I size={28} className="mx-auto mb-2 opacity-50" />
+        <div className="text-sm font-medium text-muted">{title}</div>
+        {sub && <div className="text-xs">{sub}</div>}
       </div>
     </div>
   );
 }
 
-function LiveGrid({ meta }) {
-  if (meta.active.length === 0) {
-    return (
-      <div className="min-h-[200px] grid place-items-center text-center">
-        <div className="text-faint">
-          <Icons.Radar size={28} className="mx-auto mb-2 opacity-50" />
-          <div className="text-sm font-medium text-muted">No sensors streaming</div>
-          <div className="text-xs">Start streaming from the phone to see live signals.</div>
-        </div>
-      </div>
-    );
-  }
+function LiveGrid({ meta, onSelect, cols = "sm:grid-cols-2" }) {
+  if (meta.active.length === 0)
+    return <Empty icon="Radar" title="No sensors streaming" sub="Start streaming from the phone (or run --selftest)." />;
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <div className={`grid grid-cols-1 ${cols} gap-3`}>
       {meta.active.map(({ handle, type }) => (
-        <SignalCard key={handle} handle={handle} type={type} />
+        <SignalCard key={handle} handle={handle} type={type} onSelect={() => onSelect({ handle, type })} />
       ))}
+    </div>
+  );
+}
+
+function DiagRow({ label, value, tone }) {
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-line/60 last:border-0">
+      <span className="text-sm text-muted">{label}</span>
+      <span className={`num text-sm ${tone || "text-fg"}`}>{value}</span>
+    </div>
+  );
+}
+
+function Diagnostics({ meta }) {
+  const d = meta.debug || {};
+  const s = meta.stats || {};
+  const rate = s.bps ? (s.bps < 1048576 ? `${(s.bps / 1024).toFixed(0)} KB/s` : `${(s.bps / 1048576).toFixed(2)} MB/s`) : "—";
+  return (
+    <div className="grid md:grid-cols-2 gap-4">
+      <Panel title="Connection">
+        <DiagRow label="Status" value={meta.device ? "Connected" : "No device"} tone={meta.device ? "text-ok" : "text-muted"} />
+        <DiagRow label="Device" value={meta.device ? `${meta.device.model} (Android ${meta.device.android})` : "—"} />
+        <DiagRow label="Network latency (p50 / p95)" value={`${d.latency_ms_p50 ?? "—"} / ${d.latency_ms_p95 ?? "—"} ms`} />
+        <DiagRow label="Jitter" value={`${d.jitter_ms ?? "—"} ms`} />
+        <DiagRow label="Phone latency (acq→send)" value={`${d.phone_latency_ms_p50 ?? "—"} / ${d.phone_latency_ms_p95 ?? "—"} ms`} />
+        <DiagRow label="Packet loss" value={`${d.loss_pct ?? 0} %`} tone={(d.loss_pct || 0) > 1 ? "text-warn" : "text-fg"} />
+        <DiagRow label="Throughput" value={rate} />
+      </Panel>
+      <Panel title="Sensor Pipeline">
+        <DiagRow label="Active sensors" value={meta.active.length} />
+        <DiagRow label="Packets received" value={s.packets ?? "—"} />
+        <DiagRow label="Records received" value={d.received ?? s.records ?? "—"} />
+        <DiagRow label="Lost samples" value={d.lost ?? "—"} />
+        <DiagRow label="Reordered" value={d.reordered ?? "—"} />
+        <DiagRow label="Decode errors" value={s.decode_errors ?? "—"} />
+        <DiagRow label="Recording" value={meta.recording?.active ? `Yes · ${meta.recording.rows} rows` : "No"} />
+      </Panel>
     </div>
   );
 }
@@ -111,27 +125,63 @@ function LiveGrid({ meta }) {
 export default function App() {
   const meta = useTelemetry();
   const [view, setView] = useState("Dashboard");
-  const [tab, setTab] = useState("Live View");
+  const [selected, setSelected] = useState(null);
+
+  const graphSensors = [];
+  const seen = new Set();
+  meta.active.forEach(({ type }) => {
+    const k = signalMeta(type).kind;
+    if ((k === "vector" || k === "orientation") && !seen.has(type)) {
+      seen.add(type);
+      graphSensors.push({ type, name: signalMeta(type).name });
+    }
+  });
 
   return (
     <div className="flex h-full bg-ink">
       <NavRail view={view} onView={setView} meta={meta} />
       <main className="flex-1 min-w-0 flex flex-col">
-        <TopBar meta={meta} tab={tab} onTab={setTab} />
+        <TopBar meta={meta} view={view} />
         <div className="flex-1 overflow-auto p-4 bg-hero-grad">
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-4">
-            <Panel title="3D Device Visualization" className="min-h-[380px]">
-              <Placeholder icon="Box" label="Premium 3D phone — arriving next stage" />
+          {view === "Dashboard" && (
+            <>
+              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-4">
+                <Panel title="3D Device Visualization" className="min-h-[440px] flex flex-col">
+                  <Phone3D />
+                </Panel>
+                <Panel title="Live Sensor Data">
+                  <LiveGrid meta={meta} onSelect={setSelected} />
+                </Panel>
+              </div>
+              <Panel title="Real-Time Graphs" className="mt-4">
+                <GraphPanel sensors={graphSensors} />
+              </Panel>
+            </>
+          )}
+
+          {view === "Sensors" && (
+            <Panel title="Streaming Signals">
+              <LiveGrid meta={meta} onSelect={setSelected} cols="sm:grid-cols-2 xl:grid-cols-3" />
             </Panel>
-            <Panel title="Live Sensor Data">
-              <LiveGrid meta={meta} />
+          )}
+
+          {view === "Diagnostics" && <Diagnostics meta={meta} />}
+
+          {view === "Recordings" && (
+            <Panel title="Recordings">
+              <Empty icon="Database" title="Recording browser" sub="Use Record above to capture; replay/list UI coming here." />
             </Panel>
-          </div>
-          <Panel title="Real-Time Graphs" className="mt-4">
-            <Placeholder icon="LineChart" label="Premium real-time graphs — arriving next stage" />
-          </Panel>
+          )}
+
+          {view === "Settings" && (
+            <Panel title="Settings">
+              <Empty icon="Settings" title="Settings" sub="Theme, ports and preferences will live here." />
+            </Panel>
+          )}
         </div>
       </main>
+
+      {selected && <SensorModal sensor={selected} catalog={meta.catalog} onClose={() => setSelected(null)} />}
     </div>
   );
 }

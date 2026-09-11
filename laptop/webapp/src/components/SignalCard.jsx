@@ -61,7 +61,7 @@ function ScalarValue({ v, unit }) {
   );
 }
 
-export default function SignalCard({ handle, type }) {
+export default function SignalCard({ handle, type, onSelect }) {
   const rec = useSignal(handle);
   const meta = signalMeta(type);
   const Icon = Icons[meta.icon] || Icons.CircleDot;
@@ -69,7 +69,10 @@ export default function SignalCard({ handle, type }) {
   const active = !!rec;
 
   return (
-    <div className="card p-4 flex flex-col gap-3 bg-surface-grad animate-fade-in">
+    <div
+      onClick={onSelect}
+      className="card p-4 flex flex-col gap-3 bg-surface-grad animate-fade-in cursor-pointer hover:border-line2 hover:shadow-glow/50 transition-all"
+    >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3 min-w-0">
           <div className="grid place-items-center w-9 h-9 rounded-lg bg-accent-soft text-accent shrink-0">
