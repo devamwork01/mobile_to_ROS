@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { getByType } from "../telemetry/store.js";
 import { androidToThree } from "../lib/orient.js";
 import { AXIS } from "../telemetry/signals.js";
@@ -19,6 +21,40 @@ function makeLabel(text, color) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false }));
   sp.scale.set(0.3, 0.3, 0.3);
   return sp;
+}
+
+// Subtle glowing "screen content" drawn to a canvas, used as an additive overlay.
+function makeScreenTexture() {
+  const c = document.createElement("canvas");
+  c.width = 256;
+  c.height = 512;
+  const g = c.getContext("2d");
+  g.clearRect(0, 0, 256, 512);
+  const rg = g.createRadialGradient(128, 160, 8, 128, 160, 280);
+  rg.addColorStop(0, "rgba(61,123,253,0.55)");
+  rg.addColorStop(0.6, "rgba(61,123,253,0.10)");
+  rg.addColorStop(1, "rgba(61,123,253,0)");
+  g.fillStyle = rg;
+  g.fillRect(0, 0, 256, 512);
+  g.textAlign = "center";
+  g.fillStyle = "rgba(232,237,244,0.92)";
+  g.font = "bold 25px Inter, system-ui, sans-serif";
+  g.fillText("SENSORSTREAM", 128, 300);
+  g.fillStyle = "rgba(61,123,253,0.95)";
+  g.font = "bold 15px Inter, system-ui, sans-serif";
+  g.fillText("P R O", 128, 324);
+  g.strokeStyle = "rgba(63,208,122,0.55)";
+  g.lineWidth = 2.5;
+  g.beginPath();
+  for (let x = 0; x <= 256; x += 3) {
+    const env = Math.exp(-Math.abs(x - 128) / 110);
+    const y = 392 + Math.sin(x / 15) * 20 * env;
+    x === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+  }
+  g.stroke();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 function Toggle({ label, color, on, onClick }) {
@@ -42,35 +78,123 @@ export default function Phone3D() {
   useEffect(() => {
     const el = mount.current;
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-    camera.position.set(1.9, 1.5, 2.4);
+    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+    camera.position.set(1.85, 1.35, 2.4);
     camera.lookAt(0, 0, 0);
+
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(window.devicePixelRatio || 1);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     el.appendChild(renderer.domElement);
     renderer.domElement.style.position = "absolute";
     renderer.domElement.style.inset = "0";
 
-    scene.add(new THREE.HemisphereLight(0x9fbaff, 0x0a0d12, 0.85));
-    const key = new THREE.DirectionalLight(0xffffff, 1.1);
-    key.position.set(2, 4, 3);
-    scene.add(key);
+    // Image-based lighting (procedural, offline) for realistic metal/glass reflections.
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
-    const grid = new THREE.GridHelper(8, 16, 0x2a313c, 0x1a2029);
+    scene.add(new THREE.HemisphereLight(0x9fbaff, 0x0a0d12, 0.35));
+    const key = new THREE.DirectionalLight(0xffffff, 1.6);
+    key.position.set(2.5, 4.5, 3);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.camera.near = 0.5;
+    key.shadow.camera.far = 15;
+    key.shadow.camera.left = -3;
+    key.shadow.camera.right = 3;
+    key.shadow.camera.top = 3;
+    key.shadow.camera.bottom = -3;
+    key.shadow.bias = -0.0004;
+    key.shadow.radius = 4;
+    scene.add(key);
+    const rim = new THREE.DirectionalLight(0x5b8cff, 0.7);
+    rim.position.set(-3, 1.5, -2.5);
+    scene.add(rim);
+
+    const grid = new THREE.GridHelper(8, 16, 0x2a313c, 0x151b23);
     grid.position.y = -1.25;
     scene.add(grid);
+
+    // soft contact shadow catcher
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(8, 8),
+      new THREE.ShadowMaterial({ opacity: 0.32 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -1.248;
+    ground.receiveShadow = true;
+    scene.add(ground);
 
     // phone (local axes == device axes: +X right, +Y top, +Z out of screen)
     const phone = new THREE.Group();
     scene.add(phone);
-    const body = new THREE.MeshStandardMaterial({ color: 0x2b323d, metalness: 0.75, roughness: 0.35 });
-    const screen = new THREE.MeshStandardMaterial({ color: 0x0e1524, metalness: 0.2, roughness: 0.1, emissive: 0x0a2044, emissiveIntensity: 0.5 });
-    const faces = [body, body, body, body, screen, body];
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.44, 0.09), faces);
-    phone.add(mesh);
-    const dot = new THREE.Mesh(new THREE.CircleGeometry(0.045, 24), new THREE.MeshBasicMaterial({ color: 0x0a0d12 }));
-    dot.position.set(0, 0.58, 0.046);
+
+    const titanium = new THREE.MeshPhysicalMaterial({
+      color: 0x4a4f57,
+      metalness: 1.0,
+      roughness: 0.38,
+      clearcoat: 0.35,
+      clearcoatRoughness: 0.45,
+      envMapIntensity: 1.25,
+    });
+    const glass = new THREE.MeshPhysicalMaterial({
+      color: 0x04060c,
+      metalness: 0.1,
+      roughness: 0.12,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.06,
+      envMapIntensity: 1.4,
+    });
+    const matte = new THREE.MeshStandardMaterial({ color: 0x23272e, metalness: 0.6, roughness: 0.55 });
+
+    // titanium frame
+    const frame = new THREE.Mesh(new RoundedBoxGeometry(0.74, 1.46, 0.086, 6, 0.075), titanium);
+    frame.castShadow = true;
+    frame.receiveShadow = true;
+    phone.add(frame);
+
+    // glossy black glass screen slab
+    const screenGlass = new THREE.Mesh(new RoundedBoxGeometry(0.665, 1.385, 0.092, 6, 0.05), glass);
+    screenGlass.castShadow = true;
+    phone.add(screenGlass);
+
+    // glowing screen content (additive overlay on the front face, +Z)
+    const screenTex = makeScreenTexture();
+    const content = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.6, 1.28),
+      new THREE.MeshBasicMaterial({ map: screenTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.95 })
+    );
+    content.position.set(0, 0, 0.0475);
+    phone.add(content);
+
+    // front punch-hole camera
+    const dot = new THREE.Mesh(
+      new THREE.CircleGeometry(0.028, 24),
+      new THREE.MeshBasicMaterial({ color: 0x05070c })
+    );
+    dot.position.set(0, 0.6, 0.049);
     phone.add(dot);
+
+    // rear camera island + lenses
+    const island = new THREE.Mesh(new RoundedBoxGeometry(0.28, 0.28, 0.04, 4, 0.06), matte);
+    island.position.set(-0.18, 0.5, -0.055);
+    island.castShadow = true;
+    phone.add(island);
+    const lensMat = new THREE.MeshPhysicalMaterial({ color: 0x090b10, metalness: 0.5, roughness: 0.1, clearcoat: 1 });
+    const ringMat = new THREE.MeshStandardMaterial({ color: 0x2f343c, metalness: 1, roughness: 0.4 });
+    for (const [lx, ly] of [[-0.055, 0.055], [0.055, 0.055], [0, -0.06]]) {
+      const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.03, 24), ringMat);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(-0.18 + lx, 0.5 + ly, -0.078);
+      phone.add(ring);
+      const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, 0.02, 24), lensMat);
+      lens.rotation.x = Math.PI / 2;
+      lens.position.set(-0.18 + lx, 0.5 + ly, -0.086);
+      phone.add(lens);
+    }
 
     const arrow = (parent, dir, len, color, head = 0.16) => {
       const a = new THREE.ArrowHelper(dir.clone().normalize(), new THREE.Vector3(), len, color, head, head * 0.6);
@@ -162,6 +286,8 @@ export default function Phone3D() {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      pmrem.dispose();
+      scene.environment?.dispose();
       renderer.dispose();
       el.removeChild(renderer.domElement);
     };
