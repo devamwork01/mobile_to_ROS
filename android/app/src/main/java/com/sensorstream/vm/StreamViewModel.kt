@@ -86,12 +86,20 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         val e = _sel.value.enabled.toMutableSet()
         if (!e.add(handle)) e.remove(handle)
         _sel.value = _sel.value.copy(enabled = e)
+        applyLiveReconfig()
     }
 
     fun periodOf(handle: Int): Int = _sel.value.periodByHandle[handle] ?: 10_000
 
     fun setPeriod(handle: Int, periodUs: Int) {
         _sel.value = _sel.value.copy(periodByHandle = _sel.value.periodByHandle + (handle to periodUs))
+        applyLiveReconfig()
+    }
+
+    /** When already streaming, push selection/rate changes to the engine without a reconnect. */
+    private fun applyLiveReconfig() {
+        if (!engine.state.value.streaming) return
+        engine.updateSelections(_sel.value.enabled.map { Selection(it, periodOf(it)) })
     }
 
     fun toggleStreaming() {

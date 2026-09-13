@@ -35,6 +35,7 @@ class SensorEventSource(private val sm: SensorManager) : SensorEventListener {
     private val handleByType = ConcurrentHashMap<Int, Int>()
     private val seqByHandle = ConcurrentHashMap<Int, Long>()
     private val accuracyByHandle = ConcurrentHashMap<Int, Int>()
+    private val activeRegs = ConcurrentHashMap<Int, Reg>() // handle -> currently-registered Reg
 
     fun start(regs: List<Reg>) {
         stop()
@@ -42,12 +43,42 @@ class SensorEventSource(private val sm: SensorManager) : SensorEventListener {
         val h = Handler(t.looper)
         thread = t
         handler = h
-        for (r in regs) {
-            handleByType[r.sensor.type] = r.handle
-            seqByHandle[r.handle] = 0L
-            accuracyByHandle[r.handle] = SensorManager.SENSOR_STATUS_ACCURACY_HIGH
-            sm.registerListener(this, r.sensor, r.periodUs, r.maxReportLatencyUs, h)
+        for (r in regs) registerOne(r, h)
+    }
+
+    /**
+     * Live reconfigure the registered set without tearing down the acquisition
+     * thread: registers newly-enabled sensors, unregisters removed ones, and
+     * re-registers any whose requested period changed. Unchanged sensors keep
+     * streaming (and their sequence counters) uninterrupted. No-op if not started.
+     */
+    fun updateRegs(newRegs: List<Reg>) {
+        val h = handler ?: return
+        val newByHandle = newRegs.associateBy { it.handle }
+        // Remove sensors no longer wanted, and drop ones whose rate changed (re-added below).
+        for ((handle, reg) in activeRegs.toList()) {
+            val nr = newByHandle[handle]
+            val rateChanged = nr != null && (nr.periodUs != reg.periodUs || nr.maxReportLatencyUs != reg.maxReportLatencyUs)
+            if (nr == null || rateChanged) {
+                sm.unregisterListener(this, reg.sensor)
+                activeRegs.remove(handle)
+                if (nr == null) {
+                    handleByType.remove(reg.sensor.type)
+                    seqByHandle.remove(handle)
+                    accuracyByHandle.remove(handle)
+                }
+            }
         }
+        // Add new sensors (and re-add rate-changed ones), preserving seq across a rate change.
+        for (r in newRegs) if (!activeRegs.containsKey(r.handle)) registerOne(r, h)
+    }
+
+    private fun registerOne(r: Reg, h: Handler) {
+        handleByType[r.sensor.type] = r.handle
+        seqByHandle.putIfAbsent(r.handle, 0L)
+        accuracyByHandle.putIfAbsent(r.handle, SensorManager.SENSOR_STATUS_ACCURACY_HIGH)
+        sm.registerListener(this, r.sensor, r.periodUs, r.maxReportLatencyUs, h)
+        activeRegs[r.handle] = r
     }
 
     fun stop() {
@@ -58,6 +89,7 @@ class SensorEventSource(private val sm: SensorManager) : SensorEventListener {
         handleByType.clear()
         seqByHandle.clear()
         accuracyByHandle.clear()
+        activeRegs.clear()
     }
 
     override fun onSensorChanged(event: SensorEvent) {

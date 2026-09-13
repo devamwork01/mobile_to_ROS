@@ -82,6 +82,13 @@ class WsControlClient {
         ws?.send(stats.put("type", "stats").toString())
     }
 
+    /** Announce the currently-streaming sensor handles so the dashboard can add/remove live. */
+    fun sendActive(handles: List<Int>) {
+        val arr = org.json.JSONArray()
+        for (h in handles) arr.put(h)
+        ws?.send(JSONObject().put("type", "active").put("handles", arr).toString())
+    }
+
     fun close() {
         try { ws?.close(1000, null) } catch (_: Exception) {}
         ws = null

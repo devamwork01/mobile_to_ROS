@@ -64,6 +64,20 @@ function clearActive() {
   setMeta({ active: [] });
 }
 
+// Authoritative active set announced by the phone (live add/remove). Adds newly
+// enabled handles (type from the catalog; values fill in as data arrives) and
+// drops removed ones immediately — robust for low-rate/on-change sensors that a
+// data-gap timeout would wrongly evict.
+function applyActiveSet(handles) {
+  const wanted = new Set(handles.map(Number));
+  const catType = new Map((meta.catalog || []).map((s) => [s.handle, s.type]));
+  for (const h of [...activeHandles.keys()]) if (!wanted.has(h)) activeHandles.delete(h);
+  for (const h of wanted) if (!activeHandles.has(h)) activeHandles.set(h, catType.get(h) ?? 0);
+  const activeTypes = new Set(activeHandles.values());
+  for (const ty of [...latestByType.keys()]) if (!activeTypes.has(ty)) latestByType.delete(ty);
+  setMeta({ active: [...activeHandles.entries()].map(([handle, type]) => ({ handle, type })) });
+}
+
 let ws = null;
 let backoff = 500;
 function connect() {
@@ -97,7 +111,9 @@ function connect() {
         m.records.forEach(onRecord);
         break;
       case "stats":
-        setMeta({ stats: m });
+        // The stats stream also carries the live recording state (rec_rows every
+        // ~0.5s); the one-shot "recording" message only fires on toggle.
+        setMeta({ stats: m, recording: { active: !!m.recording, rows: m.rec_rows || 0 } });
         break;
       case "debug":
         setMeta({ debug: m });
@@ -107,6 +123,9 @@ function connect() {
         break;
       case "phone_connected":
         setMeta({ catalog: m.sensors || [], device: { model: m.model, android: m.android } });
+        break;
+      case "active_set":
+        applyActiveSet(m.handles || []);
         break;
       case "phone_disconnected":
         setMeta({ catalog: [], device: null });
