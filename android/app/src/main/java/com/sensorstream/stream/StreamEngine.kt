@@ -169,6 +169,24 @@ class StreamEngine(context: Context) {
         }
         controller.start(host, udpPort, regs)
         _state.value = _state.value.copy(streaming = true)
+        control.sendActive(regs.map { it.handle })
+    }
+
+    /**
+     * Live-reconfigure the streamed sensor set (add/remove/rate-change) without a
+     * reconnect. Safe to call any time; only takes effect while streaming. The new
+     * active set is announced to the laptop so the dashboard updates immediately.
+     */
+    fun updateSelections(newSelections: List<Selection>) {
+        selections = newSelections
+        if (!_state.value.streaming) return
+        val regs = newSelections.mapNotNull { sel ->
+            repo.sensorAt(sel.handle)?.let { SensorEventSource.Reg(it, sel.handle, sel.periodUs) }
+        }
+        val keep = regs.map { it.handle }.toSet()
+        for (h in latest.keys.toList()) if (h !in keep) { latest.remove(h); hz.remove(h); lastTs.remove(h) }
+        controller.updateRegs(regs)
+        control.sendActive(regs.map { it.handle })
     }
 
     private fun buildHello(): JSONObject {

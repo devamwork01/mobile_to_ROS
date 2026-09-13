@@ -118,6 +118,26 @@ async def run(args: argparse.Namespace) -> None:
 
     dash.on_ui_command = ui_command
 
+    def ui_snapshot() -> list:
+        """Current state replayed to a browser that connects after the phone did."""
+        msgs: list = []
+        for s in control.sessions.values():
+            msgs.append({
+                "kind": "phone_connected",
+                "device_id": s.device_id,
+                "addr": s.addr,
+                "model": s.model,
+                "android": s.android,
+                "app_version": s.app_version,
+                "sensors": s.catalog,
+            })
+            if s.active:
+                msgs.append({"kind": "active_set", "device_id": s.device_id, "handles": s.active})
+        msgs.append({"kind": "recording", "active": recorder.is_recording, "rows": recorder.rows})
+        return msgs
+
+    dash.on_ui_connect = ui_snapshot
+
     advertiser = None
     if not args.no_discovery:
         adv_ips = _local_ips()

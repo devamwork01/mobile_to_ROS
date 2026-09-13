@@ -69,6 +69,7 @@ MSG_STATS = "stats"
 MSG_ERROR = "error"
 MSG_START = "start"
 MSG_STOP = "stop"
+MSG_ACTIVE = "active"  # phone→laptop: currently-streaming sensor handles (live reconfig)
 
 
 # ---------------------------------------------------------------------------

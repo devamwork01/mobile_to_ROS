@@ -49,6 +49,7 @@ class PhoneSession:
     android: str = ""
     app_version: str = ""
     catalog: List[dict] = field(default_factory=list)
+    active: List[int] = field(default_factory=list)
     connected_at: float = field(default_factory=time.monotonic)
     last_heartbeat: float = field(default_factory=time.monotonic)
     last_stats: dict = field(default_factory=dict)
@@ -104,6 +105,11 @@ class ControlServer:
                     if session:
                         session.last_stats = msg
                         self._on_event({"kind": "phone_stats", "device_id": session.device_id, "stats": msg})
+                elif mtype == p.MSG_ACTIVE:
+                    if session:
+                        handles = [int(h) for h in (msg.get("handles") or [])]
+                        session.active = handles
+                        self._on_event({"kind": "active_set", "device_id": session.device_id, "handles": handles})
                 elif mtype == p.MSG_CONFIG_STATE:
                     if session:
                         self._on_event({"kind": "config_state", "device_id": session.device_id, "config": msg.get("config")})

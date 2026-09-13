@@ -48,6 +48,10 @@ class DashboardServer:
         self.control_handler: Optional[Callable[[object], Awaitable[None]]] = None
         # Set by app.py: callback(dict) for {"cmd": ...} messages from the dashboard.
         self.on_ui_command: Optional[Callable[[dict], None]] = None
+        # Set by app.py: returns a list of messages to replay to each newly
+        # connected dashboard client (current device/catalog/active/recording),
+        # so a browser that joins after the phone still sees the live state.
+        self.on_ui_connect: Optional[Callable[[], list]] = None
         self._ws_server: Optional[websockets.Server] = None
         self._httpd: Optional[_ReusableTCPServer] = None
 
@@ -74,6 +78,12 @@ class DashboardServer:
             await self.control_handler(ws)
             return
         self.clients.add(ws)
+        if self.on_ui_connect is not None:
+            try:
+                for obj in self.on_ui_connect():
+                    await ws.send(json.dumps(obj, separators=(",", ":")))
+            except Exception:
+                pass
         try:
             async for raw in ws:  # dashboard may send {"cmd": ...} (e.g. record toggle)
                 if self.on_ui_command is None:

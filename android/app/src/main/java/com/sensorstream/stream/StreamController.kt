@@ -78,6 +78,12 @@ class StreamController(sm: SensorManager) {
         source.start(regs)
     }
 
+    /** Live-reconfigure the streamed sensor set without dropping the UDP sender. */
+    fun updateRegs(regs: List<SensorEventSource.Reg>) {
+        if (scope == null) return
+        source.updateRegs(regs)
+    }
+
     fun stop() {
         source.onSample = null
         source.stop()

@@ -105,20 +105,20 @@ python -m pytest
 
 ## Pending / not yet verified
 
-Tracked so the "test-as-you-build" checks don't get lost. Nothing below is confirmed on real
-hardware with the redesigned UI yet.
+Tracked so the "test-as-you-build" checks don't get lost.
 
-### A. Redesigned dashboard on a real phone (Galaxy S25 Ultra)
-- [ ] Device connects → header/nav show real model, Android version, IP
-- [ ] Multi-sensor stream → every sensor selected on the phone shows a live card
-- [ ] 3D orientation tracks real motion — verify `androidToThree` mapping (body axes vs ENU world)
-- [ ] Graphs plot real sensor data at real rates without stalling
-- [ ] Sensor-details modal **Hardware** section populates from the real phone catalog
+### A. Redesigned dashboard on a real phone (Galaxy S25 Ultra) — verified
+- [x] Device connects → header/nav show real model, Android version, IP (incl. reload-after-connect via snapshot)
+- [x] Multi-sensor stream → every sensor selected on the phone shows a live card
+- [x] 3D orientation tracks real motion — `androidToThree` mapping confirmed (body axes vs ENU world)
+- [x] Graphs plot real sensor data at real rates without stalling
+- [x] Sensor-details modal **Hardware** section populates from the real phone catalog
       (vendor / resolution / max range / power / max rate / wake-up)
-- [ ] Humanized names resolve for all sensor types the S25 reports (unmapped types fall back gracefully)
-- [ ] Record start/stop writes rows; Diagnostics counters (latency p50/p95, jitter, phone-latency,
+- [x] Humanized names resolve for the sensor types the S25 reports (unmapped types fall back gracefully)
+- [x] Record start/stop writes rows; Diagnostics counters (latency p50/p95, jitter, phone-latency,
       loss, throughput) read sane
-- [ ] Reconnect after Wi-Fi drop; screen-off streaming (power fix) still works with the new UI
+- [x] Reconnect after Wi-Fi drop / server restart
+- [ ] Screen-off streaming (power fix) still works with the new UI (A8 — not yet verified)
 
 ### B. Not-yet-built UI (tests follow the build)
 - [ ] Light theme toggle
@@ -129,9 +129,11 @@ hardware with the redesigned UI yet.
 - [x] Rounded/metallic/glass phone renders in both frames; toggles work; no perf regression;
       WebGL cleanup on unmount — verified via `--selftest`
 
-### D. Deferred system items
-- [ ] Galaxy M36 5G validation
-- [ ] Live sensor reconfig (add/remove sensors without restart; dashboard plots update dynamically)
+### D. System items
+- [x] Live sensor reconfig — toggle a sensor on the phone while streaming adds/removes its
+      dashboard card + graph tab live, no reconnect (phone `updateSelections` + `active` control msg)
+- [~] Galaxy M36 5G validation — app installs and enumerates 34 sensors; **known issue:** after
+      ~2–3 min the app grows laggy (streaming and UI interactions); S25 Ultra unaffected. Under investigation.
 - [ ] ROS2 bridge (`Ros2Sink` behind the `OutputSink` seam)
 - [ ] Soak test (long-run stability)
 
