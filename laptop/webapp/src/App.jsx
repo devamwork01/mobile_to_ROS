@@ -145,11 +145,11 @@ export default function App() {
         <div className="flex-1 overflow-auto p-4 bg-hero-grad">
           {view === "Dashboard" && (
             <>
-              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-4">
-                <Panel title="3D Device Visualization" className="min-h-[440px] flex flex-col">
+              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-4 items-start">
+                <Panel title="3D Device Visualization" className="h-[460px] flex flex-col">
                   <Phone3D />
                 </Panel>
-                <Panel title="Live Sensor Data">
+                <Panel title="Live Sensor Data" className="max-h-[460px] overflow-y-auto">
                   <LiveGrid meta={meta} onSelect={setSelected} />
                 </Panel>
               </div>

@@ -80,6 +80,26 @@ function applyActiveSet(handles) {
 
 let ws = null;
 let backoff = 500;
+let lastDataTs = 0;
+let lastHeal = 0;
+let everHadDevice = false; // only self-heal a real phone session (not --selftest, which has no device)
+
+// Self-heal the device banner: the server replays a device/catalog snapshot to every
+// NEW dashboard connection, but a long-lived socket can miss a phone_connected
+// broadcast if the phone drops and reconnects during a socket blip (common when the
+// screen locks). If a device was seen, data is clearly still flowing, yet the device
+// is now unknown, drop the socket so the fresh connection gets the snapshot again.
+setInterval(() => {
+  if (ws && ws.readyState === 1 && everHadDevice && !meta.device && Date.now() - lastDataTs < 2000 && Date.now() - lastHeal > 6000) {
+    lastHeal = Date.now();
+    try {
+      ws.close();
+    } catch (e) {
+      /* ignore */
+    }
+  }
+}, 2000);
+
 function connect() {
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
@@ -108,6 +128,7 @@ function connect() {
     }
     switch (m.kind) {
       case "data":
+        lastDataTs = Date.now();
         m.records.forEach(onRecord);
         break;
       case "stats":
@@ -122,6 +143,7 @@ function connect() {
         setMeta({ recording: { active: !!m.active, rows: m.rows || 0 } });
         break;
       case "phone_connected":
+        everHadDevice = true;
         setMeta({ catalog: m.sensors || [], device: { model: m.model, android: m.android } });
         break;
       case "active_set":

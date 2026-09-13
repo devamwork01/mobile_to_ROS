@@ -37,6 +37,13 @@ import androidx.compose.ui.unit.dp
 import com.sensorstream.core.SensorInfo
 import com.sensorstream.vm.StreamViewModel
 
+private fun fmtBps(bps: Long): String = when {
+    bps <= 0 -> "0 B/s"
+    bps < 1024 -> "$bps B/s"
+    bps < 1024 * 1024 -> "%.0f KB/s".format(bps / 1024.0)
+    else -> "%.2f MB/s".format(bps / (1024.0 * 1024))
+}
+
 @Composable
 fun StreamScreen(vm: StreamViewModel) {
     val engine by vm.engineState.collectAsState()
@@ -121,6 +128,12 @@ private fun ConnectionCard(vm: StreamViewModel, engine: com.sensorstream.stream.
                 "packets %d   dropped %d   udp :%d".format(engine.sentPackets, engine.droppedSamples, engine.udpPort),
                 fontFamily = FontFamily.Monospace,
                 style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "network out  %s".format(fmtBps(engine.sendBps)),
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (engine.streaming) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             engine.error?.let { Text("Error: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         }

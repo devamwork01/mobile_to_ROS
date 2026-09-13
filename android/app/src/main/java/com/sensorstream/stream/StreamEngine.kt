@@ -34,6 +34,7 @@ data class EngineState(
     val rttMs: Float = 0f,
     val sentPackets: Long = 0L,
     val droppedSamples: Long = 0L,
+    val sendBps: Long = 0L, // outgoing telemetry bytes/sec (network load this app puts out)
     val error: String? = null,
 )
 
@@ -100,6 +101,7 @@ class StreamEngine(context: Context) {
 
         s.launch {
             var hb = 0
+            var lastBytes = 0L
             while (isActive) {
                 if (_state.value.connected) {
                     control.sendHeartbeat(hb++)
@@ -109,9 +111,13 @@ class StreamEngine(context: Context) {
                             .put("dropped", controller.droppedSamples.get())
                     )
                 }
+                val nowBytes = controller.sentBytes.get()
+                val bps = (nowBytes - lastBytes).coerceAtLeast(0L) // loop cadence is ~1s
+                lastBytes = nowBytes
                 _state.value = _state.value.copy(
                     sentPackets = controller.sentPackets.get(),
                     droppedSamples = controller.droppedSamples.get(),
+                    sendBps = bps,
                 )
                 delay(1000)
             }
