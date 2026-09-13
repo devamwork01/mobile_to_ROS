@@ -82,8 +82,7 @@ export default function Phone3D() {
     camera.position.set(1.85, 1.35, 2.4);
     camera.lookAt(0, 0, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
@@ -100,7 +99,7 @@ export default function Phone3D() {
     const key = new THREE.DirectionalLight(0xffffff, 1.6);
     key.position.set(2.5, 4.5, 3);
     key.castShadow = true;
-    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.mapSize.set(512, 512);
     key.shadow.camera.near = 0.5;
     key.shadow.camera.far = 15;
     key.shadow.camera.left = -3;
@@ -237,8 +236,12 @@ export default function Phone3D() {
 
     const target = new THREE.Quaternion();
     let raf = 0;
-    const animate = () => {
+    let lastRender = 0;
+    const FRAME_MS = 1000 / 30; // cap to ~30 fps — smooth enough for orientation, ~half the GPU/CPU of 60
+    const animate = (now) => {
       raf = requestAnimationFrame(animate);
+      if (now - lastRender < FRAME_MS) return;
+      lastRender = now;
       const t = togRef.current;
       dev.visible = t.body;
       world.visible = t.world;
@@ -274,6 +277,12 @@ export default function Phone3D() {
     const resize = () => {
       const w = el.clientWidth || 400;
       const h = el.clientHeight || 320;
+      // Cap the drawing-buffer width (CSS upscales) so the fragment cost stays
+      // bounded on large / high-DPI screens — the fix for size-dependent lag.
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      const MAX_BUFFER_W = 1280;
+      const pr = Math.min(dpr, MAX_BUFFER_W / Math.max(1, w));
+      renderer.setPixelRatio(pr);
       renderer.setSize(w, h);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
@@ -289,6 +298,7 @@ export default function Phone3D() {
       pmrem.dispose();
       scene.environment?.dispose();
       renderer.dispose();
+      renderer.forceContextLoss(); // fully release the GPU context (avoid leaking contexts across remounts)
       el.removeChild(renderer.domElement);
     };
   }, []);

@@ -31,6 +31,7 @@ class StreamController(sm: SensorManager) {
     private var channel: Channel<SensorSample>? = null
 
     val sentPackets = AtomicLong(0)
+    val sentBytes = AtomicLong(0)
     val droppedSamples = AtomicLong(0)
 
     @Volatile var deviceId: Int = (System.currentTimeMillis() and 0xFFFFFFFFL).toInt()
@@ -40,6 +41,7 @@ class StreamController(sm: SensorManager) {
     fun start(host: String, port: Int, regs: List<SensorEventSource.Reg>) {
         stop()
         sentPackets.set(0)
+        sentBytes.set(0)
         droppedSamples.set(0)
 
         val ch = Channel<SensorSample>(capacity = 4096, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -69,6 +71,7 @@ class StreamController(sm: SensorManager) {
                     val bytes = BinaryPacketCodec.encode(deviceId, one, BinaryPacketCodec.FLAG_STAGE_TS)
                     sender.send(bytes)
                     sentPackets.incrementAndGet()
+                    sentBytes.addAndGet(bytes.size.toLong())
                 } catch (t: Throwable) {
                     onError?.invoke(t)
                 }

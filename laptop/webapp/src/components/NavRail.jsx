@@ -79,7 +79,8 @@ export default function NavRail({ view, onView, meta }) {
           <div className="h-px bg-line my-0.5" />
           <Stat label="Latency" value={latency} />
           <Stat label="Packet Loss" value={`${d.loss_pct ?? 0} %`} />
-          <Stat label="Data Rate" value={fmtRate(s.bps)} />
+          <Stat label="Network In" value={fmtRate(s.bps)} />
+          <Stat label="Packet Rate" value={s.pps != null ? `${Math.round(s.pps)}/s` : "—"} />
           <Stat label="Active Sensors" value={String(meta.active.length)} />
         </div>
       </div>
