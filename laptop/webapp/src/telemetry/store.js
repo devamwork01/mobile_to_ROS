@@ -30,14 +30,23 @@ const signalListeners = new Map(); // handle -> Set<listener>
 const activeHandles = new Map(); // handle -> type
 const latestByType = new Map(); // sensor type -> latest record
 const typeListeners = new Map(); // type -> Set<cb(record)>
+const lastCardNotify = new Map(); // handle -> ms of last card re-render
+const CARD_REFRESH_MS = 100; // cap live-card React re-renders to ~10 Hz (human-readable; the raw stream is faster)
 
 function onRecord(r) {
+  // Store latest + feed graphs/3D at full rate (they consume imperatively, no React re-render).
   signals.set(r.handle, r);
-  const sl = signalListeners.get(r.handle);
-  if (sl) sl.forEach((l) => l());
   latestByType.set(r.type, r);
   const tl = typeListeners.get(r.type);
   if (tl) tl.forEach((cb) => cb(r));
+  // Throttle the per-card React re-renders: 21 cards re-rendering at stream rate inside a
+  // scroll container is what froze scrolling. Cards still show the latest value, at ~10 Hz.
+  const now = Date.now();
+  if (now - (lastCardNotify.get(r.handle) || 0) >= CARD_REFRESH_MS) {
+    lastCardNotify.set(r.handle, now);
+    const sl = signalListeners.get(r.handle);
+    if (sl) sl.forEach((l) => l());
+  }
   if (!activeHandles.has(r.handle)) {
     activeHandles.set(r.handle, r.type);
     setMeta({ active: [...activeHandles.entries()].map(([handle, type]) => ({ handle, type })) });

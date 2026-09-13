@@ -71,7 +71,7 @@ export default function SignalCard({ handle, type, onSelect }) {
   return (
     <div
       onClick={onSelect}
-      className="card p-4 flex flex-col gap-3 bg-surface-grad animate-fade-in cursor-pointer hover:border-line2 hover:shadow-glow/50 transition-all"
+      className="card p-4 flex flex-col gap-3 bg-surface-grad cursor-pointer hover:border-line2 transition-colors [content-visibility:auto] [contain-intrinsic-size:auto_180px]"
     >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3 min-w-0">
