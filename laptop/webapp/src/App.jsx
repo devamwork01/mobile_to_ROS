@@ -5,6 +5,7 @@ import SignalCard from "./components/SignalCard.jsx";
 import Phone3D from "./components/Phone3D.jsx";
 import GraphPanel from "./components/GraphPanel.jsx";
 import SensorModal from "./components/SensorModal.jsx";
+import RecordingsView from "./components/RecordingsView.jsx";
 import { useTelemetry, sendCommand } from "./telemetry/store.js";
 import { signalMeta } from "./telemetry/signals.js";
 
@@ -167,11 +168,7 @@ export default function App() {
 
           {view === "Diagnostics" && <Diagnostics meta={meta} />}
 
-          {view === "Recordings" && (
-            <Panel title="Recordings">
-              <Empty icon="Database" title="Recording browser" sub="Use Record above to capture; replay/list UI coming here." />
-            </Panel>
-          )}
+          {view === "Recordings" && <RecordingsView />}
 
           {view === "Settings" && (
             <Panel title="Settings">
