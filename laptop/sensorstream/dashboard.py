@@ -14,6 +14,7 @@ import http.server
 import json
 import socketserver
 import threading
+import urllib.parse
 from typing import Awaitable, Callable, Optional, Set
 
 import websockets
@@ -29,6 +30,27 @@ def _ws_path(ws) -> str:
 class _QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args, **kwargs):  # silence per-request stderr logging
         pass
+
+    def do_GET(self):
+        # Read-only JSON API (recordings list / LOD queries). Everything else is static.
+        dash = getattr(self.server, "dashboard", None)
+        api = getattr(dash, "on_api_get", None) if dash is not None else None
+        if api is not None and self.path.startswith("/api/"):
+            parsed = urllib.parse.urlparse(self.path)
+            query = {k: v[0] for k, v in urllib.parse.parse_qs(parsed.query).items()}
+            try:
+                status, obj = api(parsed.path, query)
+            except Exception as exc:  # never take down the static server
+                status, obj = 500, {"error": str(exc)}
+            body = json.dumps(obj, separators=(",", ":")).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        super().do_GET()
 
 
 class _ReusableTCPServer(socketserver.ThreadingTCPServer):
@@ -52,6 +74,8 @@ class DashboardServer:
         # connected dashboard client (current device/catalog/active/recording),
         # so a browser that joins after the phone still sees the live state.
         self.on_ui_connect: Optional[Callable[[], list]] = None
+        # Set by app.py: (path, query) -> (status, json-able) for read-only GET /api/... routes.
+        self.on_api_get: Optional[Callable[[str, dict], tuple]] = None
         self._ws_server: Optional[websockets.Server] = None
         self._httpd: Optional[_ReusableTCPServer] = None
 
@@ -68,6 +92,7 @@ class DashboardServer:
     def _start_http(self) -> None:
         handler = functools.partial(_QuietHandler, directory=self.web_dir)
         self._httpd = _ReusableTCPServer((self.http_host, self.http_port), handler)
+        self._httpd.dashboard = self  # let the handler reach on_api_get live
         self.http_port = self._httpd.server_address[1]
         threading.Thread(target=self._httpd.serve_forever, name="http-static", daemon=True).start()
 
