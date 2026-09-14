@@ -1,11 +1,16 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Icons } from "./icons.js";
 import NavRail from "./components/NavRail.jsx";
 import SignalCard from "./components/SignalCard.jsx";
-import Phone3D from "./components/Phone3D.jsx";
-import GraphPanel from "./components/GraphPanel.jsx";
 import SensorModal from "./components/SensorModal.jsx";
-import RecordingsView from "./components/RecordingsView.jsx";
+// Heavy deps (three.js, uPlot) are code-split so the dashboard shell paints fast.
+const Phone3D = lazy(() => import("./components/Phone3D.jsx"));
+const GraphPanel = lazy(() => import("./components/GraphPanel.jsx"));
+const RecordingsView = lazy(() => import("./components/RecordingsView.jsx"));
+
+function Loading({ label = "Loading…" }) {
+  return <div className="min-h-[200px] grid place-items-center text-sm text-faint">{label}</div>;
+}
 import { useTelemetry, sendCommand } from "./telemetry/store.js";
 import { signalMeta } from "./telemetry/signals.js";
 
@@ -148,14 +153,18 @@ export default function App() {
             <>
               <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-4 items-start">
                 <Panel title="3D Device Visualization" className="h-[460px] flex flex-col">
-                  <Phone3D />
+                  <Suspense fallback={<Loading label="Loading 3D…" />}>
+                    <Phone3D />
+                  </Suspense>
                 </Panel>
                 <Panel title="Live Sensor Data" className="max-h-[460px] overflow-y-auto">
                   <LiveGrid meta={meta} onSelect={setSelected} />
                 </Panel>
               </div>
               <Panel title="Real-Time Graphs" className="mt-4">
-                <GraphPanel sensors={graphSensors} />
+                <Suspense fallback={<Loading label="Loading graphs…" />}>
+                  <GraphPanel sensors={graphSensors} />
+                </Suspense>
               </Panel>
             </>
           )}
@@ -168,7 +177,11 @@ export default function App() {
 
           {view === "Diagnostics" && <Diagnostics meta={meta} />}
 
-          {view === "Recordings" && <RecordingsView />}
+          {view === "Recordings" && (
+            <Suspense fallback={<Loading label="Loading recordings…" />}>
+              <RecordingsView />
+            </Suspense>
+          )}
 
           {view === "Settings" && (
             <Panel title="Settings">
