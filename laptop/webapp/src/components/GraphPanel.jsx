@@ -63,9 +63,18 @@ export default function GraphPanel({ sensors }) {
     });
 
     let raf = 0;
+    // Pause redraw while off-screen or during active scroll (data keeps buffering and
+    // flushes right after) — keeps the compositor free so scrolling stays smooth.
+    let visible = true;
+    let scrolling = false;
+    let scrollTimer = 0;
+    const vio = new IntersectionObserver(([e]) => { visible = e.isIntersecting; }, { threshold: 0.01 });
+    vio.observe(host.current);
+    const onScroll = () => { scrolling = true; clearTimeout(scrollTimer); scrollTimer = setTimeout(() => { scrolling = false; }, 150); };
+    document.addEventListener("scroll", onScroll, true);
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      if (!dirty) return;
+      if (!dirty || scrolling || !visible) return;
       const xmax = xs[xs.length - 1];
       const cutoff = xmax - winRef.current - 1;
       let drop = 0;
@@ -87,6 +96,9 @@ export default function GraphPanel({ sensors }) {
       cancelAnimationFrame(raf);
       unsub();
       ro.disconnect();
+      vio.disconnect();
+      document.removeEventListener("scroll", onScroll, true);
+      clearTimeout(scrollTimer);
       u.destroy();
     };
   }, [type]);
