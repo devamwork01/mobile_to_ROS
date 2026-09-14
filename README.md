@@ -142,10 +142,12 @@ Tracked so the "test-as-you-build" checks don't get lost.
       ~3.7 MP; bounded panel + capped drawing buffer (~0.52 MP) + 30 fps throttle + lighter shadows
 - [x] Scroll-freeze in the live sensor panel — throttle per-card re-renders to ~10 Hz +
       `content-visibility:auto` so off-screen cards skip paint
-- [ ] **Performance-architecture roadmap** (client data pipeline: worker-owned store, graph
-      LOD/aggregation, virtualized data table, server-side range/LOD queries for recordings) —
-      under discussion, see
-      [`High-Frequency Sensor Streaming — Performance Architecture Directions.md`](High-Frequency%20Sensor%20Streaming%20—%20Performance%20Architecture%20Directions.md)
+- [~] **Performance-architecture roadmap** — decided (thin browser + server-side LOD; no
+      speculative workers). Design: [`docs/adr-001-dashboard-performance.md`](docs/adr-001-dashboard-performance.md),
+      directions: [`High-Frequency Sensor Streaming — Performance Architecture Directions.md`](High-Frequency%20Sensor%20Streaming%20—%20Performance%20Architecture%20Directions.md)
+    - [ ] Recordings list API + view (server-side listing)
+    - [ ] Server-side LOD range/aggregation queries (min/max/first/last/avg buckets)
+    - [ ] Historical graph with zoom→resolution; delivery-semantics/health metrics in Diagnostics
 
 ## Reference
 
