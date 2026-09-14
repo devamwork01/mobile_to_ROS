@@ -143,6 +143,9 @@ Tracked so the "test-as-you-build" checks don't get lost.
       screen-lock that triggers the M36 throttle; verified latency back to ~10 ms. Note: manually
       switching apps / opening recent apps still backgrounds the app (same OEM throttle) and
       recovers on return — no in-app fix for that; keep the app foreground while streaming.
+- [ ] On-phone lossless recording + laptop backfill (screen-off data integrity; laptop stays
+      authoritative, live path untouched) — **design approved**, plan next. Spec:
+      [`docs/superpowers/specs/2026-09-14-onphone-recording-backfill-design.md`](docs/superpowers/specs/2026-09-14-onphone-recording-backfill-design.md)
 - [ ] ROS2 bridge (`Ros2Sink` behind the `OutputSink` seam)
 - [ ] Soak test (long-run stability)
 
