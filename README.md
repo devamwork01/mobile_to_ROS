@@ -145,9 +145,10 @@ Tracked so the "test-as-you-build" checks don't get lost.
 - [~] **Performance-architecture roadmap** — decided (thin browser + server-side LOD; no
       speculative workers). Design: [`docs/adr-001-dashboard-performance.md`](docs/adr-001-dashboard-performance.md),
       directions: [`High-Frequency Sensor Streaming — Performance Architecture Directions.md`](High-Frequency%20Sensor%20Streaming%20—%20Performance%20Architecture%20Directions.md)
-    - [ ] Recordings list API + view (server-side listing)
-    - [ ] Server-side LOD range/aggregation queries (min/max/first/last/avg buckets)
-    - [ ] Historical graph with zoom→resolution; delivery-semantics/health metrics in Diagnostics
+    - [x] Recordings list API + view (server-side listing; `.meta.json` written on record start)
+    - [x] Server-side LOD range/aggregation queries (min/max/first/last/avg buckets) + history chart
+    - [ ] Zoom→resolution: re-query the server for higher-res on zoom (native visual zoom works now)
+    - [ ] Recordings pagination (cursor) when the list grows; delivery-semantics/health metrics in Diagnostics
 
 ## Reference
 
