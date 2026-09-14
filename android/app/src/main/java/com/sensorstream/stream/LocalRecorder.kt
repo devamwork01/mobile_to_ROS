@@ -41,12 +41,13 @@ class LocalRecorder(
 
     data class Stats(
         val recorded: Long, val bytesOnDisk: Long, val oldestAgeMs: Long,
-        val droppedOldest: Long, val writeErrors: Long,
+        val droppedOldest: Long, val writeErrors: Long, val lastError: String?,
     )
 
     private var recorded = 0L
     private var droppedOldest = 0L
     private var writeErrors = 0L
+    @Volatile private var lastError: String? = null
 
     init {
         dir.mkdirs()
@@ -66,7 +67,7 @@ class LocalRecorder(
                 .add(Triple(sample.seq, datagramOffset, datagram.size))
             recorded++
             prune()
-        }.onFailure { writeErrors++ }
+        }.onFailure { e -> writeErrors++; lastError = e.message ?: e.javaClass.simpleName }
     }
 
     private fun totalBytes(): Long = segments.sumOf { it.bytes }
@@ -87,7 +88,7 @@ class LocalRecorder(
 
     fun stats(): Stats {
         val oldestAge = segments.firstOrNull()?.let { now() - it.startMs } ?: 0L
-        return Stats(recorded, totalBytes(), oldestAge, droppedOldest, writeErrors)
+        return Stats(recorded, totalBytes(), oldestAge, droppedOldest, writeErrors, lastError)
     }
 
     fun readRawRange(handle: Int, fromSeq: Long, toSeq: Long): List<ByteArray> {
