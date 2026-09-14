@@ -20,6 +20,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /** A user's choice to stream one sensor at a requested period. */
@@ -72,6 +73,20 @@ class StreamEngine(context: Context) {
     // Increments on every (re)connect; callbacks from superseded/closed sockets
     // carry a stale generation and are ignored, preventing a reconnect storm.
     private var connGen = 0
+
+    private var recordDir: File? = null
+    private var recMaxBytes = 150L * 1024 * 1024
+    private var recMaxAgeMs = 20L * 60 * 1000
+    private val recSegmentMs = 10_000L
+
+    /** Configure on-phone lossless recording; call before [start]. */
+    fun configureRecording(dir: File, maxBytes: Long, maxAgeMs: Long) {
+        recordDir = dir
+        recMaxBytes = maxBytes
+        recMaxAgeMs = maxAgeMs
+    }
+
+    fun recorderStats(): LocalRecorder.Stats? = controller.recorderStats()
 
     fun start(host: String, controlPort: Int, selections: List<Selection>) {
         stop()
@@ -173,7 +188,10 @@ class StreamEngine(context: Context) {
             _state.value = _state.value.copy(error = "No sensors selected")
             return
         }
-        controller.start(host, udpPort, regs)
+        val recorder = recordDir?.let {
+            LocalRecorder(File(it, "onphone"), controller.deviceId, recMaxBytes, recMaxAgeMs, recSegmentMs)
+        }
+        controller.start(host, udpPort, regs, recorder)
         _state.value = _state.value.copy(streaming = true)
         control.sendActive(regs.map { it.handle })
     }

@@ -29,6 +29,8 @@ class StreamController(sm: SensorManager) {
 
     private var scope: CoroutineScope? = null
     private var channel: Channel<SensorSample>? = null
+    private var recorder: LocalRecorder? = null
+    private var recCh: Channel<SensorSample>? = null
 
     val sentPackets = AtomicLong(0)
     val sentBytes = AtomicLong(0)
@@ -38,20 +40,28 @@ class StreamController(sm: SensorManager) {
     @Volatile var onUiSample: ((SensorSample) -> Unit)? = null
     @Volatile var onError: ((Throwable) -> Unit)? = null
 
-    fun start(host: String, port: Int, regs: List<SensorEventSource.Reg>) {
+    fun start(host: String, port: Int, regs: List<SensorEventSource.Reg>, recorder: LocalRecorder? = null) {
         stop()
         sentPackets.set(0)
         sentBytes.set(0)
         droppedSamples.set(0)
+        this.recorder = recorder
 
         val ch = Channel<SensorSample>(capacity = 4096, onBufferOverflow = BufferOverflow.DROP_OLDEST)
         channel = ch
+        val rc = Channel<SensorSample>(capacity = 16384, onBufferOverflow = BufferOverflow.SUSPEND)
+        recCh = rc
         val s = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         scope = s
 
         source.onSample = { sample ->
             if (ch.trySend(sample).isFailure) droppedSamples.incrementAndGet()
+            if (recorder != null) rc.trySend(sample)
             onUiSample?.invoke(sample)
+        }
+
+        s.launch {
+            for (sample in rc) recorder?.write(sample)
         }
 
         s.launch {
@@ -92,8 +102,14 @@ class StreamController(sm: SensorManager) {
         source.stop()
         channel?.close()
         channel = null
+        recCh?.close()
+        recCh = null
         scope?.cancel()
         scope = null
         sender.close()
+        recorder?.close()
+        recorder = null
     }
+
+    fun recorderStats(): LocalRecorder.Stats? = recorder?.stats()
 }

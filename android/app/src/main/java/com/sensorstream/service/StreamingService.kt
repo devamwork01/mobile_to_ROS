@@ -42,7 +42,12 @@ class StreamingService : Service() {
                 val selections = handles.indices.map { Selection(handles[it], periods.getOrElse(it) { 0 }) }
                 startForegroundNotification(host, port)
                 acquireLocks()
-                StreamHolder.engine(this).start(host, port, selections)
+                val prefs = getSharedPreferences("sensorstream", Context.MODE_PRIVATE)
+                val maxBytes = prefs.getLong("rec_max_bytes", 150L * 1024 * 1024)
+                val maxAgeMs = prefs.getLong("rec_max_age_ms", 20L * 60 * 1000)
+                val engine = StreamHolder.engine(this)
+                engine.configureRecording(filesDir, maxBytes, maxAgeMs)
+                engine.start(host, port, selections)
             }
             ACTION_STOP -> {
                 StreamHolder.engine(this).stop()
