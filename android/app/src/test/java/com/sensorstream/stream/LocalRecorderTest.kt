@@ -38,4 +38,18 @@ class LocalRecorderTest {
         val payload = bytes.copyOfRange(LocalRecorder.MAGIC.size + 12, LocalRecorder.MAGIC.size + 12 + len)
         assertArrayEquals(datagram, payload)
     }
+
+    @Test
+    fun rotatesSegmentsByTime() {
+        val dir = tempDir()
+        var t = 0L
+        val rec = LocalRecorder(dir, deviceId = 1, maxBytes = 10_000_000, maxAgeMs = 600_000,
+            segmentMs = 100, now = { t })
+        rec.write(sample(0, 0))       // opens segment @ t=0
+        t = 50; rec.write(sample(0, 1)) // same segment
+        t = 150; rec.write(sample(0, 2)) // >=100ms since start -> new segment
+        rec.close()
+        val segs = dir.listFiles { f -> f.name.endsWith(".ssbin") }!!
+        assertTrue("expected 2 segments, got ${segs.size}", segs.size == 2)
+    }
 }
