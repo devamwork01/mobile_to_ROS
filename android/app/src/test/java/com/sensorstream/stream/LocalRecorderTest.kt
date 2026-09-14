@@ -95,4 +95,27 @@ class LocalRecorderTest {
         assertTrue(got.size == 3)
         got.forEachIndexed { i, b -> assertArrayEquals(expected[i], b) }
     }
+
+    @Test
+    fun rotationAtConstantClockDoesNotCollideSegmentFiles() {
+        val dir = tempDir()
+        // constant clock + segmentMs=0 forces a rotation on every write, exercising the
+        // filename-collision risk when now() doesn't change between rotations.
+        val rec = LocalRecorder(dir, deviceId = 5, maxBytes = 10_000_000, maxAgeMs = 600_000,
+            segmentMs = 0, now = { 100L })
+        val n = 5
+        val written = (0 until n).map { i -> sample(handle = 9, seq = i.toLong()).also { rec.write(it) } }
+        rec.close()
+
+        // every segment file created must be uniquely named (no truncate-on-reuse collision)
+        val segFiles = dir.listFiles { f -> f.name.endsWith(".ssbin") }!!
+        assertTrue("expected at least $n distinct segment files, got ${segFiles.size}: " +
+            segFiles.map { it.name }, segFiles.size >= n)
+
+        // and no data loss/corruption from a collided/truncated filename
+        val got = rec.readRawRange(handle = 9, fromSeq = 0, toSeq = (n - 1).toLong())
+        val expected = written.map { BinaryPacketCodec.encode(5, listOf(it), BinaryPacketCodec.FLAG_STAGE_TS) }
+        assertTrue("expected $n records read back, got ${got.size}", got.size == n)
+        got.forEachIndexed { i, b -> assertArrayEquals(expected[i], b) }
+    }
 }
