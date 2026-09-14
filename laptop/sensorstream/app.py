@@ -17,8 +17,10 @@ import os
 import socket
 import sys
 import time
+from typing import Optional
 
 from . import protocol as p
+from . import recordings
 from .control import ControlServer
 from .dashboard import DashboardServer
 from .discovery import Advertiser, BEACON_PORT
@@ -106,17 +108,45 @@ async def run(args: argparse.Namespace) -> None:
     # Control channel: phones connect to ws://host:ws_port/phone
     control = ControlServer(udp_port, on_event=dash.broadcast)
     dash.control_handler = control.handle
-    rec_base = recorder.start(args.log_dir) if args.record else None
+
+    def record_meta() -> Optional[dict]:
+        """Device info + sensor catalog for the recording's .meta.json (handle -> name mapping)."""
+        for s in control.sessions.values():
+            return {"model": s.model, "android": s.android, "app_version": s.app_version,
+                    "device_id": s.device_id, "sensors": s.catalog}
+        return None
+
+    rec_base = recorder.start(args.log_dir, record_meta()) if args.record else None
 
     def ui_command(msg: dict) -> None:
         cmd = msg.get("cmd")
         if cmd == "record_start" and not recorder.is_recording:
-            print("[rec] start:", recorder.start(args.log_dir) + ".ssbin")
+            print("[rec] start:", recorder.start(args.log_dir, record_meta()) + ".ssbin")
         elif cmd == "record_stop" and recorder.is_recording:
             print("[rec] stop:", recorder.stop())
         dash.broadcast({"kind": "recording", "active": recorder.is_recording, "rows": recorder.rows})
 
     dash.on_ui_command = ui_command
+
+    def api_get(path: str, query: dict):
+        """Read-only recordings API (ADR-001). Filesystem-backed; safe off the event loop."""
+        parts = [x for x in path.split("/") if x]  # e.g. ['api','recordings', <id>, 'signals', <handle>]
+        if parts == ["api", "recordings"]:
+            return 200, recordings.list_recordings(args.log_dir)
+        if len(parts) == 5 and parts[:2] == ["api", "recordings"] and parts[3] == "signals":
+            rec_id, handle = parts[2], parts[4]
+            start = query.get("start")
+            end = query.get("end")
+            res = recordings.query_signal(
+                args.log_dir, rec_id, int(handle),
+                int(start) if start else None,
+                int(end) if end else None,
+                int(query.get("buckets", 1000)),
+            )
+            return (200, res) if res is not None else (404, {"error": "recording or signal not found"})
+        return 404, {"error": "unknown endpoint"}
+
+    dash.on_api_get = api_get
 
     def ui_snapshot() -> list:
         """Current state replayed to a browser that connects after the phone did."""
