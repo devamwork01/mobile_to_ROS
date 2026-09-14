@@ -13,8 +13,12 @@ const IDLE_MS = 150; // "scrolling" persists this long after the last scroll eve
 // Per-visualization frame targets — the ONE place to tune. Values are the minimum ms
 // between renders (lower = faster). Start here; adjust from foreground DevTools traces.
 const TARGETS = {
-  "3d": { normal: 1000 / 30, scroll: 1000 / 15 }, // 30 fps -> 15 fps while scrolling
-  plot: { normal: 1000 / 30, scroll: 1000 / 10 }, // 30 Hz  -> 10 Hz while scrolling
+  // Validated config: constant 60 for the whole UI — scrolling stays smooth at 60 (no
+  // degradation needed). 3D renders at 60; plots reach 60 when the server presentation
+  // rate is 60 (max_ui_hz, now the default). If a weaker GPU ever stutters while
+  // scrolling, set `scroll` back to 1000/30 here — the scheduler handles the rest.
+  "3d": { normal: 1000 / 60, scroll: 1000 / 60 },
+  plot: { normal: 1000 / 60, scroll: 1000 / 60 },
 };
 
 let lastScrollTs = -Infinity;
