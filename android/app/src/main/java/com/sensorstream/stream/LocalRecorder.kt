@@ -38,21 +38,55 @@ class LocalRecorder(
     private var current: Segment? = null
     private val segments = ArrayList<Segment>()
 
+    data class Stats(
+        val recorded: Long, val bytesOnDisk: Long, val oldestAgeMs: Long,
+        val droppedOldest: Long, val writeErrors: Long,
+    )
+
+    private var recorded = 0L
+    private var droppedOldest = 0L
+    private var writeErrors = 0L
+
     init {
         dir.mkdirs()
     }
 
     fun write(sample: SensorSample) {
-        var seg = current ?: openSegment()
-        if (now() - seg.startMs >= segmentMs) { rotate(); seg = current!! }
-        val datagram = BinaryPacketCodec.encode(deviceId, listOf(sample), flags)
-        val header = ByteBuffer.allocate(FRAME_HEADER).order(ByteOrder.LITTLE_ENDIAN)
-        header.putLong(sample.tAcquireNs); header.putInt(datagram.size)
-        val datagramOffset = seg.bytes + FRAME_HEADER
-        seg.out.write(header.array()); seg.out.write(datagram)
-        seg.bytes += FRAME_HEADER + datagram.size
-        seg.index.getOrPut(sample.handle) { ArrayList() }
-            .add(Triple(sample.seq, datagramOffset, datagram.size))
+        runCatching {
+            var seg = current ?: openSegment()
+            if (now() - seg.startMs >= segmentMs) { rotate(); seg = current!! }
+            val datagram = BinaryPacketCodec.encode(deviceId, listOf(sample), flags)
+            val header = ByteBuffer.allocate(FRAME_HEADER).order(ByteOrder.LITTLE_ENDIAN)
+            header.putLong(sample.tAcquireNs); header.putInt(datagram.size)
+            val datagramOffset = seg.bytes + FRAME_HEADER
+            seg.out.write(header.array()); seg.out.write(datagram)
+            seg.bytes += FRAME_HEADER + datagram.size
+            seg.index.getOrPut(sample.handle) { ArrayList() }
+                .add(Triple(sample.seq, datagramOffset, datagram.size))
+            recorded++
+            prune()
+        }.onFailure { writeErrors++ }
+    }
+
+    private fun totalBytes(): Long = segments.sumOf { it.bytes }
+
+    private fun prune() {
+        while (segments.size > 1) {
+            val oldest = segments.first()
+            val overSize = totalBytes() > maxBytes
+            val overAge = now() - oldest.startMs > maxAgeMs
+            if (!overSize && !overAge) break
+            // count records in the segment as dropped, then delete it
+            droppedOldest += oldest.index.values.sumOf { it.size.toLong() }
+            runCatching { oldest.out.close() }
+            oldest.file.delete()
+            segments.removeAt(0)
+        }
+    }
+
+    fun stats(): Stats {
+        val oldestAge = segments.firstOrNull()?.let { now() - it.startMs } ?: 0L
+        return Stats(recorded, totalBytes(), oldestAge, droppedOldest, writeErrors)
     }
 
     private fun rotate() {
