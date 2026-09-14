@@ -79,7 +79,7 @@ re-run `npm run build` so the Python server picks up the new `dist/`.
 | `--http-port` | `8080` | Dashboard HTTP port |
 | `--ws-port` | `8081` | Control WebSocket port |
 | `--udp-port` | `5005` | Telemetry UDP port |
-| `--ui-hz` | `30` | Max per-sensor update rate pushed to the browser |
+| `--ui-hz` | `60` | Max per-sensor update rate pushed to the browser (raw logging always full-rate) |
 | `--no-discovery` | off | Disable mDNS + UDP beacon advertising |
 
 ## Setup & run — Android app
@@ -143,9 +143,10 @@ Tracked so the "test-as-you-build" checks don't get lost.
 - [x] Scroll-freeze in the live sensor panel — throttle per-card re-renders to ~10 Hz +
       `content-visibility:auto` so off-screen cards skip paint
 - [x] Initial load — code-split three.js/uPlot (initial JS 716 KB → 174 KB)
-- [x] Visualization scheduler (`renderBudget.js`) — during scroll the 3D drops to ~15 fps and
-      plots to ~10 Hz (degrade, never freeze), auto-recovering to ~30 idle; off-screen pause;
-      dev HUD via `?perf`. Foreground DevTools Test A–D traces still to run for the gate.
+- [x] Visualization scheduler (`renderBudget.js`) — per-viz frame budget with a cheap shared
+      scroll signal. Validated at **constant 60 fps** (3D + plots) — scrolls smoothly with no
+      degradation on the test hardware; the degrade-during-scroll path stays one line away for
+      weaker GPUs. Off-screen pause; dev HUD via `?perf`. (`max_ui_hz` default raised 30 → 60.)
 - [~] **Performance-architecture roadmap** — decided (thin browser + server-side LOD; no
       speculative workers). Design: [`docs/adr-001-dashboard-performance.md`](docs/adr-001-dashboard-performance.md),
       directions: [`High-Frequency Sensor Streaming — Performance Architecture Directions.md`](High-Frequency%20Sensor%20Streaming%20—%20Performance%20Architecture%20Directions.md)

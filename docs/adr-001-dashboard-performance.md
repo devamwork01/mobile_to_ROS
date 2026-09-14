@@ -13,10 +13,10 @@ and later OffscreenCanvas / SharedArrayBuffer / WebGPU).
 
 Key fact that reframes the problem: **the high-frequency pipeline already lives in the
 Python backend.** `laptop/sensorstream/` decodes, syncs, and records the raw stream at
-full rate; `DashboardSink` **decimates per-sensor to `max_ui_hz` (30 Hz)** before the
-browser sees anything (`sinks.py`), and the raw stream flows **unthrottled to the
-loggers** (`.ssbin` + `.csv`). The browser has never received raw data. Raw fidelity is
-preserved server-side.
+full rate; `DashboardSink` **decimates per-sensor to `max_ui_hz`** (default now 60 Hz,
+originally 30) before the browser sees anything (`sinks.py`), and the raw stream flows
+**unthrottled to the loggers** (`.ssbin` + `.csv`). The browser has never received raw
+data. Raw fidelity is preserved server-side.
 
 The recent lag was therefore not a data-volume problem in the browser; it was:
 1. a **layout** bug (the sensor-card column stretched the WebGL canvas to ~3.7 MP), and
@@ -116,10 +116,13 @@ Shipped:
   (IntersectionObserver), and **code-splitting** (three.js / uPlot lazy-loaded → initial
   JS 716 KB → 174 KB).
 - **Visualization scheduler** (`renderBudget.js`) — lightweight shared budget: one
-  capture-phase scroll listener → `frameIntervalMs('3d'|'plot')`, so during scroll the 3D
-  drops to ~15 fps and plots to ~10 Hz (degrade, **never freeze**; off-screen still paused),
-  auto-recovering to ~30 when idle. Dev HUD behind `?perf`; §7 drawing-buffer guard warns
-  if the canvas balloons past ~0.6 MP. Verify foreground; DevTools Test A–D still to run.
+  capture-phase scroll listener → `frameIntervalMs('3d'|'plot')`, the single place FPS
+  targets live. Supports scroll-degradation (drop during scroll, never freeze), but
+  foreground testing showed **constant 60 fps scrolls smoothly on the test hardware**, so
+  the validated config is 60 idle **and** during scroll (no degradation); the degrade path
+  is one line away if a weaker GPU needs it. Off-screen viz still fully paused (§8). Plots
+  reach 60 because `max_ui_hz` is now **60** (server default raised from 30 after validation;
+  raw logging stays full-rate). Dev HUD behind `?perf`; §7 guard warns past ~0.6 MP.
 
 Deferred (P4/P5): server **re-query on zoom** (higher-res on zoom-in), recordings
 **pagination/virtualization** (only once the list is large), and **health metrics** in
@@ -135,10 +138,11 @@ Diagnostics (§10: coalesced-vs-lost, queue depth).
   canvases redrawing while the compositor scrolled.
 - **A during-scroll render pause was tried and reverted, then replaced by the scheduler.**
   Fully pausing canvas redraw during scroll made scrolling smooth but **froze the visible
-  3D/plot** — a worse trade. The visualization scheduler (above) is the accepted answer:
-  it *reduces* the frame rate during scroll (3D ~15 fps, plots ~10 Hz) instead of stopping,
-  so the viz stays alive while the compositor gets headroom, and restores ~30 when idle.
-  Off-screen viz is still fully paused (that's different from freezing visible content).
+  3D/plot** — a worse trade. The scheduler replaced it with adjustable per-viz frame rates.
+  Empirically, this hardware scrolls smoothly at **constant 60** (no degradation needed), so
+  that's the shipped setting; the scheduler keeps the degrade-during-scroll path one line
+  away for weaker GPUs. Off-screen viz is still fully paused (different from freezing visible
+  content). `max_ui_hz` was raised 30 → 60 so plots match the 60 fps 3D.
 - **Measurement caveat.** Chrome throttles `requestAnimationFrame` on backgrounded/occluded
   tabs, so automation-tab FPS is unreliable; foreground DevTools Performance traces (or
   buffered `longtask`/navigation entries) are the source of truth. This is why §11/P5 is

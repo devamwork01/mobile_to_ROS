@@ -253,7 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--http-port", type=int, default=8080)
     ap.add_argument("--ws-host", default="0.0.0.0")
     ap.add_argument("--ws-port", type=int, default=8081)
-    ap.add_argument("--ui-hz", type=float, default=30.0, help="max per-sensor update rate to the browser")
+    ap.add_argument("--ui-hz", type=float, default=60.0, help="max per-sensor update rate to the browser (raw logging is always full-rate)")
     ap.add_argument("--selftest", action="store_true", help="emit a synthetic stream (no phone needed)")
     ap.add_argument("--selftest-hz", type=float, default=100.0)
     ap.add_argument("--log-dir", default="./recordings", help="directory for recordings")
