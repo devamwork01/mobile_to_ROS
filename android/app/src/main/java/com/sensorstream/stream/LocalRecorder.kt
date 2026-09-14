@@ -31,23 +31,33 @@ class LocalRecorder(
     private class Segment(val file: File, val startMs: Long) {
         val out = BufferedOutputStream(FileOutputStream(file))
         var bytes = 0L
+        // (handle -> list of (seq, datagramOffset, datagramLen)) for readRawRange
+        val index = HashMap<Int, ArrayList<Triple<Long, Long, Int>>>()
     }
 
     private var current: Segment? = null
+    private val segments = ArrayList<Segment>()
 
     init {
         dir.mkdirs()
     }
 
     fun write(sample: SensorSample) {
-        val seg = current ?: openSegment()
+        var seg = current ?: openSegment()
+        if (now() - seg.startMs >= segmentMs) { rotate(); seg = current!! }
         val datagram = BinaryPacketCodec.encode(deviceId, listOf(sample), flags)
         val header = ByteBuffer.allocate(FRAME_HEADER).order(ByteOrder.LITTLE_ENDIAN)
-        header.putLong(sample.tAcquireNs)
-        header.putInt(datagram.size)
-        seg.out.write(header.array())
-        seg.out.write(datagram)
+        header.putLong(sample.tAcquireNs); header.putInt(datagram.size)
+        val datagramOffset = seg.bytes + FRAME_HEADER
+        seg.out.write(header.array()); seg.out.write(datagram)
         seg.bytes += FRAME_HEADER + datagram.size
+        seg.index.getOrPut(sample.handle) { ArrayList() }
+            .add(Triple(sample.seq, datagramOffset, datagram.size))
+    }
+
+    private fun rotate() {
+        current?.out?.flush(); current?.out?.close()
+        openSegment()
     }
 
     private fun openSegment(): Segment {
@@ -56,6 +66,7 @@ class LocalRecorder(
         seg.out.write(MAGIC)
         seg.bytes = MAGIC.size.toLong()
         current = seg
+        segments.add(seg)
         return seg
     }
 
