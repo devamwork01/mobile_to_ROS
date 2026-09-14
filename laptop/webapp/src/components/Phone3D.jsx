@@ -239,26 +239,18 @@ export default function Phone3D() {
     let lastRender = 0;
     const FRAME_MS = 1000 / 30; // ~30 fps — smooth for orientation, ~half the GPU/CPU of 60
 
-    // Pause rendering while off-screen or during active scrolling: a WebGL redraw
-    // competing with the compositor is what makes scrolling stutter (the jank is
-    // paint-bound, not JS — confirmed: zero long tasks while scrolling).
+    // Only skip rendering when the panel is scrolled off-screen (don't waste GPU on an
+    // invisible canvas). Rendering keeps running while the panel is visible — including
+    // while scrolling — so the 3D never freezes in view.
     let visible = true;
-    let scrolling = false;
-    let scrollTimer = 0;
     const io = new IntersectionObserver(([e]) => { visible = e.isIntersecting; }, { threshold: 0.01 });
     io.observe(el);
-    const onScroll = () => {
-      scrolling = true;
-      clearTimeout(scrollTimer);
-      scrollTimer = setTimeout(() => { scrolling = false; }, 150);
-    };
-    document.addEventListener("scroll", onScroll, true); // capture: catches any scroll container
 
     const animate = (now) => {
       raf = requestAnimationFrame(animate);
       if (now - lastRender < FRAME_MS) return;
       lastRender = now;
-      if (!visible || scrolling) return; // paused — free the GPU for smooth scrolling/compositing
+      if (!visible) return; // off-screen only
       const t = togRef.current;
       dev.visible = t.body;
       world.visible = t.world;
@@ -313,8 +305,6 @@ export default function Phone3D() {
       cancelAnimationFrame(raf);
       ro.disconnect();
       io.disconnect();
-      document.removeEventListener("scroll", onScroll, true);
-      clearTimeout(scrollTimer);
       pmrem.dispose();
       scene.environment?.dispose();
       renderer.dispose();
