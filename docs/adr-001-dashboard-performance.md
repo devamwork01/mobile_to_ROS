@@ -41,13 +41,15 @@ We **will** implement, in priority order:
 
 1. **(done)** Preserve the server/browser data boundary. No raw data in React state;
    external store + selective/imperative subscriptions.
-2. **(done / ongoing)** Eliminate unnecessary UI/layout/paint work (re-renders, DOM
-   size, `content-visibility`, bounded canvas).
-3. **Server-side LOD** — range/aggregation queries for historical & replay graphs.
-4. **Efficient Recordings UI** — server-side listing + pagination; client virtualization
-   only if a measured need appears.
-5. **Profile again** (foreground trace) before any further optimization.
-6. **Advanced browser architecture** — only if step 5 justifies it.
+2. **(done)** Eliminate unnecessary UI/layout/paint work (re-renders, DOM size,
+   `content-visibility`, bounded canvas, code-split heavy deps).
+3. **(done)** Server-side LOD — range/aggregation queries for historical & replay graphs.
+4. **(partial)** Efficient Recordings UI — server-side listing + LOD chart done;
+   pagination/virtualization deferred until the list is large enough to need it.
+5. **(ongoing)** Profile with a foreground trace before any further optimization.
+6. **(not started)** Advanced browser architecture — only if step 5 justifies it.
+
+See **Implementation status** below for what shipped and the profiling that drove it.
 
 ## Server API (new)
 
@@ -60,13 +62,18 @@ so it runs off the asyncio loop safely):
   when no meta file exists.
 
 - `GET /api/recordings/{id}/signals/{handle}?start={ns}&end={ns}&buckets={n}`
-  → `{ handle, type, unit, start, end, buckets, points:[[t, min, max, first, last, avg], …] }`
+  → column-oriented for uPlot (as built):
+  `{ handle, type, ncomp, raw, buckets, start, end,
+     t:[sec from range start], avg:[[…per comp]], min:[[…]], max:[[…]] }`
   Server reads the `.ssbin`, buckets the requested range into `n` buckets (n chosen by the
-  client from graph pixel width), and returns **min/max/first/last/avg per bucket** so
-  transient spikes survive aggregation (never a bare average). Zooming issues a new query
-  with a narrower range → higher effective resolution; fully zoomed in returns raw points.
+  client from graph pixel width), and keeps **min/max/avg per component per bucket** so
+  transient spikes survive aggregation (never a bare average). When the range holds fewer
+  raw samples than `n`, each bucket is one sample (raw resolution). `first`/`last` are
+  computed internally and can be added to the response if a view needs them.
 
-Resolution rule (client): `buckets ≈ min(rawCountInRange, graphWidthPx)`.
+Resolution rule (client): `buckets ≈ min(rawCountInRange, graphWidthPx)`. Zooming issues a
+new query with a narrower range → higher effective resolution (see follow-ups: server
+**re-query on zoom** is still pending; native visual zoom works on loaded buckets today).
 
 ## Delivery-semantics contract (documented, §10)
 
@@ -92,6 +99,44 @@ with lost raw data.
   (leverages the format it already owns; no new storage system).
 - We accept blocking file reads in the HTTP worker threads for now; if large recordings
   make queries slow, add an index/cache — profile first.
+
+## Implementation status (updated 2026-09-14)
+
+Shipped:
+
+- **Server LOD API** — `recordings.py` (`list_recordings` + `query_signal` with
+  min/max/avg buckets), wired as read-only `GET /api/…` routes on the dashboard HTTP
+  server; `.meta.json` (device + catalog) now written on record start so handles map to
+  names. Verified via curl (6,812 raw → N buckets; 404 on unknown; static unaffected).
+- **Recordings view** — `RecordingsView.jsx` + `HistoryChart.jsx` (uPlot: avg line per
+  component X=red/Y=green/Z=blue with a min/max envelope band), consuming the API. The
+  browser never downloads raw samples.
+- **Dashboard perf** — bounded 3D canvas (~0.52 MP, 30 fps, 512 shadow maps), per-card
+  re-render throttle (~10 Hz), `content-visibility:auto` on cards, off-screen render pause
+  (IntersectionObserver), and **code-splitting** (three.js / uPlot lazy-loaded → initial
+  JS 716 KB → 174 KB).
+
+Deferred (P4/P5): server **re-query on zoom** (higher-res on zoom-in), recordings
+**pagination/virtualization** (only once the list is large), and **health metrics** in
+Diagnostics (§10: coalesced-vs-lost, queue depth).
+
+## Profiling findings & follow-through
+
+- **The "scroll freeze" was two different things.** (1) The initial "freeze" was the
+  716 KB bundle (three.js ≈ 85%) parsing on the main thread for ~0.6 s on load — a single
+  long task that froze everything, scroll included. Fixed by code-splitting. (2) Genuine
+  scroll stutter was **paint/compositing-bound, not JS** — a foreground-style measurement
+  showed **zero long tasks and 2.8 ms reflow while scrolling**; the cost was the WebGL/uPlot
+  canvases redrawing while the compositor scrolled.
+- **A during-scroll render pause was tried and reverted.** Pausing canvas redraw during
+  active scroll made scrolling smooth but **froze the visible 3D/plot** — a worse trade.
+  We kept only the *off-screen* pause; visible visualizations keep animating during scroll.
+  If per-scroll stutter persists on a given GPU, the next lever is reducing 3D FPS *during*
+  scroll (not freezing), decided from a real foreground trace.
+- **Measurement caveat.** Chrome throttles `requestAnimationFrame` on backgrounded/occluded
+  tabs, so automation-tab FPS is unreliable; foreground DevTools Performance traces (or
+  buffered `longtask`/navigation entries) are the source of truth. This is why §11/P5 is
+  "profile in the foreground."
 
 ## Revisit trigger
 
