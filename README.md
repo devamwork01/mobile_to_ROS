@@ -152,8 +152,10 @@ Tracked so the "test-as-you-build" checks don't get lost.
       directions: [`High-Frequency Sensor Streaming — Performance Architecture Directions.md`](High-Frequency%20Sensor%20Streaming%20—%20Performance%20Architecture%20Directions.md)
     - [x] Recordings list API + view (server-side listing; `.meta.json` written on record start)
     - [x] Server-side LOD range/aggregation queries (min/max/first/last/avg buckets) + history chart
-    - [ ] Zoom→resolution: re-query the server for higher-res on zoom (native visual zoom works now)
-    - [ ] Recordings pagination (cursor) when the list grows; delivery-semantics/health metrics in Diagnostics
+    - [x] Zoom→resolution: drag-select re-queries the server at ~1 bucket/px (verified ~5× finer on a 20% window)
+    - [x] Delivery-semantics/health metrics in Diagnostics (coalesced vs lost; UI-rate cap; raw = lossless)
+    - [x] Recordings list bug: `_peek_sensors` now scans a window so real-phone recordings list all sensors
+    - [ ] Recordings pagination (cursor) — only once the list grows large
 
 ## Reference
 
