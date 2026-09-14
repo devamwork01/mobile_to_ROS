@@ -142,6 +142,10 @@ Tracked so the "test-as-you-build" checks don't get lost.
       ~3.7 MP; bounded panel + capped drawing buffer (~0.52 MP) + 30 fps throttle + lighter shadows
 - [x] Scroll-freeze in the live sensor panel — throttle per-card re-renders to ~10 Hz +
       `content-visibility:auto` so off-screen cards skip paint
+- [x] Initial load — code-split three.js/uPlot (initial JS 716 KB → 174 KB)
+- [x] Visualization scheduler (`renderBudget.js`) — during scroll the 3D drops to ~15 fps and
+      plots to ~10 Hz (degrade, never freeze), auto-recovering to ~30 idle; off-screen pause;
+      dev HUD via `?perf`. Foreground DevTools Test A–D traces still to run for the gate.
 - [~] **Performance-architecture roadmap** — decided (thin browser + server-side LOD; no
       speculative workers). Design: [`docs/adr-001-dashboard-performance.md`](docs/adr-001-dashboard-performance.md),
       directions: [`High-Frequency Sensor Streaming — Performance Architecture Directions.md`](High-Frequency%20Sensor%20Streaming%20—%20Performance%20Architecture%20Directions.md)
