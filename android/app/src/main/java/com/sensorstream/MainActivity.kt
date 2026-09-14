@@ -10,11 +10,14 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -38,6 +41,16 @@ class MainActivity : ComponentActivity() {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         requestBatteryExemption()
+        // Keep the screen on while streaming: on this class of device, locking the phone
+        // backgrounds the app and the OEM throttles delivery (latency ~7ms -> ~150ms). Holding
+        // the screen on keeps the app foreground, so the live stream stays low-latency. The
+        // flag is cleared when streaming stops, so the screen sleeps normally otherwise.
+        lifecycleScope.launch {
+            viewModel.engineState.collect { st ->
+                if (st.streaming) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
         setContent {
             SensorStreamTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
