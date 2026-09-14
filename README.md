@@ -137,6 +137,16 @@ Tracked so the "test-as-you-build" checks don't get lost.
 - [ ] ROS2 bridge (`Ros2Sink` behind the `OutputSink` seam)
 - [ ] Soak test (long-run stability)
 
+### E. Dashboard performance
+- [x] 3D canvas lag on large screens / many sensors — layout was stretching the canvas to
+      ~3.7 MP; bounded panel + capped drawing buffer (~0.52 MP) + 30 fps throttle + lighter shadows
+- [x] Scroll-freeze in the live sensor panel — throttle per-card re-renders to ~10 Hz +
+      `content-visibility:auto` so off-screen cards skip paint
+- [ ] **Performance-architecture roadmap** (client data pipeline: worker-owned store, graph
+      LOD/aggregation, virtualized data table, server-side range/LOD queries for recordings) —
+      under discussion, see
+      [`High-Frequency Sensor Streaming — Performance Architecture Directions.md`](High-Frequency%20Sensor%20Streaming%20—%20Performance%20Architecture%20Directions.md)
+
 ## Reference
 
 Wire format: [`docs/protocol.md`](docs/protocol.md) ·
