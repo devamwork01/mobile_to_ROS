@@ -5,6 +5,7 @@ import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment
 import { getByType } from "../telemetry/store.js";
 import { androidToThree } from "../lib/orient.js";
 import { AXIS } from "../telemetry/signals.js";
+import { frameIntervalMs, report } from "../lib/renderBudget.js";
 
 const ORI_TYPES = [11, 15, 20]; // rotation vector / game / geomagnetic
 const GRAV_TYPES = [9, 1]; // gravity preferred, else accelerometer
@@ -237,20 +238,18 @@ export default function Phone3D() {
     const target = new THREE.Quaternion();
     let raf = 0;
     let lastRender = 0;
-    const FRAME_MS = 1000 / 30; // ~30 fps — smooth for orientation, ~half the GPU/CPU of 60
 
-    // Only skip rendering when the panel is scrolled off-screen (don't waste GPU on an
-    // invisible canvas). Rendering keeps running while the panel is visible — including
-    // while scrolling — so the 3D never freezes in view.
+    // Render budget comes from the shared scheduler: ~30 fps idle, ~15 fps while scrolling
+    // (degrade, never freeze). Only skip entirely when scrolled off-screen (§8).
     let visible = true;
     const io = new IntersectionObserver(([e]) => { visible = e.isIntersecting; }, { threshold: 0.01 });
     io.observe(el);
 
     const animate = (now) => {
       raf = requestAnimationFrame(animate);
-      if (now - lastRender < FRAME_MS) return;
+      if (now - lastRender < frameIntervalMs("3d")) return;
       lastRender = now;
-      if (!visible) return; // off-screen only
+      if (!visible) return; // off-screen only — visible content keeps rendering during scroll
       const t = togRef.current;
       dev.visible = t.body;
       world.visible = t.world;
@@ -281,8 +280,10 @@ export default function Phone3D() {
         }
       }
       renderer.render(scene, camera);
+      report("3d");
     };
 
+    let warnedBigBuffer = false;
     const resize = () => {
       const w = el.clientWidth || 400;
       const h = el.clientHeight || 320;
@@ -295,6 +296,12 @@ export default function Phone3D() {
       renderer.setSize(w, h);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
+      // §7 guard: warn once if a CSS regression lets the drawing buffer balloon again.
+      const cv = renderer.domElement;
+      if (!warnedBigBuffer && cv.width * cv.height > 600000) {
+        warnedBigBuffer = true;
+        console.warn(`[Phone3D] drawing buffer ${cv.width}x${cv.height} (>0.6 MP) — possible layout regression (ADR-001 §7).`);
+      }
     };
     const ro = new ResizeObserver(resize);
     ro.observe(el);

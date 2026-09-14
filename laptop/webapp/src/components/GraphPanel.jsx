@@ -3,6 +3,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { subscribeType } from "../telemetry/store.js";
 import { signalMeta, AXIS } from "../telemetry/signals.js";
+import { frameIntervalMs, report } from "../lib/renderBudget.js";
 
 const WINDOWS = [1, 5, 10, 30, 60];
 const AXIS_COLORS = [AXIS.X, AXIS.Y, AXIS.Z, "#b57edc"];
@@ -63,14 +64,17 @@ export default function GraphPanel({ sensors }) {
     });
 
     let raf = 0;
-    // Skip redraw only while the chart is scrolled off-screen (data keeps buffering and
-    // flushes when it returns). Redraw continues while visible, including during scroll.
+    let lastDraw = 0;
+    // Redraw budget from the shared scheduler: ~30 Hz idle, ~10 Hz while scrolling (coalesced,
+    // never frozen — data keeps buffering between draws). Skip entirely only when off-screen (§8).
     let visible = true;
     const vio = new IntersectionObserver(([e]) => { visible = e.isIntersecting; }, { threshold: 0.01 });
     vio.observe(host.current);
-    const tick = () => {
+    const tick = (now) => {
       raf = requestAnimationFrame(tick);
       if (!dirty || !visible) return;
+      if (now - lastDraw < frameIntervalMs("plot")) return; // coalesce; dirty stays true, flush next slot
+      lastDraw = now;
       const xmax = xs[xs.length - 1];
       const cutoff = xmax - winRef.current - 1;
       let drop = 0;
@@ -82,6 +86,7 @@ export default function GraphPanel({ sensors }) {
       }
       u.setData([xs, ...ys]);
       dirty = false;
+      report("plot");
     };
     raf = requestAnimationFrame(tick);
 

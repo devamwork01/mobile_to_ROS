@@ -3,6 +3,7 @@ import { Icons } from "./icons.js";
 import NavRail from "./components/NavRail.jsx";
 import SignalCard from "./components/SignalCard.jsx";
 import SensorModal from "./components/SensorModal.jsx";
+import PerfOverlay from "./components/PerfOverlay.jsx";
 // Heavy deps (three.js, uPlot) are code-split so the dashboard shell paints fast.
 const Phone3D = lazy(() => import("./components/Phone3D.jsx"));
 const GraphPanel = lazy(() => import("./components/GraphPanel.jsx"));
@@ -132,6 +133,7 @@ export default function App() {
   const meta = useTelemetry();
   const [view, setView] = useState("Dashboard");
   const [selected, setSelected] = useState(null);
+  const showPerf = typeof location !== "undefined" && new URLSearchParams(location.search).has("perf");
 
   const graphSensors = [];
   const seen = new Set();
@@ -192,6 +194,7 @@ export default function App() {
       </main>
 
       {selected && <SensorModal sensor={selected} catalog={meta.catalog} onClose={() => setSelected(null)} />}
+      {showPerf && <PerfOverlay />}
     </div>
   );
 }
