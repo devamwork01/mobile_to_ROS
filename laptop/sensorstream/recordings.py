@@ -57,13 +57,18 @@ def _scan_frames(path: str):
     return n, first, last
 
 
-def _peek_sensors(path: str, meta: Optional[dict]) -> List[dict]:
-    """Sensors present in the first datagram, named from the meta catalog when available."""
+def _peek_sensors(path: str, meta: Optional[dict], max_frames: int = 1000) -> List[dict]:
+    """Distinct sensors recorded, named from the meta catalog when available.
+
+    The phone sends one record per datagram, so a single datagram shows only one sensor;
+    scan a bounded window of datagrams (cheap) to enumerate the full active set.
+    """
     catalog = {}
     if meta:
         for s in meta.get("sensors", []) or []:
             catalog[s.get("handle")] = s
     found: dict = {}
+    n = 0
     for _t_recv, data in read_frames(path):
         try:
             dg = p.decode_datagram(data)
@@ -79,8 +84,10 @@ def _peek_sensors(path: str, meta: Optional[dict]) -> List[dict]:
                     "unit": info.get("units"),
                     "ncomp": len(r.values),
                 }
-        break  # first datagram is enough to enumerate the recorded set
-    return list(found.values())
+        n += 1
+        if n >= max_frames:
+            break
+    return sorted(found.values(), key=lambda s: s["handle"])
 
 
 def list_recordings(log_dir: str) -> List[dict]:

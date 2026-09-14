@@ -44,10 +44,15 @@ class DashboardSink(OutputSink):
         self._hz: Dict[Key, float] = {}
         self._last_seq: Dict[Key, int] = {}
         self._lost: Dict[Key, int] = {}
+        # Health: records seen vs records forwarded to the browser. The gap is *coalesced*
+        # presentation updates (intentional decimation) — NOT lost raw data.
+        self.records_in = 0
+        self.records_out = 0
 
     def on_datagram(self, dg: Datagram, addr: Tuple[str, int], t_recv_ns: int) -> None:
         now = time.monotonic()
         out = []
+        self.records_in += len(dg.records)
         for r in dg.records:
             key = (r.sensor_type, r.sensor_handle)
 
@@ -69,6 +74,7 @@ class DashboardSink(OutputSink):
 
             if now - self._last_emit.get(key, 0.0) >= self._min_emit_dt:
                 self._last_emit[key] = now
+                self.records_out += 1
                 out.append(
                     {
                         "type": r.sensor_type,

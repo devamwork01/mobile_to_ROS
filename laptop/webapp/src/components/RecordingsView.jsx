@@ -20,6 +20,7 @@ export default function RecordingsView() {
   const [sel, setSel] = useState(null); // selected recording
   const [handle, setHandle] = useState(null); // selected signal handle
   const [q, setQ] = useState(null); // LOD query result
+  const [range, setRange] = useState(null); // current zoom window {start,end} ns; null = full
   const [loadingSig, setLoadingSig] = useState(false);
   const chartWrap = useRef(null);
 
@@ -27,16 +28,19 @@ export default function RecordingsView() {
     listRecordings().then(setRecs).catch((e) => { setErr(e.message); setRecs([]); });
   }, []);
 
-  const openSignal = (rec, h) => {
-    setHandle(h);
+  // ~1 bucket per pixel, so zooming into a narrower range yields higher effective resolution.
+  const runQuery = (rec, h, r) => {
     setLoadingSig(true);
     setQ(null);
     const buckets = Math.max(200, Math.round(chartWrap.current?.clientWidth || 900));
-    querySignal(rec.id, h, { buckets })
+    querySignal(rec.id, h, { buckets, start: r?.start, end: r?.end })
       .then(setQ)
       .catch((e) => setErr(e.message))
       .finally(() => setLoadingSig(false));
   };
+  const openSignal = (rec, h) => { setHandle(h); setRange(null); runQuery(rec, h, null); };
+  const zoomTo = (start, end) => { const r = { start, end }; setRange(r); runQuery(sel, handle, r); };
+  const resetZoom = () => { setRange(null); runQuery(sel, handle, null); };
 
   if (recs === null) {
     return <div className="panel p-8 grid place-items-center text-sm text-muted">Loading recordings…</div>;
@@ -101,7 +105,7 @@ export default function RecordingsView() {
               ) : loadingSig ? (
                 <div className="min-h-[300px] grid place-items-center text-sm text-muted">Aggregating…</div>
               ) : (
-                <HistoryChart q={q} />
+                <HistoryChart q={q} onZoom={zoomTo} onReset={resetZoom} zoomed={!!range} />
               )}
             </div>
             {err && <div className="text-xs text-err mt-2">{err}</div>}

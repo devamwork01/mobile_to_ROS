@@ -217,6 +217,9 @@ async def run(args: argparse.Namespace) -> None:
                     "phones": len(control.sessions),
                     "recording": recorder.is_recording,
                     "rec_rows": recorder.rows,
+                    "ui_hz": args.ui_hz,
+                    "ui_records_in": sink.records_in,
+                    "ui_records_out": sink.records_out,
                 }
             )
             dash.broadcast(sync.snapshot())

@@ -105,6 +105,8 @@ function Diagnostics({ meta }) {
   const d = meta.debug || {};
   const s = meta.stats || {};
   const rate = s.bps ? (s.bps < 1048576 ? `${(s.bps / 1024).toFixed(0)} KB/s` : `${(s.bps / 1048576).toFixed(2)} MB/s`) : "—";
+  const inN = s.ui_records_in, outN = s.ui_records_out;
+  const coalesced = inN ? Math.round((1 - outN / inN) * 100) : null;
   return (
     <div className="grid md:grid-cols-2 gap-4">
       <Panel title="Connection">
@@ -116,14 +118,24 @@ function Diagnostics({ meta }) {
         <DiagRow label="Packet loss" value={`${d.loss_pct ?? 0} %`} tone={(d.loss_pct || 0) > 1 ? "text-warn" : "text-fg"} />
         <DiagRow label="Throughput" value={rate} />
       </Panel>
-      <Panel title="Sensor Pipeline">
+      <Panel title="Raw pipeline (recorded losslessly)">
         <DiagRow label="Active sensors" value={meta.active.length} />
         <DiagRow label="Packets received" value={s.packets ?? "—"} />
         <DiagRow label="Records received" value={d.received ?? s.records ?? "—"} />
-        <DiagRow label="Lost samples" value={d.lost ?? "—"} />
+        <DiagRow label="Lost samples (wire)" value={d.lost ?? "—"} tone={(d.lost || 0) > 0 ? "text-warn" : "text-fg"} />
         <DiagRow label="Reordered" value={d.reordered ?? "—"} />
-        <DiagRow label="Decode errors" value={s.decode_errors ?? "—"} />
+        <DiagRow label="Decode errors" value={s.decode_errors ?? "—"} tone={(s.decode_errors || 0) > 0 ? "text-warn" : "text-fg"} />
         <DiagRow label="Recording" value={meta.recording?.active ? `Yes · ${meta.recording.rows} rows` : "No"} />
+      </Panel>
+      <Panel title="Presentation (browser stream)">
+        <DiagRow label="UI rate cap" value={s.ui_hz ? `${s.ui_hz} Hz` : "—"} />
+        <DiagRow label="Coalesced" value={coalesced != null ? `${coalesced} %` : "—"} tone="text-muted" />
+        <DiagRow label="Forwarded to browser" value={outN != null ? outN.toLocaleString() : "—"} />
+        <DiagRow label="Raw records seen" value={inN != null ? inN.toLocaleString() : "—"} />
+        <div className="text-[11px] text-faint pt-2 leading-snug">
+          Coalesced = presentation updates intentionally dropped to hold the UI rate — not lost data.
+          Raw is recorded in full; "Lost samples (wire)" is the only real data loss.
+        </div>
       </Panel>
     </div>
   );
