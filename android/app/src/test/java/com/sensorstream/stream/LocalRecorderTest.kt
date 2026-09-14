@@ -118,4 +118,18 @@ class LocalRecorderTest {
         assertTrue("expected $n records read back, got ${got.size}", got.size == n)
         got.forEachIndexed { i, b -> assertArrayEquals(expected[i], b) }
     }
+
+    @Test
+    fun writeFailureIsCapturedInLastError() {
+        val parent = tempDir()
+        val notADir = File(parent, "blocked")
+        notADir.writeText("this is a regular file, not a directory")
+        // dir points at a regular file, so segment creation inside it must fail
+        val rec = LocalRecorder(notADir, deviceId = 1, maxBytes = 10_000, maxAgeMs = 10_000,
+            segmentMs = 10_000, now = { 0L })
+        rec.write(sample(0, 0))
+        val st = rec.stats()
+        assertTrue("expected at least one write error, got ${st.writeErrors}", st.writeErrors >= 1)
+        assertTrue("expected lastError to be captured", st.lastError != null)
+    }
 }
