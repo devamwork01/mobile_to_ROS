@@ -138,8 +138,11 @@ Tracked so the "test-as-you-build" checks don't get lost.
       management**, not an app bug — verified the app holds a `PARTIAL_WAKE_LOCK` +
       `FULL_LOW_LATENCY` WifiLock, is battery-optimization exempt (deviceidle whitelist), not
       frozen; sensors are non-wake-up with no HW batching and the M36 has no wake-up IMU
-      variants. S25 Ultra's power management doesn't impose this. Workaround: keep the phone
-      unlocked/foreground while streaming (optional "keep screen on" toggle proposed).
+      variants. S25 Ultra's power management doesn't impose this.
+- [x] **Keep screen on while streaming** (`FLAG_KEEP_SCREEN_ON` in MainActivity) — prevents the
+      screen-lock that triggers the M36 throttle; verified latency back to ~10 ms. Note: manually
+      switching apps / opening recent apps still backgrounds the app (same OEM throttle) and
+      recovers on return — no in-app fix for that; keep the app foreground while streaming.
 - [ ] ROS2 bridge (`Ros2Sink` behind the `OutputSink` seam)
 - [ ] Soak test (long-run stability)
 
