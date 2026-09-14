@@ -132,8 +132,14 @@ Tracked so the "test-as-you-build" checks don't get lost.
 ### D. System items
 - [x] Live sensor reconfig — toggle a sensor on the phone while streaming adds/removes its
       dashboard card + graph tab live, no reconnect (phone `updateSelections` + `active` control msg)
-- [~] Galaxy M36 5G validation — app installs and enumerates 34 sensors; **known issue:** after
-      ~2–3 min the app grows laggy (streaming and UI interactions); S25 Ultra unaffected. Under investigation.
+- [~] Galaxy M36 5G validation — app installs, enumerates 34 sensors, streams at 122 Hz.
+      **Diagnosed lag:** locking the phone spikes network latency ~7 ms → ~155 ms with bursty
+      delivery, so the dashboard plots stutter. It is **OEM screen-off/background power
+      management**, not an app bug — verified the app holds a `PARTIAL_WAKE_LOCK` +
+      `FULL_LOW_LATENCY` WifiLock, is battery-optimization exempt (deviceidle whitelist), not
+      frozen; sensors are non-wake-up with no HW batching and the M36 has no wake-up IMU
+      variants. S25 Ultra's power management doesn't impose this. Workaround: keep the phone
+      unlocked/foreground while streaming (optional "keep screen on" toggle proposed).
 - [ ] ROS2 bridge (`Ros2Sink` behind the `OutputSink` seam)
 - [ ] Soak test (long-run stability)
 
