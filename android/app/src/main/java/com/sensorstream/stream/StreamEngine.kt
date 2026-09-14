@@ -189,7 +189,10 @@ class StreamEngine(context: Context) {
             return
         }
         val recorder = recordDir?.let {
-            LocalRecorder(File(it, "onphone"), controller.deviceId, recMaxBytes, recMaxAgeMs, recSegmentMs)
+            // flags = 0: the recorder's encode must not read tSerializeNs, which the network
+            // drain coroutine mutates concurrently on the same fanned-out sample; serialize-for-
+            // send time is meaningless for an on-phone recording anyway.
+            LocalRecorder(File(it, "onphone"), controller.deviceId, recMaxBytes, recMaxAgeMs, recSegmentMs, flags = 0)
         }
         controller.start(host, udpPort, regs, recorder)
         _state.value = _state.value.copy(streaming = true)
