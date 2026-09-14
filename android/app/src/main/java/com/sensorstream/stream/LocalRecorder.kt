@@ -89,6 +89,24 @@ class LocalRecorder(
         return Stats(recorded, totalBytes(), oldestAge, droppedOldest, writeErrors)
     }
 
+    fun readRawRange(handle: Int, fromSeq: Long, toSeq: Long): List<ByteArray> {
+        current?.out?.flush() // ensure current segment's bytes are on disk before reading
+        val out = ArrayList<Pair<Long, ByteArray>>()
+        for (seg in segments) {
+            val entries = seg.index[handle] ?: continue
+            for ((seq, offset, len) in entries) {
+                if (seq < fromSeq || seq > toSeq) continue
+                java.io.RandomAccessFile(seg.file, "r").use { raf ->
+                    raf.seek(offset)
+                    val buf = ByteArray(len)
+                    raf.readFully(buf)
+                    out.add(seq to buf)
+                }
+            }
+        }
+        return out.sortedBy { it.first }.map { it.second }
+    }
+
     private fun rotate() {
         current?.out?.flush(); current?.out?.close()
         openSegment()
