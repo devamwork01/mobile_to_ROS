@@ -37,6 +37,7 @@ class LocalRecorder(
 
     private var current: Segment? = null
     private val segments = ArrayList<Segment>()
+    private var segmentSeq = 0L
 
     data class Stats(
         val recorded: Long, val bytesOnDisk: Long, val oldestAgeMs: Long,
@@ -114,7 +115,10 @@ class LocalRecorder(
 
     private fun openSegment(): Segment {
         val ts = now()
-        val seg = Segment(File(dir, "seg_$ts.ssbin"), ts)
+        // salt with a monotonic counter: a constant/coarse clock can otherwise produce the
+        // same filename across rotations, causing a later segment's FileOutputStream to
+        // truncate a still-referenced earlier segment's file.
+        val seg = Segment(File(dir, "seg_${ts}_${segmentSeq++}.ssbin"), ts)
         seg.out.write(MAGIC)
         seg.bytes = MAGIC.size.toLong()
         current = seg
