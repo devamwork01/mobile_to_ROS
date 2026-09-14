@@ -79,4 +79,20 @@ class LocalRecorderTest {
         rec.close()
         assertTrue(rec.stats().droppedOldest >= 1)
     }
+
+    @Test
+    fun readRawRangeReturnsRequestedDatagrams() {
+        val dir = tempDir()
+        var t = 0L
+        val rec = LocalRecorder(dir, deviceId = 3, maxBytes = 10_000_000, maxAgeMs = 600_000,
+            segmentMs = 30, now = { t })
+        val written = (0L until 6L).map { seq -> sample(handle = 2, seq = seq).also { t = seq * 10; rec.write(it) } }
+        rec.close()
+        val got = rec.readRawRange(handle = 2, fromSeq = 2, toSeq = 4)
+        // expect datagrams for seq 2,3,4 == codec output
+        val expected = written.filter { it.seq in 2..4 }
+            .map { BinaryPacketCodec.encode(3, listOf(it), BinaryPacketCodec.FLAG_STAGE_TS) }
+        assertTrue(got.size == 3)
+        got.forEachIndexed { i, b -> assertArrayEquals(expected[i], b) }
+    }
 }
