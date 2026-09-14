@@ -52,4 +52,31 @@ class LocalRecorderTest {
         val segs = dir.listFiles { f -> f.name.endsWith(".ssbin") }!!
         assertTrue("expected 2 segments, got ${segs.size}", segs.size == 2)
     }
+
+    @Test
+    fun prunesOldestBySize() {
+        val dir = tempDir()
+        var t = 0L
+        // tiny size cap so a few records force a prune; small segments so multiple exist
+        val rec = LocalRecorder(dir, deviceId = 1, maxBytes = 400, maxAgeMs = 600_000,
+            segmentMs = 1, now = { t })
+        for (i in 0 until 20) { t = i.toLong(); rec.write(sample(0, i.toLong())) }
+        rec.close()
+        val st = rec.stats()
+        assertTrue("bytes ${st.bytesOnDisk} should be <= cap-ish", st.bytesOnDisk <= 400 + 200)
+        assertTrue("expected some dropped, got ${st.droppedOldest}", st.droppedOldest > 0)
+        assertTrue("at least current segment remains", dir.listFiles { f -> f.name.endsWith(".ssbin") }!!.isNotEmpty())
+    }
+
+    @Test
+    fun prunesOldestByAge() {
+        val dir = tempDir()
+        var t = 0L
+        val rec = LocalRecorder(dir, deviceId = 1, maxBytes = 10_000_000, maxAgeMs = 100,
+            segmentMs = 10, now = { t })
+        rec.write(sample(0, 0))                 // seg @0
+        t = 500; rec.write(sample(0, 1))        // seg @500; seg@0 is now >100ms old -> pruned
+        rec.close()
+        assertTrue(rec.stats().droppedOldest >= 1)
+    }
 }
