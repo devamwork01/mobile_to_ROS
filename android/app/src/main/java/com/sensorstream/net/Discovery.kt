@@ -59,6 +59,11 @@ class Discovery(context: Context, private val beaconPort: Int = 5006) {
 
     private fun emit(host: String, port: Int) {
         val l = listener
+        if (host.isBlank()) return
+        // Ignore loopback / non-routable results (e.g. a stale mDNS record resolving to 127.0.0.1):
+        // the phone can't reach the laptop over loopback. The UDP beacon supplies the real LAN IP.
+        val lower = host.lowercase()
+        if (lower == "localhost" || host.startsWith("127.") || host == "::1" || host == "0.0.0.0") return
         if (port in 1..65535 && l != null && active.get()) l.onFound(host, port)
     }
 
