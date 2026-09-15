@@ -47,6 +47,10 @@ class StreamingService : Service() {
                 val maxAgeMs = prefs.getLong("rec_max_age_ms", 20L * 60 * 1000)
                 val engine = StreamHolder.engine(this)
                 engine.configureRecording(filesDir, maxBytes, maxAgeMs)
+                engine.clientId = com.sensorstream.core.ClientId.getOrCreate(
+                    read = { prefs.getString("client_id", null) },
+                    write = { prefs.edit().putString("client_id", it).apply() },
+                )
                 engine.start(host, port, selections)
             }
             ACTION_STOP -> {
