@@ -47,6 +47,8 @@ class StreamController(sm: SensorManager) {
     // Samples dropped at the fan-out boundary because the recorder channel was full (should stay 0).
     // Distinct from LocalRecorder.Stats.droppedOldest (ring prune) — this is upstream of the recorder.
     val recorderDropped = AtomicLong(0)
+    // Datagrams served back to the laptop via backfill (Phase 2B); cumulative for the session.
+    val backfillServed = AtomicLong(0)
 
     @Volatile var deviceId: Int = (System.currentTimeMillis() and 0xFFFFFFFFL).toInt()
     @Volatile var onUiSample: ((SensorSample) -> Unit)? = null
@@ -61,6 +63,7 @@ class StreamController(sm: SensorManager) {
         sentBytes.set(0)
         droppedSamples.set(0)
         recorderDropped.set(0)
+        backfillServed.set(0)
         this.recorder = recorder
 
         val ch = Channel<SensorSample>(capacity = 4096, onBufferOverflow = BufferOverflow.DROP_OLDEST)
