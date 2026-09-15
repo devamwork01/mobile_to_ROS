@@ -50,7 +50,9 @@ fun Phone3DView(
         val cx = size.width / 2f
         val cy = size.height / 2f
         val unit = minOf(size.width, size.height) * 0.34f
-        val r = Projection.rotationVectorToMatrix(rotationVector ?: floatArrayOf(0f, 0f, 0f))
+        // Render in the SAME space the laptop uses (Rx(-90°) ENU->Y-up) so the on-device phone's
+        // orientation matches the dashboard's 3D viz exactly.
+        val r = Projection.threeMatrix(rotationVector ?: floatArrayOf(0f, 0f, 0f))
 
         // Contact shadow beneath the phone (soft, elliptical).
         drawOvalShadow(cx, cy + unit * 0.95f, unit * 1.1f, unit * 0.28f, colors.isDark)
