@@ -10,7 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
 import com.sensorstream.ui.theme.Ss
 import kotlin.math.hypot
@@ -83,12 +83,18 @@ fun Phone3DView(
         )
         drawPath(body, color = colors.line, style = Stroke(width = 2.dp.toPx()))
 
-        // Axes.
+        // Axes (drawn Z first so X/Y read on top). Labels sit just past each arrow tip.
         if (showAxes) {
             val ep = Phone3DConfig.axisEndpoints(r, cx, cy, unit * 1.15f)
             drawAxis(cx, cy, ep["Z"]!!, colors.axisZ)
             drawAxis(cx, cy, ep["X"]!!, colors.axisX)
             drawAxis(cx, cy, ep["Y"]!!, colors.axisY)
+            if (showLabels) {
+                val lp = Phone3DConfig.axisEndpoints(r, cx, cy, unit * 1.34f) // labels a bit beyond tips
+                drawAxisLabel("Z", lp["Z"]!!, colors.axisZ)
+                drawAxisLabel("X", lp["X"]!!, colors.axisX)
+                drawAxisLabel("Y", lp["Y"]!!, colors.axisY)
+            }
             if (sensorVector != null && sensorVectorColor != null) {
                 val rot = Projection.rotate(r, normalize(sensorVector))
                 val (dx, dy) = Projection.project(rot, unit * 1.0f)
@@ -108,6 +114,20 @@ private fun DrawScope.drawOvalShadow(cx: Float, cy: Float, rx: Float, ry: Float,
         topLeft = Offset(cx - rx, cy - ry),
         size = Size(rx * 2, ry * 2),
     )
+}
+
+private fun DrawScope.drawAxisLabel(text: String, at: Pair<Float, Float>, color: Color) {
+    val paint = android.graphics.Paint().apply {
+        this.color = android.graphics.Color.argb(
+            (color.alpha * 255).toInt(), (color.red * 255).toInt(), (color.green * 255).toInt(), (color.blue * 255).toInt(),
+        )
+        textSize = 34f
+        isAntiAlias = true
+        isFakeBoldText = true
+        textAlign = android.graphics.Paint.Align.CENTER
+    }
+    // Center vertically on the point (baseline offset ~ textSize/3).
+    drawContext.canvas.nativeCanvas.drawText(text, at.first, at.second + 12f, paint)
 }
 
 private fun DrawScope.drawAxis(cx: Float, cy: Float, end: Pair<Float, Float>, color: Color, thick: Float = 4f) {

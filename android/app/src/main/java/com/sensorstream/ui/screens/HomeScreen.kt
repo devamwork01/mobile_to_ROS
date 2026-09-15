@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.clickable
@@ -43,11 +44,15 @@ import com.sensorstream.vm.StreamViewModel
 fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
     val state by vm.engineState.collectAsState()
     val sel by vm.sel.collectAsState()
-    val live by vm.live.collectAsState()
+    val orientation by vm.orientationPreview.collectAsState()
     val c = Ss.colors
 
-    val rvHandle = vm.catalog.firstOrNull { it.type == Sensor.TYPE_ROTATION_VECTOR }?.handle
-    val rvValues = rvHandle?.let { live[it]?.values }
+    // Drive the hero phone from a local orientation preview so it responds to device motion whether
+    // or not we're streaming. Registration is ref-counted + released when Home leaves composition.
+    DisposableEffect(Unit) {
+        vm.startOrientationPreview()
+        onDispose { vm.stopOrientationPreview() }
+    }
 
     val phase = state.phase()
     val streamingLike = phase == StreamPhase.STREAMING || state.connecting || state.connected
@@ -71,7 +76,7 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
 
         // Hero pseudo-3D phone.
         Phone3DView(
-            rotationVector = rvValues,
+            rotationVector = orientation,
             modifier = Modifier.fillMaxWidth().aspectRatio(1.1f),
         )
 
