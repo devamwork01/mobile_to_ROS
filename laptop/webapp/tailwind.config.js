@@ -1,35 +1,37 @@
 /** @type {import('tailwindcss').Config} */
-// SensorStream Pro design tokens. Premium dark-first palette: charcoal/graphite
-// surfaces (never pure black), off-white text, one restrained electric-blue
-// accent, semantic status colors, and the universal X=red / Y=green / Z=blue
-// axis colors used identically everywhere.
+// SensorStream Pro design tokens. Dark-first, now theme-aware: every semantic color
+// resolves through a CSS variable (an "R G B" triple defined per theme in index.css),
+// so `bg-surface` / `text-fg` re-resolve for light or dark with NO markup changes and
+// Tailwind opacity modifiers still work. The universal X=red / Y=green / Z=blue axis
+// colors are fixed hex — identical in both themes everywhere.
+const v = (name) => `rgb(var(--${name}) / <alpha-value>)`;
 export default {
   content: ["./index.html", "./src/**/*.{js,jsx}"],
-  darkMode: "class",
+  darkMode: ["class", '[data-theme="dark"]'],
   theme: {
     extend: {
       colors: {
-        ink: "#0a0d12", // app background (deep charcoal, not black)
+        ink: v("ink"), // app background
         surface: {
-          DEFAULT: "#12161d",
-          2: "#171c25",
-          3: "#1f2530",
+          DEFAULT: v("surface"),
+          2: v("surface-2"),
+          3: v("surface-3"),
         },
-        line: "#272e39",
-        line2: "#333c49",
-        fg: "#e8edf4",
-        muted: "#8b95a4",
-        faint: "#5a6472",
+        line: v("line"),
+        line2: v("line2"),
+        fg: v("fg"),
+        muted: v("muted"),
+        faint: v("faint"),
         accent: {
-          DEFAULT: "#3d7bfd",
-          hover: "#5a90ff",
-          soft: "#17233d",
+          DEFAULT: v("accent"),
+          hover: v("accent-hover"),
+          soft: v("accent-soft"),
         },
-        ok: "#3fd07a",
-        warn: "#e3a635",
-        err: "#ff5c5c",
-        info: "#39c5cf",
-        sel: "#e3b341",
+        ok: v("ok"),
+        warn: v("warn"),
+        err: v("err"),
+        info: v("info"),
+        sel: v("sel"),
         axis: { x: "#ff5c5c", y: "#3fd07a", z: "#4c8dff" },
       },
       fontFamily: {

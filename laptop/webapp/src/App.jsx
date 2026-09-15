@@ -4,6 +4,8 @@ import NavRail from "./components/NavRail.jsx";
 import SignalCard from "./components/SignalCard.jsx";
 import SensorModal from "./components/SensorModal.jsx";
 import PerfOverlay from "./components/PerfOverlay.jsx";
+import ThemeToggle from "./components/ThemeToggle.jsx";
+import { getStoredTheme, setTheme } from "./lib/theme.js";
 // Heavy deps (three.js, uPlot) are code-split so the dashboard shell paints fast.
 const Phone3D = lazy(() => import("./components/Phone3D.jsx"));
 const GraphPanel = lazy(() => import("./components/GraphPanel.jsx"));
@@ -154,6 +156,8 @@ export default function App() {
   const meta = useTelemetry();
   const [view, setView] = useState("Dashboard");
   const [selected, setSelected] = useState(null);
+  const [theme, setThemeState] = useState(() => getStoredTheme());
+  const changeTheme = (p) => setThemeState(setTheme(p));
   const showPerf = typeof location !== "undefined" && new URLSearchParams(location.search).has("perf");
 
   const graphSensors = [];
@@ -207,9 +211,26 @@ export default function App() {
           )}
 
           {view === "Settings" && (
-            <Panel title="Settings">
-              <Empty icon="Settings" title="Settings" sub="Theme, ports and preferences will live here." />
-            </Panel>
+            <div className="grid md:grid-cols-2 gap-4 max-w-3xl">
+              <Panel title="Appearance">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <div className="text-sm text-fg">Theme</div>
+                    <div className="text-xs text-muted">System follows your OS setting.</div>
+                  </div>
+                  <ThemeToggle value={theme} onChange={changeTheme} />
+                </div>
+              </Panel>
+              <Panel title="Connection">
+                <DiagRow label="Dashboard host" value={typeof location !== "undefined" ? location.host : "—"} />
+                <DiagRow label="Phone connected" value={meta.device ? "Yes" : "No"} tone={meta.device ? "text-ok" : "text-muted"} />
+                <DiagRow label="UI update cap" value={meta.stats?.ui_hz ? `${meta.stats.ui_hz} Hz` : "—"} />
+                <DiagRow label="Recording" value={meta.recording?.active ? `Yes · ${meta.recording.rows} rows` : "No"} />
+                <div className="text-[11px] text-faint pt-2 leading-snug">
+                  Ports and capture options are set with server flags (see README). This panel is read-only.
+                </div>
+              </Panel>
+            </div>
           )}
         </div>
       </main>
