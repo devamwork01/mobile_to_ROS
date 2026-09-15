@@ -44,6 +44,12 @@ private fun fmtBps(bps: Long): String = when {
     else -> "%.2f MB/s".format(bps / (1024.0 * 1024))
 }
 
+private fun fmtBytes(b: Long): String = when {
+    b < 1024 -> "$b B"
+    b < 1024 * 1024 -> "%.0f KB".format(b / 1024.0)
+    else -> "%.1f MB".format(b / (1024.0 * 1024))
+}
+
 @Composable
 fun StreamScreen(vm: StreamViewModel) {
     val engine by vm.engineState.collectAsState()
@@ -134,6 +140,14 @@ private fun ConnectionCard(vm: StreamViewModel, engine: com.sensorstream.stream.
                 fontFamily = FontFamily.Monospace,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (engine.streaming) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "on-phone rec  %s  ·  buffered %ds  ·  dropped %d".format(
+                    fmtBytes(engine.recBytes), engine.recOldestAgeMs / 1000, engine.recDropped
+                ),
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (engine.recDropped > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             engine.error?.let { Text("Error: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         }
