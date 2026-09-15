@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.sensorstream.ui.StreamScreen
+import com.sensorstream.ui.AppScaffold
 import com.sensorstream.ui.theme.SensorStreamTheme
 import com.sensorstream.vm.StreamViewModel
 
@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             SensorStreamTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    StreamScreen(viewModel)
+                    AppScaffold(viewModel)
                 }
             }
         }
