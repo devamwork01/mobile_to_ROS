@@ -11,8 +11,15 @@ import java.nio.ByteOrder
 /**
  * Bounded, lossless on-phone recorder. Writes segmented .ssbin files byte-compatible with the
  * laptop (logging_sink.py) and indexes each record's raw datagram bytes by (handle, seq) so a
- * later backfill can resend them verbatim. Synchronous and Context-free for JVM testability;
- * callers must drive write() from an IO thread, never the sensor callback.
+ * later backfill can resend them verbatim. Context-free for JVM testability; callers must drive
+ * write() from an IO thread, never the sensor callback.
+ *
+ * Thread-safety: write() runs on the single IO drain coroutine, but stats() is polled from the
+ * heartbeat coroutine (another thread) and close() runs on the stop() caller's thread. The public
+ * methods are therefore [Synchronized] on the instance monitor so a stats() poll never iterates
+ * [segments] while write()/prune() structurally mutate it, and close() never overlaps an in-flight
+ * write(). There is only one writer, so it never contends with itself; the 1 s stats() poll (and,
+ * later, readRawRange for backfill) contend only briefly.
  */
 class LocalRecorder(
     private val dir: File,
@@ -53,6 +60,7 @@ class LocalRecorder(
         dir.mkdirs()
     }
 
+    @Synchronized
     fun write(sample: SensorSample) {
         runCatching {
             var seg = current ?: openSegment()
@@ -86,11 +94,13 @@ class LocalRecorder(
         }
     }
 
+    @Synchronized
     fun stats(): Stats {
         val oldestAge = segments.firstOrNull()?.let { now() - it.startMs } ?: 0L
         return Stats(recorded, totalBytes(), oldestAge, droppedOldest, writeErrors, lastError)
     }
 
+    @Synchronized
     fun readRawRange(handle: Int, fromSeq: Long, toSeq: Long): List<ByteArray> {
         current?.out?.flush() // ensure current segment's bytes are on disk before reading
         val out = ArrayList<Pair<Long, ByteArray>>()
@@ -127,6 +137,7 @@ class LocalRecorder(
         return seg
     }
 
+    @Synchronized
     fun close() {
         current?.out?.flush()
         current?.out?.close()
