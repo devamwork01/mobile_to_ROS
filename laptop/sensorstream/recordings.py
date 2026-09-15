@@ -138,8 +138,9 @@ def query_signal(
     if not os.path.isfile(path):
         return None
 
-    ts: List[int] = []
-    vals: List[list] = []
+    # Dedup by seq (a sample can arrive both late-live and via backfill) and order by t_sensor_ns —
+    # the .ssbin may hold out-of-order / duplicated appended frames after reconciliation.
+    seen: dict = {}   # seq -> (t_sensor_ns, values); first write wins
     stype: Optional[int] = None
     ncomp = 0
     for _t_recv, data in read_frames(path):
@@ -155,17 +156,21 @@ def query_signal(
                 continue
             if end_ns is not None and t > end_ns:
                 continue
-            ts.append(t)
-            vals.append(r.values)
-            if stype is None:
-                stype = r.sensor_type
-                ncomp = len(r.values)
+            if r.seq not in seen:
+                seen[r.seq] = (t, r.values)
+                if stype is None:
+                    stype = r.sensor_type
+                    ncomp = len(r.values)
 
-    if not ts:
+    if not seen:
         return {"handle": handle, "type": stype, "ncomp": 0, "raw": 0, "buckets": 0,
                 "start": None, "end": None, "t": [], "avg": [], "min": [], "max": []}
 
-    t0, t1 = ts[0], ts[-1]  # file order is chronological
+    ordered = sorted(seen.values(), key=lambda tv: tv[0])   # by t_sensor_ns
+    ts = [t for t, _v in ordered]
+    vals = [v for _t, v in ordered]
+
+    t0, t1 = ts[0], ts[-1]  # now chronological after the sort above
     span = max(1, t1 - t0)
     nb = max(1, min(int(buckets), len(ts)))
     width = span / nb
