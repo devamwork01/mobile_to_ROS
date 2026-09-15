@@ -134,7 +134,16 @@ function Diagnostics({ meta }) {
         <DiagRow label="Raw records seen" value={inN != null ? inN.toLocaleString() : "—"} />
         <div className="text-[11px] text-faint pt-2 leading-snug">
           Coalesced = presentation updates intentionally dropped to hold the UI rate — not lost data.
-          Raw is recorded in full; "Lost samples (wire)" is the only real data loss.
+          Raw is recorded in full; wire loss is recovered by backfill (see below).
+        </div>
+      </Panel>
+      <Panel title="Backfill (recording integrity)">
+        <DiagRow label="Backfilled records" value={(s.backfilled ?? 0).toLocaleString()} tone={(s.backfilled || 0) > 0 ? "text-ok" : "text-fg"} />
+        <DiagRow label="Permanent gaps" value={s.permanent_gaps ?? 0} tone={(s.permanent_gaps || 0) > 0 ? "text-warn" : "text-ok"} />
+        <div className="text-[11px] text-faint pt-2 leading-snug">
+          Backfilled = samples the live UDP stream missed that the phone resent from its on-phone
+          recording, merged into the session (deduped by seq). Permanent gaps = ranges the phone
+          could no longer serve (aged out of its ring) — the only irrecoverable data loss.
         </div>
       </Panel>
     </div>

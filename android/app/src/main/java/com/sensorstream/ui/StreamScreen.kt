@@ -160,6 +160,15 @@ private fun ConnectionCard(vm: StreamViewModel, engine: com.sensorstream.stream.
                     color = MaterialTheme.colorScheme.error,
                 )
             }
+            if (engine.backfillServed > 0) {
+                Text(
+                    // datagrams the laptop asked us to resend from the on-phone ring (backfill).
+                    "backfill served  %d".format(engine.backfillServed),
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             engine.error?.let { Text("Error: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         }
     }

@@ -42,6 +42,7 @@ data class EngineState(
     val recOldestAgeMs: Long = 0L, // age of the oldest buffered record
     val recFanoutDropped: Long = 0L, // samples dropped at the fan-out channel (never reached recorder)
     val recWriteErrors: Long = 0L, // recorder disk write failures
+    val backfillServed: Long = 0L, // datagrams resent to the laptop via backfill this session
     val error: String? = null,
 )
 
@@ -158,6 +159,7 @@ class StreamEngine(context: Context) {
                         recOldestAgeMs = rs?.oldestAgeMs ?: 0L,
                         recFanoutDropped = controller.recorderDropped.get(),
                         recWriteErrors = rs?.writeErrors ?: 0L,
+                        backfillServed = controller.backfillServed.get(),
                     )
                 } catch (c: CancellationException) {
                     throw c
