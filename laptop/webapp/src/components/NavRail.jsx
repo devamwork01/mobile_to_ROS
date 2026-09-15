@@ -31,12 +31,13 @@ export default function NavRail({ view, onView, meta }) {
   const latency = d.latency_ms_p50 != null ? `${d.latency_ms_p50} ms` : "—";
 
   return (
-    <aside className="w-60 shrink-0 h-full flex flex-col bg-surface border-r border-line">
-      <div className="px-4 py-4 flex items-center gap-2.5">
-        <div className="grid place-items-center w-9 h-9 rounded-xl bg-accent-soft text-accent shadow-glow">
+    // Icon-only rail on phones (w-16), full rail with labels + stats from md up (w-60).
+    <aside className="w-16 md:w-60 shrink-0 h-full flex flex-col bg-surface border-r border-line">
+      <div className="px-3 md:px-4 py-4 flex items-center gap-2.5 justify-center md:justify-start">
+        <div className="grid place-items-center w-9 h-9 rounded-xl bg-accent-soft text-accent shadow-glow shrink-0">
           <Icons.Box size={18} />
         </div>
-        <div>
+        <div className="hidden md:block">
           <div className="font-semibold leading-tight">
             SensorStream <span className="text-accent">Pro</span>
           </div>
@@ -44,7 +45,7 @@ export default function NavRail({ view, onView, meta }) {
         </div>
       </div>
 
-      <nav className="px-2.5 py-1 flex flex-col gap-0.5">
+      <nav className="px-2 md:px-2.5 py-1 flex flex-col gap-0.5">
         {NAV.map(([label, icon]) => {
           const I = Icons[icon] || Icons.CircleDot;
           const on = view === label;
@@ -52,19 +53,24 @@ export default function NavRail({ view, onView, meta }) {
             <button
               key={label}
               onClick={() => onView(label)}
-              className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors ${
+              title={label}
+              className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors justify-center md:justify-start ${
                 on ? "bg-accent-soft text-accent" : "text-muted hover:text-fg hover:bg-surface-2"
               }`}
             >
-              <I size={18} strokeWidth={2} />
-              {label}
+              <I size={18} strokeWidth={2} className="shrink-0" />
+              <span className="hidden md:inline">{label}</span>
             </button>
           );
         })}
       </nav>
 
-      <div className="mt-auto p-3">
-        <div className="card p-3.5 flex flex-col gap-2.5">
+      <div className="mt-auto p-2 md:p-3">
+        {/* Compact connection dot on phones; full stats card from md up. */}
+        <div className="md:hidden flex justify-center py-2" title={connected ? "Connected" : "No device"}>
+          <span className={`w-2.5 h-2.5 rounded-full ${connected ? "bg-ok animate-pulsedot" : "bg-faint"}`} />
+        </div>
+        <div className="hidden md:flex card p-3.5 flex-col gap-2.5">
           <div className="flex items-center gap-2">
             <span className={`w-2.5 h-2.5 rounded-full ${connected ? "bg-ok animate-pulsedot" : "bg-faint"}`} />
             <span className={`text-sm font-medium ${connected ? "text-ok" : "text-muted"}`}>
