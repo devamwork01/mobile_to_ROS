@@ -120,10 +120,13 @@ Tracked so the "test-as-you-build" checks don't get lost.
 - [x] Reconnect after Wi-Fi drop / server restart
 - [ ] Screen-off streaming (power fix) still works with the new UI (A8 — not yet verified)
 
-### B. Not-yet-built UI (tests follow the build)
-- [ ] Light theme toggle
-- [ ] Responsive / phone-width layout (~400px)
-- [ ] Recordings browser + Settings views (currently placeholders)
+### B. Dashboard UI
+- [x] Light theme toggle — theme-aware CSS-variable tokens (dark default + light palette),
+      System/Light/Dark toggle in Settings, persisted; verified in-browser (dark + light)
+- [x] Recordings browser (server-side list + LOD history chart + zoom) — built earlier
+- [x] Settings view — Appearance (theme) + read-only connection info (replaces the placeholder)
+- [~] Responsive / phone-width layout (~400px) — NavRail collapses to an icon rail below `md`,
+      content grids stack; desktop verified, true ~400px visual check pending a device/emulator
 
 ### C. Premium 3D
 - [x] Rounded/metallic/glass phone renders in both frames; toggles work; no perf regression;
