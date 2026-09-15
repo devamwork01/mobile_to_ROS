@@ -48,6 +48,7 @@ class PhoneSession:
     model: str = ""
     android: str = ""
     app_version: str = ""
+    client_id: str = ""
     catalog: List[dict] = field(default_factory=list)
     active: List[int] = field(default_factory=list)
     connected_at: float = field(default_factory=time.monotonic)
@@ -113,6 +114,16 @@ class ControlServer:
                 elif mtype == p.MSG_CONFIG_STATE:
                     if session:
                         self._on_event({"kind": "config_state", "device_id": session.device_id, "config": msg.get("config")})
+                elif mtype == p.MSG_BACKFILL:
+                    if session:
+                        self._on_event({"kind": "backfill", "device_id": session.device_id,
+                                        "handle": int(msg.get("handle", -1)),
+                                        "frames": list(msg.get("frames") or [])})
+                elif mtype == p.MSG_BACKFILL_UNAVAILABLE:
+                    if session:
+                        self._on_event({"kind": "backfill_unavailable", "device_id": session.device_id,
+                                        "handle": int(msg.get("handle", -1)),
+                                        "from": int(msg.get("from", 0)), "to": int(msg.get("to", 0))})
                 # unknown types ignored (forward-compatible)
         except Exception:
             pass
@@ -130,6 +141,7 @@ class ControlServer:
             model=str(msg.get("model", "")),
             android=str(msg.get("android", "")),
             app_version=str(msg.get("app_version", "")),
+            client_id=str(msg.get("client_id", "")),
             catalog=list(msg.get("sensors", []) or []),
         )
         self._sessions[device_id] = session
@@ -142,6 +154,7 @@ class ControlServer:
                 "model": session.model,
                 "android": session.android,
                 "app_version": session.app_version,
+                "client_id": session.client_id,
                 "sensors": session.catalog,
             }
         )
@@ -153,4 +166,22 @@ class ControlServer:
         if s is None:
             return False
         await _send(s.ws, {"type": p.MSG_CONFIGURE, **config})
+        return True
+
+    async def send_resend(self, device_id: int, handle: int, from_seq: int, to_seq: int) -> bool:
+        """Ask the phone to resend a missing seq range from its on-phone recording (backfill)."""
+        s = self._sessions.get(device_id)
+        if s is None:
+            return False
+        await _send(s.ws, {"type": p.MSG_RESEND, "device_id": device_id,
+                           "handle": handle, "from": from_seq, "to": to_seq})
+        return True
+
+    async def send_backfill_ack(self, device_id: int, upto: list) -> bool:
+        """Tell the phone the highest contiguous seq per handle it may prune. ``upto`` = [(handle, seq)]."""
+        s = self._sessions.get(device_id)
+        if s is None:
+            return False
+        await _send(s.ws, {"type": p.MSG_BACKFILL_ACK, "device_id": device_id,
+                           "upto": [{"handle": h, "seq": seq} for (h, seq) in upto]})
         return True
