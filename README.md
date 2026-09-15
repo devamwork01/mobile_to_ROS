@@ -143,9 +143,16 @@ Tracked so the "test-as-you-build" checks don't get lost.
       screen-lock that triggers the M36 throttle; verified latency back to ~10 ms. Note: manually
       switching apps / opening recent apps still backgrounds the app (same OEM throttle) and
       recovers on return — no in-app fix for that; keep the app foreground while streaming.
-- [ ] On-phone lossless recording + laptop backfill (screen-off data integrity; laptop stays
-      authoritative, live path untouched) — **design approved**, plan next. Spec:
-      [`docs/superpowers/specs/2026-09-14-onphone-recording-backfill-design.md`](docs/superpowers/specs/2026-09-14-onphone-recording-backfill-design.md)
+- [~] On-phone lossless recording + laptop backfill (screen-off data integrity; laptop stays
+      authoritative, live path untouched). Spec:
+      [`docs/superpowers/specs/2026-09-14-onphone-recording-backfill-design.md`](docs/superpowers/specs/2026-09-14-onphone-recording-backfill-design.md) ·
+      Plan: [`docs/superpowers/plans/2026-09-14-onphone-recording.md`](docs/superpowers/plans/2026-09-14-onphone-recording.md)
+    - [x] **Phase 1 — on-phone recording** (branch `feat/onphone-recording`): `LocalRecorder`
+          writes a bounded `.ssbin` ring (byte-compatible with `logging_sink.py`), fanned out from
+          acquisition off the sensor callback (non-blocking `trySend` → IO drain), size/age prune,
+          `(handle,seq)` index for backfill, on-device size/buffered/dropped in the status card.
+          7 JVM unit tests + `assembleDebug` green. **On-device streaming smoke test still pending.**
+    - [ ] Phase 2 — laptop gap detection + backfill request/serve + merge/dedup on read (separate plan)
 - [ ] ROS2 bridge (`Ros2Sink` behind the `OutputSink` seam)
 - [ ] Soak test (long-run stability)
 
