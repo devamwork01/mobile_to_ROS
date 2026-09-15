@@ -35,6 +35,7 @@ Datagram layout (all little-endian, standard sizes, no padding)::
 
 from __future__ import annotations
 
+import base64
 import struct
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -70,6 +71,10 @@ MSG_ERROR = "error"
 MSG_START = "start"
 MSG_STOP = "stop"
 MSG_ACTIVE = "active"  # phone→laptop: currently-streaming sensor handles (live reconfig)
+MSG_RESEND = "resend"                                # laptop→phone: request missing seq ranges
+MSG_BACKFILL = "backfill"                            # phone→laptop: base64 raw datagrams for a range
+MSG_BACKFILL_UNAVAILABLE = "backfill_unavailable"    # phone→laptop: ranges no longer in the ring
+MSG_BACKFILL_ACK = "backfill_ack"                    # laptop→phone: highest contiguous seq safe to prune
 
 
 # ---------------------------------------------------------------------------
@@ -197,3 +202,20 @@ def iter_records(buf: bytes):
     :func:`decode_datagram`.
     """
     yield from decode_datagram(buf).records
+
+
+def encode_frame_b64(datagram_bytes: bytes) -> str:
+    """Base64-encode one raw telemetry datagram for carriage over the JSON control channel.
+
+    Backfill reuses the exact recorded wire bytes (the phone codec is encode-only), so the
+    laptop decodes them with the ordinary :func:`decode_datagram`. One record per datagram.
+    """
+    return base64.b64encode(datagram_bytes).decode("ascii")
+
+
+def decode_frame_b64(s: str) -> bytes:
+    """Inverse of :func:`encode_frame_b64`. Raises :class:`ProtocolError` on malformed input."""
+    try:
+        return base64.b64decode(s, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise ProtocolError(f"bad base64 frame: {exc}") from exc
