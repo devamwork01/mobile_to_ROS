@@ -120,6 +120,64 @@ class LocalRecorderTest {
     }
 
     @Test
+    fun adoptsExistingSegmentsOnOpen() {
+        val dir = tempDir()
+        // session 1: write records across a couple of segments, then "crash" (just drop the ref).
+        var t = 0L
+        val rec1 = LocalRecorder(dir, deviceId = 4, maxBytes = 10_000_000, maxAgeMs = 600_000,
+            segmentMs = 20, now = { t })
+        val written = (0L until 6L).map { seq -> sample(handle = 2, seq = seq).also { t = seq * 10; rec1.write(it) } }
+        rec1.close()
+        val bytesBefore = rec1.stats().bytesOnDisk
+        assertTrue("session 1 wrote data", bytesBefore > 0)
+
+        // session 2: a NEW recorder over the SAME dir must adopt the old segments.
+        val rec2 = LocalRecorder(dir, deviceId = 99, maxBytes = 10_000_000, maxAgeMs = 600_000,
+            segmentMs = 20, now = { 1000L })
+        // adopted bytes count toward the cap
+        assertTrue("adopted bytesOnDisk ${rec2.stats().bytesOnDisk} vs $bytesBefore",
+            rec2.stats().bytesOnDisk == bytesBefore)
+        // adopted records are readable (verbatim datagrams, deviceId from session 1)
+        val got = rec2.readRawRange(handle = 2, fromSeq = 2, toSeq = 4)
+        val expected = written.filter { it.seq in 2..4 }
+            .map { BinaryPacketCodec.encode(4, listOf(it), BinaryPacketCodec.FLAG_STAGE_TS) }
+        assertTrue("expected 3 adopted datagrams, got ${got.size}", got.size == 3)
+        got.forEachIndexed { i, b -> assertArrayEquals(expected[i], b) }
+
+        // adopted segments prune under a small cap, counting their records as droppedOldest
+        val rec3 = LocalRecorder(dir, deviceId = 1, maxBytes = 100, maxAgeMs = 600_000,
+            segmentMs = 1, now = { 2000L })
+        rec3.write(sample(handle = 2, seq = 100)) // triggers prune of the over-cap adopted segments
+        assertTrue("adopted records pruned -> droppedOldest ${rec3.stats().droppedOldest}",
+            rec3.stats().droppedOldest > 0)
+    }
+
+    @Test
+    fun segmentSeqContinuesPastAdoptedFiles() {
+        val dir = tempDir()
+        // session 1 at a constant clock -> file seg_100_0.ssbin (salt 0)
+        val rec1 = LocalRecorder(dir, deviceId = 1, maxBytes = 10_000_000, maxAgeMs = 600_000,
+            segmentMs = 10_000, now = { 100L })
+        rec1.write(sample(handle = 9, seq = 0))
+        rec1.close()
+        val before = dir.listFiles { f -> f.name.endsWith(".ssbin") }!!.map { it.name }.toSet()
+
+        // session 2 at the SAME clock: a naive salt reset to 0 would reuse seg_100_0 and truncate it.
+        val rec2 = LocalRecorder(dir, deviceId = 1, maxBytes = 10_000_000, maxAgeMs = 600_000,
+            segmentMs = 10_000, now = { 100L })
+        rec2.write(sample(handle = 9, seq = 1))
+        rec2.close()
+        val after = dir.listFiles { f -> f.name.endsWith(".ssbin") }!!.map { it.name }.toSet()
+
+        // the old file survives (not truncated/overwritten) and a NEW distinct file was created
+        assertTrue("old segment must survive, before=$before after=$after", after.containsAll(before))
+        assertTrue("a new distinct segment must be created, before=$before after=$after", after.size > before.size)
+        // both records readable across the two sessions -> no collision/data loss
+        val got = rec2.readRawRange(handle = 9, fromSeq = 0, toSeq = 1)
+        assertTrue("expected both records after re-open, got ${got.size}", got.size == 2)
+    }
+
+    @Test
     fun writeFailureIsCapturedInLastError() {
         val parent = tempDir()
         val notADir = File(parent, "blocked")

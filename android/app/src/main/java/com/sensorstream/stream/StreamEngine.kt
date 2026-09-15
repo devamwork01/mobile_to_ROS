@@ -8,6 +8,7 @@ import com.sensorstream.core.SensorSample
 import com.sensorstream.net.WsControlClient
 import com.sensorstream.sensor.SensorEventSource
 import com.sensorstream.sensor.SensorRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,6 +40,8 @@ data class EngineState(
     val recBytes: Long = 0L, // on-phone recording size on disk
     val recDropped: Long = 0L, // records lost to ring prune (over cap = permanent gap)
     val recOldestAgeMs: Long = 0L, // age of the oldest buffered record
+    val recFanoutDropped: Long = 0L, // samples dropped at the fan-out channel (never reached recorder)
+    val recWriteErrors: Long = 0L, // recorder disk write failures
     val error: String? = null,
 )
 
@@ -81,6 +84,9 @@ class StreamEngine(context: Context) {
     private var recMaxBytes = 150L * 1024 * 1024
     private var recMaxAgeMs = 20L * 60 * 1000
     private val recSegmentMs = 10_000L
+    // Built ONCE per streaming session (first successful connect) and reused across reconnects, so
+    // reconnects never orphan/rebuild it; closed only when the session actually stops.
+    private var recorder: LocalRecorder? = null
 
     /** Configure on-phone lossless recording; call before [start]. */
     fun configureRecording(dir: File, maxBytes: Long, maxAgeMs: Long) {
@@ -121,26 +127,37 @@ class StreamEngine(context: Context) {
             var hb = 0
             var lastBytes = 0L
             while (isActive) {
-                if (_state.value.connected) {
-                    control.sendHeartbeat(hb++)
-                    control.sendStats(
-                        JSONObject()
-                            .put("sent", controller.sentPackets.get())
-                            .put("dropped", controller.droppedSamples.get())
+                // The connection now depends on this loop for heartbeats + stats; a transient
+                // control.send* / stats throw must not silently kill it. Swallow non-cancellation
+                // errors and keep ticking (cancellation still propagates to stop the loop).
+                try {
+                    if (_state.value.connected) {
+                        control.sendHeartbeat(hb++)
+                        control.sendStats(
+                            JSONObject()
+                                .put("sent", controller.sentPackets.get())
+                                .put("dropped", controller.droppedSamples.get())
+                        )
+                    }
+                    val nowBytes = controller.sentBytes.get()
+                    val bps = (nowBytes - lastBytes).coerceAtLeast(0L) // loop cadence is ~1s
+                    lastBytes = nowBytes
+                    val rs = controller.recorderStats()
+                    _state.value = _state.value.copy(
+                        sentPackets = controller.sentPackets.get(),
+                        droppedSamples = controller.droppedSamples.get(),
+                        sendBps = bps,
+                        recBytes = rs?.bytesOnDisk ?: 0L,
+                        recDropped = rs?.droppedOldest ?: 0L,
+                        recOldestAgeMs = rs?.oldestAgeMs ?: 0L,
+                        recFanoutDropped = controller.recorderDropped.get(),
+                        recWriteErrors = rs?.writeErrors ?: 0L,
                     )
+                } catch (c: CancellationException) {
+                    throw c
+                } catch (_: Throwable) {
+                    // transient (e.g. a WS send racing a drop) — retry next tick
                 }
-                val nowBytes = controller.sentBytes.get()
-                val bps = (nowBytes - lastBytes).coerceAtLeast(0L) // loop cadence is ~1s
-                lastBytes = nowBytes
-                val rs = controller.recorderStats()
-                _state.value = _state.value.copy(
-                    sentPackets = controller.sentPackets.get(),
-                    droppedSamples = controller.droppedSamples.get(),
-                    sendBps = bps,
-                    recBytes = rs?.bytesOnDisk ?: 0L,
-                    recDropped = rs?.droppedOldest ?: 0L,
-                    recOldestAgeMs = rs?.oldestAgeMs ?: 0L,
-                )
                 delay(1000)
             }
         }
@@ -195,11 +212,17 @@ class StreamEngine(context: Context) {
             _state.value = _state.value.copy(error = "No sensors selected")
             return
         }
-        val recorder = recordDir?.let {
-            // flags = 0: the recorder's encode must not read tSerializeNs, which the network
-            // drain coroutine mutates concurrently on the same fanned-out sample; serialize-for-
-            // send time is meaningless for an on-phone recording anyway.
-            LocalRecorder(File(it, "onphone"), controller.deviceId, recMaxBytes, recMaxAgeMs, recSegmentMs, flags = 0)
+        // Build the recorder ONCE per session (this runs again on every reconnect via onHelloAck).
+        // Reuse the same instance across reconnects so its files/index/cap accounting persist; a
+        // fresh instance per reconnect would orphan the prior segments (unbounded growth).
+        // deviceId is the laptop-assigned id (set in onHelloAck before this call, on first connect).
+        if (recorder == null) {
+            recorder = recordDir?.let {
+                // flags = 0: the recorder's encode must not read tSerializeNs, which the network
+                // drain coroutine mutates concurrently on the same fanned-out sample; serialize-for-
+                // send time is meaningless for an on-phone recording anyway.
+                LocalRecorder(File(it, "onphone"), controller.deviceId, recMaxBytes, recMaxAgeMs, recSegmentMs, flags = 0)
+            }
         }
         controller.start(host, udpPort, regs, recorder)
         _state.value = _state.value.copy(streaming = true)
@@ -259,10 +282,12 @@ class StreamEngine(context: Context) {
         desired = false
         connGen++  // invalidate in-flight callbacks so nothing reconnects after stop
         controller.onUiSample = null
-        controller.stop()
+        controller.stop()          // flushes the recorder's buffered tail; leaves it open
         control.close()
-        scope?.cancel()
+        scope?.cancel()            // stops the heartbeat loop -> no more recorderStats() reads
         scope = null
+        recorder?.close()          // now safe: StreamEngine owns the recorder's lifecycle
+        recorder = null
         _state.value = _state.value.copy(connecting = false, connected = false, streaming = false)
     }
 }
