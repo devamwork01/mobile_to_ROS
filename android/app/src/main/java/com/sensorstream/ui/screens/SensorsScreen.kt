@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.sp
 import com.sensorstream.core.SensorInfo
 import com.sensorstream.ui.components.SectionHeader
 import com.sensorstream.ui.components.SensorCard
+import com.sensorstream.ui.nav.AppNav
+import com.sensorstream.ui.nav.Screen
 import com.sensorstream.ui.signal.SensorCategory
 import com.sensorstream.ui.signal.SignalCatalog
 import com.sensorstream.ui.theme.Ss
@@ -39,7 +41,7 @@ private fun SensorCategory.title() = when (this) {
 }
 
 @Composable
-fun SensorsScreen(vm: StreamViewModel) {
+fun SensorsScreen(vm: StreamViewModel, nav: AppNav) {
     val sel by vm.sel.collectAsState()
     val c = Ss.colors
 
@@ -71,6 +73,7 @@ fun SensorsScreen(vm: StreamViewModel) {
                     rateText = rate,
                     enabled = enabled,
                     onToggle = { vm.toggle(info.handle) },
+                    onOpen = { nav.go(Screen.Detail(info.handle)) },
                     modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
                 )
             }

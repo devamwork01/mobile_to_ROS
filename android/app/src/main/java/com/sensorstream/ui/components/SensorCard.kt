@@ -2,6 +2,7 @@ package com.sensorstream.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,10 +37,11 @@ fun SensorCard(
     enabled: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpen: (() -> Unit)? = null,
 ) {
     val c = Ss.colors
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = if (onOpen != null) modifier.fillMaxWidth().clickable(onClick = onOpen) else modifier.fillMaxWidth(),
         color = if (enabled) c.accentSoft else c.surface,
         contentColor = c.fg,
         shape = RoundedCornerShape(SsDims.radiusSm),

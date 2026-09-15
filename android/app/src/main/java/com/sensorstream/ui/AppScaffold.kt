@@ -24,6 +24,7 @@ import com.sensorstream.ui.nav.AppNav
 import com.sensorstream.ui.nav.Screen
 import com.sensorstream.ui.nav.rememberAppNav
 import com.sensorstream.ui.screens.HomeScreen
+import com.sensorstream.ui.screens.SensorDetailScreen
 import com.sensorstream.ui.screens.SensorsScreen
 import com.sensorstream.ui.theme.Ss
 import com.sensorstream.vm.StreamViewModel
@@ -78,10 +79,10 @@ fun AppScaffold(vm: StreamViewModel) {
 private fun AppContent(vm: StreamViewModel, nav: AppNav, current: Screen) {
     when (current) {
         is Screen.Home -> HomeScreen(vm, nav)
-        is Screen.Sensors -> SensorsScreen(vm)
+        is Screen.Sensors -> SensorsScreen(vm, nav)
         is Screen.Connection -> Placeholder("Connection", "A polished connection workflow arrives in a later phase.")
         is Screen.Settings -> Placeholder("Settings", "Theme, units and 3D preferences arrive in a later phase.")
-        is Screen.Detail -> Placeholder("Sensor detail", "Per-sensor detail screens arrive in Phase 2.")
+        is Screen.Detail -> SensorDetailScreen(vm, nav, current.handle)
     }
 }
 

@@ -57,35 +57,61 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     private val _discovering = MutableStateFlow(false)
     val discovering: StateFlow<Boolean> = _discovering.asStateFlow()
 
-    // --- Local orientation preview (UI only) ---------------------------------------------------
-    // Drives the hero 3D phone so it responds to device motion whether or not we're streaming. This
-    // is a SEPARATE, read-only rotation-vector listener purely for the visualization: it does not
-    // touch SensorEventSource, the telemetry pipeline, timestamps, fusion, or the network. Started
-    // only while a screen is showing the hero (startOrientationPreview) and stopped on dispose.
+    // --- Local sensor preview (UI only) --------------------------------------------------------
+    // Drives the 3D visualizations + detail values so screens respond to device motion whether or
+    // not we're streaming. These are SEPARATE, read-only listeners purely for the visualization:
+    // they do not touch SensorEventSource, the telemetry pipeline, timestamps, fusion, or the
+    // network. Registrations are ref-counted per sensor type and released when screens dispose.
     private val sensorManager = app.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
-    private val _orientationPreview = MutableStateFlow<FloatArray?>(null)
-    val orientationPreview: StateFlow<FloatArray?> = _orientationPreview.asStateFlow()
-    private var previewRefs = 0
+    private val _preview = MutableStateFlow<Map<Int, FloatArray>>(emptyMap())
+    /** Latest preview values keyed by Android sensor type. */
+    val preview: StateFlow<Map<Int, FloatArray>> = _preview.asStateFlow()
+    private val previewRefs = HashMap<Int, Int>()
+    private val previewAccuracy = HashMap<Int, Int>()
     private val previewListener = object : SensorEventListener {
         override fun onSensorChanged(e: SensorEvent) {
-            if (e.sensor.type == Sensor.TYPE_ROTATION_VECTOR) _orientationPreview.value = e.values.copyOf()
+            _preview.value = _preview.value + (e.sensor.type to e.values.copyOf())
         }
-        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-    }
-
-    /** Ref-counted so multiple screens can share one registration. */
-    fun startOrientationPreview() {
-        if (previewRefs++ == 0) {
-            rotationSensor?.let { sensorManager.registerListener(previewListener, it, SensorManager.SENSOR_DELAY_GAME) }
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+            if (sensor != null) previewAccuracy[sensor.type] = accuracy
         }
     }
 
-    fun stopOrientationPreview() {
-        if (previewRefs > 0 && --previewRefs == 0) {
-            sensorManager.unregisterListener(previewListener)
+    /** Convenience for the hero orientation. */
+    val orientationPreview: StateFlow<FloatArray?> =
+        MutableStateFlow<FloatArray?>(null).also { flow ->
+            viewModelScope.launch { preview.collect { flow.value = it[Sensor.TYPE_ROTATION_VECTOR] } }
+        }.asStateFlow()
+
+    fun previewAccuracyOf(type: Int): Int = previewAccuracy[type] ?: -1
+
+    /** Register read-only preview listeners for [types] (ref-counted). */
+    fun startPreview(vararg types: Int) {
+        for (type in types) {
+            if ((previewRefs[type] ?: 0) == 0) {
+                sensorManager.getDefaultSensor(type)?.let {
+                    sensorManager.registerListener(previewListener, it, SensorManager.SENSOR_DELAY_GAME)
+                }
+            }
+            previewRefs[type] = (previewRefs[type] ?: 0) + 1
         }
     }
+
+    fun stopPreview(vararg types: Int) {
+        for (type in types) {
+            val n = (previewRefs[type] ?: 0)
+            if (n <= 1) {
+                previewRefs.remove(type)
+                sensorManager.getDefaultSensor(type)?.let { sensorManager.unregisterListener(previewListener, it) }
+            } else {
+                previewRefs[type] = n - 1
+            }
+        }
+    }
+
+    /** Back-compat convenience for the Home hero (rotation vector only). */
+    fun startOrientationPreview() = startPreview(Sensor.TYPE_ROTATION_VECTOR)
+    fun stopOrientationPreview() = stopPreview(Sensor.TYPE_ROTATION_VECTOR)
 
     init {
         val defaultTypes = setOf(
