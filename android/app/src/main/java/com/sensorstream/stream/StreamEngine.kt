@@ -36,6 +36,9 @@ data class EngineState(
     val sentPackets: Long = 0L,
     val droppedSamples: Long = 0L,
     val sendBps: Long = 0L, // outgoing telemetry bytes/sec (network load this app puts out)
+    val recBytes: Long = 0L, // on-phone recording size on disk
+    val recDropped: Long = 0L, // records lost to ring prune (over cap = permanent gap)
+    val recOldestAgeMs: Long = 0L, // age of the oldest buffered record
     val error: String? = null,
 )
 
@@ -129,10 +132,14 @@ class StreamEngine(context: Context) {
                 val nowBytes = controller.sentBytes.get()
                 val bps = (nowBytes - lastBytes).coerceAtLeast(0L) // loop cadence is ~1s
                 lastBytes = nowBytes
+                val rs = controller.recorderStats()
                 _state.value = _state.value.copy(
                     sentPackets = controller.sentPackets.get(),
                     droppedSamples = controller.droppedSamples.get(),
                     sendBps = bps,
+                    recBytes = rs?.bytesOnDisk ?: 0L,
+                    recDropped = rs?.droppedOldest ?: 0L,
+                    recOldestAgeMs = rs?.oldestAgeMs ?: 0L,
                 )
                 delay(1000)
             }
