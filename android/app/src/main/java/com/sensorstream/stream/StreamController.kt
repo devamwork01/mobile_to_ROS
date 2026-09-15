@@ -19,29 +19,31 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Ties acquisition to networking through a **bounded channel**: sensor callbacks
- * `trySend` samples (dropping the oldest under backpressure — a full queue never
- * blocks the sensor thread), and a single IO coroutine drains, serializes and
- * sends them. This is the Phase-1 shape of the "sensor event bus -> serialization
- * -> network queue -> UDP" pipeline; coalescing and buffer pooling arrive in Phase 7.
+ * Ties acquisition to networking through bounded channels. Acquisition + recording run for the
+ * whole streaming session ([startSession]/[stopSession]); the UDP sender is a per-connection job
+ * ([connectSender]/[disconnectSender]) so a control-channel drop pauses only the network send while
+ * the sensors keep firing and the recorder keeps writing (seq stays continuous, recording lossless).
+ * The network channel is DROP_OLDEST: during a sender outage nothing drains it, so it sheds the
+ * exact samples Phase-2B backfill recovers, while the recorder channel (SUSPEND) keeps all of them.
  */
 class StreamController(sm: SensorManager) {
 
     private val source = SensorEventSource(sm)
     private val sender = UdpTelemetrySender()
 
-    private var scope: CoroutineScope? = null
-    private var channel: Channel<SensorSample>? = null
+    private var sessionScope: CoroutineScope? = null
+    private var channel: Channel<SensorSample>? = null   // network path (DROP_OLDEST, best-effort)
     // Recorder is OWNED by StreamEngine (built once per session, kept across reconnects); the
-    // controller only holds a ref to fan out to it and never closes it. @Volatile: written on start
-    // (WS callback thread), read by recorderStats() on the heartbeat thread.
+    // controller only holds a ref to fan out to it and never closes it. @Volatile: written on
+    // startSession (WS callback thread), read by recorderStats() on the heartbeat thread.
     @Volatile private var recorder: LocalRecorder? = null
-    private var recCh: Channel<SensorSample>? = null
+    private var recCh: Channel<SensorSample>? = null      // recorder path (SUSPEND, lossless)
     private var recDrainJob: Job? = null
+    private var senderJob: Job? = null
 
     val sentPackets = AtomicLong(0)
     val sentBytes = AtomicLong(0)
-    val droppedSamples = AtomicLong(0)
+    val droppedSamples = AtomicLong(0)   // network-channel drops (recovered later via backfill)
     // Samples dropped at the fan-out boundary because the recorder channel was full (should stay 0).
     // Distinct from LocalRecorder.Stats.droppedOldest (ring prune) — this is upstream of the recorder.
     val recorderDropped = AtomicLong(0)
@@ -50,8 +52,11 @@ class StreamController(sm: SensorManager) {
     @Volatile var onUiSample: ((SensorSample) -> Unit)? = null
     @Volatile var onError: ((Throwable) -> Unit)? = null
 
-    fun start(host: String, port: Int, regs: List<SensorEventSource.Reg>, recorder: LocalRecorder? = null) {
-        stop()
+    /** Start acquisition + recording for the whole session. The sender is attached separately via
+     *  [connectSender] and re-attached on every reconnect, so acquisition never restarts mid-session
+     *  (per-sensor seq stays continuous) and recording continues across control-channel outages. */
+    fun startSession(regs: List<SensorEventSource.Reg>, recorder: LocalRecorder?) {
+        stopSession()
         sentPackets.set(0)
         sentBytes.set(0)
         droppedSamples.set(0)
@@ -63,7 +68,7 @@ class StreamController(sm: SensorManager) {
         val rc = Channel<SensorSample>(capacity = 16384, onBufferOverflow = BufferOverflow.SUSPEND)
         recCh = rc
         val s = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        scope = s
+        sessionScope = s
 
         source.onSample = { sample ->
             if (ch.trySend(sample).isFailure) droppedSamples.incrementAndGet()
@@ -75,7 +80,16 @@ class StreamController(sm: SensorManager) {
             for (sample in rc) recorder?.write(sample)
         }
 
-        s.launch {
+        source.start(regs)
+    }
+
+    /** (Re)attach the UDP sender. Call on every (re)connect; drains the shared network channel.
+     *  Cancels any prior sender first, so it is safe to call repeatedly across reconnects. */
+    fun connectSender(host: String, port: Int) {
+        val s = sessionScope ?: return
+        disconnectSender()
+        val ch = channel ?: return
+        senderJob = s.launch {
             try {
                 sender.connect(host, port)
             } catch (t: Throwable) {
@@ -98,25 +112,31 @@ class StreamController(sm: SensorManager) {
                 }
             }
         }
-
-        source.start(regs)
     }
 
-    /** Live-reconfigure the streamed sensor set without dropping the UDP sender. */
+    /** Pause the UDP sender only; acquisition + recorder keep running (lossless during an outage). */
+    fun disconnectSender() {
+        senderJob?.cancel()
+        senderJob = null
+        sender.close()
+    }
+
+    /** Live-reconfigure the streamed sensor set without dropping acquisition. */
     fun updateRegs(regs: List<SensorEventSource.Reg>) {
-        if (scope == null) return
+        if (sessionScope == null) return
         source.updateRegs(regs)
     }
 
-    fun stop() {
+    /** Tear down the whole session. The recorder is owned + closed by StreamEngine. */
+    fun stopSession() {
         source.onSample = null
         source.stop()
+        disconnectSender()
         channel?.close()
         channel = null
         // Flush the recorder's buffered tail before tearing down the scope: draining a closed
         // channel completes quickly; the timeout only guards against a stuck write() (no tail loss
-        // on a normal stop/reconnect). The recorder itself is owned + closed by StreamEngine, so
-        // it stays open here — a reconnect reuses the same instance across controller.start().
+        // on a normal stop). The recorder itself is owned + closed by StreamEngine.
         recCh?.close()
         recCh = null
         val drain = recDrainJob
@@ -124,9 +144,9 @@ class StreamController(sm: SensorManager) {
         // only guards a stuck write() and keeps the main-thread ACTION_STOP block well under ANR.
         if (drain != null) runBlocking { withTimeoutOrNull(500) { drain.join() } }
         recDrainJob = null
-        scope?.cancel()
-        scope = null
-        sender.close()
+        sessionScope?.cancel()
+        sessionScope = null
+        recorder = null
     }
 
     fun recorderStats(): LocalRecorder.Stats? = recorder?.stats()

@@ -90,6 +90,9 @@ class StreamEngine(context: Context) {
     // Built ONCE per streaming session (first successful connect) and reused across reconnects, so
     // reconnects never orphan/rebuild it; closed only when the session actually stops.
     private var recorder: LocalRecorder? = null
+    // True once acquisition+recording started this streaming session; reconnects only re-attach
+    // the UDP sender, they do not restart acquisition (keeps seq continuous + recording lossless).
+    private var sessionStarted = false
 
     /** Configure on-phone lossless recording; call before [start]. */
     fun configureRecording(dir: File, maxBytes: Long, maxAgeMs: Long) {
@@ -189,12 +192,15 @@ class StreamEngine(context: Context) {
         })
     }
 
-    // Control channel dropped: stop telemetry and, if still desired, reconnect with backoff.
+    // Control channel dropped: pause ONLY the UDP sender and, if still desired, reconnect with
+    // backoff. Acquisition + recording keep running across the outage (lossless; seq continuous).
     private fun onDropped() {
-        controller.stop()
-        _state.value = _state.value.copy(connected = false, streaming = false)
+        controller.disconnectSender()
+        // streaming stays true — the recorder is still capturing; only network delivery paused.
+        _state.value = _state.value.copy(connected = false)
         if (!desired) {
-            _state.value = _state.value.copy(connecting = false)
+            _state.value = _state.value.copy(connecting = false, streaming = false)
+            controller.stopSession()
             return
         }
         val attempt = reconnectAttempts.coerceAtMost(4)
@@ -215,19 +221,23 @@ class StreamEngine(context: Context) {
             _state.value = _state.value.copy(error = "No sensors selected")
             return
         }
-        // Build the recorder ONCE per session (this runs again on every reconnect via onHelloAck).
-        // Reuse the same instance across reconnects so its files/index/cap accounting persist; a
-        // fresh instance per reconnect would orphan the prior segments (unbounded growth).
-        // deviceId is the laptop-assigned id (set in onHelloAck before this call, on first connect).
-        if (recorder == null) {
-            recorder = recordDir?.let {
-                // flags = 0: the recorder's encode must not read tSerializeNs, which the network
-                // drain coroutine mutates concurrently on the same fanned-out sample; serialize-for-
-                // send time is meaningless for an on-phone recording anyway.
-                LocalRecorder(File(it, "onphone"), controller.deviceId, recMaxBytes, recMaxAgeMs, recSegmentMs, flags = 0)
+        // startTelemetry runs on every onHelloAck (first connect AND every reconnect). Build the
+        // recorder + start acquisition ONCE per session; on reconnect only re-attach the sender so
+        // acquisition never restarts (per-sensor seq stays continuous) and the recorder keeps its
+        // files/index/cap accounting (a rebuild would orphan prior segments -> unbounded growth).
+        if (!sessionStarted) {
+            if (recorder == null) {
+                recorder = recordDir?.let {
+                    // flags = 0: the recorder's encode must not read tSerializeNs, which the sender
+                    // coroutine mutates concurrently on the same fanned-out sample; serialize-for-
+                    // send time is meaningless for an on-phone recording anyway.
+                    LocalRecorder(File(it, "onphone"), controller.deviceId, recMaxBytes, recMaxAgeMs, recSegmentMs, flags = 0)
+                }
             }
+            controller.startSession(regs, recorder)
+            sessionStarted = true
         }
-        controller.start(host, udpPort, regs, recorder)
+        controller.connectSender(host, udpPort)
         _state.value = _state.value.copy(streaming = true)
         control.sendActive(regs.map { it.handle })
     }
@@ -286,12 +296,13 @@ class StreamEngine(context: Context) {
         desired = false
         connGen++  // invalidate in-flight callbacks so nothing reconnects after stop
         controller.onUiSample = null
-        controller.stop()          // flushes the recorder's buffered tail; leaves it open
+        controller.stopSession()   // flushes the recorder's buffered tail; leaves it open
         control.close()
         scope?.cancel()            // stops the heartbeat loop -> no more recorderStats() reads
         scope = null
         recorder?.close()          // now safe: StreamEngine owns the recorder's lifecycle
         recorder = null
+        sessionStarted = false
         _state.value = _state.value.copy(connecting = false, connected = false, streaming = false)
     }
 }
