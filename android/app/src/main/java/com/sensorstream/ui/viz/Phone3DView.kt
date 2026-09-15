@@ -44,6 +44,7 @@ fun Phone3DView(
     sensorVectorColor: Color? = null,
     showAxes: Boolean = true,
     showLabels: Boolean = true,
+    showWorldFrame: Boolean = false,
 ) {
     val colors = Ss.colors
     Canvas(modifier) {
@@ -56,6 +57,27 @@ fun Phone3DView(
 
         // Contact shadow beneath the phone (soft, elliptical).
         drawOvalShadow(cx, cy + unit * 0.95f, unit * 1.1f, unit * 0.28f, colors.isDark)
+
+        // World frame (fixed, does NOT rotate with the phone): E->+X, N->-Z, U->+Y in render space.
+        // Drawn faint + dashed-ish behind the phone so it reads as the reference ground truth.
+        if (showWorldFrame) {
+            val wl = unit * 1.45f
+            val worldCol = colors.muted.copy(alpha = 0.55f)
+            fun wep(v: Vec3): Pair<Float, Float> {
+                val (dx, dy) = Projection.project(v, wl); return Pair(cx + dx, cy - dy)
+            }
+            drawAxis(cx, cy, wep(Vec3(0f, 1f, 0f)), worldCol, thick = 2.5f)   // Up
+            drawAxis(cx, cy, wep(Vec3(1f, 0f, 0f)), worldCol, thick = 2.5f)   // East
+            drawAxis(cx, cy, wep(Vec3(0f, 0f, -1f)), worldCol, thick = 2.5f)  // North
+            if (showLabels) {
+                fun wlab(v: Vec3): Pair<Float, Float> {
+                    val (dx, dy) = Projection.project(v, unit * 1.62f); return Pair(cx + dx, cy - dy)
+                }
+                drawAxisLabel("U", wlab(Vec3(0f, 1f, 0f)), worldCol)
+                drawAxisLabel("E", wlab(Vec3(1f, 0f, 0f)), worldCol)
+                drawAxisLabel("N", wlab(Vec3(0f, 0f, -1f)), worldCol)
+            }
+        }
 
         // Phone body: project its 4 corners so it tilts with orientation.
         val hw = unit * 0.42f // half width

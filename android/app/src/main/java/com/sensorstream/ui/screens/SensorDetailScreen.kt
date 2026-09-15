@@ -18,10 +18,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,7 +70,14 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
     val orientation = previews[Sensor.TYPE_ROTATION_VECTOR]
     val axisColors = listOf(c.axisX, c.axisY, c.axisZ)
     val isVector = sig.category == SensorCategory.MOTION || sig.category == SensorCategory.MAGNETIC
+    val isOrientation = sig.category == SensorCategory.ORIENTATION
     val sensorVec = if (isVector && values != null && values.size >= 3) Vec3(values[0], values[1], values[2]) else null
+
+    // Orientation-screen view controls.
+    var showBody by remember { mutableStateOf(true) }
+    var showWorld by remember { mutableStateOf(true) }
+    var showLabels by remember { mutableStateOf(true) }
+    var quatMode by remember { mutableStateOf(false) } // false = Euler, true = Quaternion
 
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
@@ -95,18 +107,40 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             rotationVector = orientation,
             sensorVector = sensorVec,
             sensorVectorColor = c.accent,
+            showAxes = if (isOrientation) showBody else true,
+            showLabels = if (isOrientation) showLabels else true,
+            showWorldFrame = isOrientation && showWorld,
             modifier = Modifier.fillMaxWidth().aspectRatio(1.05f),
         )
 
         // Values
-        if (sig.category == SensorCategory.ORIENTATION) {
-            val r = Projection.rotationVectorToMatrix(orientation ?: floatArrayOf(0f, 0f, 0f))
-            val (roll, pitch, yaw) = Projection.eulerDeg(r)
+        if (isOrientation) {
+            // View controls: body/world/labels toggles.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToggleChip("Body", showBody) { showBody = !showBody }
+                ToggleChip("World", showWorld) { showWorld = !showWorld }
+                ToggleChip("Labels", showLabels) { showLabels = !showLabels }
+            }
+            // Euler / Quaternion selector.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToggleChip("Euler Angles", !quatMode) { quatMode = false }
+                ToggleChip("Quaternion", quatMode) { quatMode = true }
+            }
             SsCard(Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SignalValue("Roll", Fmt.signed(roll, 1), "°", c.axisX)
-                    SignalValue("Pitch", Fmt.signed(pitch, 1), "°", c.axisY)
-                    SignalValue("Yaw", Fmt.signed(yaw, 1), "°", c.axisZ)
+                    if (!quatMode) {
+                        val r = Projection.rotationVectorToMatrix(orientation ?: floatArrayOf(0f, 0f, 0f))
+                        val (roll, pitch, yaw) = Projection.eulerDeg(r)
+                        SignalValue("Roll", Fmt.signed(roll, 1), "°", c.axisX)
+                        SignalValue("Pitch", Fmt.signed(pitch, 1), "°", c.axisY)
+                        SignalValue("Yaw", Fmt.value(yaw, 1), "°", c.axisZ)
+                    } else {
+                        val q = Projection.quatFromRotationVector(orientation ?: floatArrayOf(0f, 0f, 0f))
+                        SignalValue("X", Fmt.signed(q[0], 4), "", c.axisX)
+                        SignalValue("Y", Fmt.signed(q[1], 4), "", c.axisY)
+                        SignalValue("Z", Fmt.signed(q[2], 4), "", c.axisZ)
+                        SignalValue("W", Fmt.signed(q[3], 4), "")
+                    }
                 }
             }
         } else if (values != null && values.isNotEmpty()) {
@@ -153,6 +187,22 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             }
         }
     }
+}
+
+@Composable
+private fun ToggleChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val c = Ss.colors
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, fontSize = 13.sp) },
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = c.surface,
+            labelColor = c.muted,
+            selectedContainerColor = c.accentSoft,
+            selectedLabelColor = c.accent,
+        ),
+    )
 }
 
 @Composable
