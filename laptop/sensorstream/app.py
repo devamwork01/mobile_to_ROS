@@ -21,7 +21,9 @@ from typing import Optional
 
 from . import protocol as p
 from . import recordings
+from .backfill import GapTracker
 from .control import ControlServer
+from .reconcile import Reconciler
 from .dashboard import DashboardServer
 from .discovery import Advertiser, BEACON_PORT
 from .logging_sink import Recorder
@@ -96,17 +98,47 @@ async def run(args: argparse.Namespace) -> None:
     recorder = Recorder()
     sync = SyncTracker()
 
+    # Backfill (Phase 2B): detect per-(client,handle) seq gaps on the live stream and, after a grace
+    # window, request the missing datagrams from the phone over the reliable control channel. Merged
+    # datagrams are appended to the session recording (deduped on read). `control` is referenced late
+    # by send_resend (assigned below, before any tick fires).
+    tracker = GapTracker()
+
+    def _append_backfill(dg, t_recv_ns):
+        if recorder.is_recording:
+            recorder.on_datagram(dg, t_recv_ns)
+
+    reconciler = Reconciler(
+        tracker,
+        send_resend=lambda d, h, a, b: asyncio.create_task(control.send_resend(d, h, a, b)),
+        on_backfilled=_append_backfill,
+    )
+
     def on_dg(dg, addr, t_recv_ns):
         sink.on_datagram(dg, addr, t_recv_ns)
         sync.observe(dg, t_recv_ns)
+        reconciler.on_live(dg.device_id, dg, t_recv_ns)
         if recorder.is_recording:
             recorder.on_datagram(dg, t_recv_ns)
 
     transport, proto = await start_receiver(args.udp_host, args.udp_port, on_dg)
     udp_port = transport.get_extra_info("socket").getsockname()[1]
 
-    # Control channel: phones connect to ws://host:ws_port/phone
-    control = ControlServer(udp_port, on_event=dash.broadcast)
+    # Control channel: phones connect to ws://host:ws_port/phone. Backfill replies and hellos are
+    # routed to the reconciler; everything else is forwarded to the browser.
+    def on_control_event(ev: dict) -> None:
+        kind = ev.get("kind")
+        if kind == "phone_connected":
+            reconciler.set_device_client(ev["device_id"], ev.get("client_id", ""))
+        elif kind == "backfill":
+            reconciler.on_backfill(ev["device_id"], ev["handle"], ev["frames"])
+            return   # raw frames are not browser-bound
+        elif kind == "backfill_unavailable":
+            reconciler.on_unavailable(ev["device_id"], ev["handle"], ev["from"], ev["to"])
+            return
+        dash.broadcast(ev)
+
+    control = ControlServer(udp_port, on_event=on_control_event)
     dash.control_handler = control.handle
 
     def record_meta() -> Optional[dict]:
@@ -220,6 +252,8 @@ async def run(args: argparse.Namespace) -> None:
                     "ui_hz": args.ui_hz,
                     "ui_records_in": sink.records_in,
                     "ui_records_out": sink.records_out,
+                    "backfilled": reconciler.stats()["backfilled"],
+                    "permanent_gaps": reconciler.stats()["permanent"],
                 }
             )
             dash.broadcast(sync.snapshot())
@@ -230,7 +264,19 @@ async def run(args: argparse.Namespace) -> None:
                 advertiser.send_beacon()
             await asyncio.sleep(1.0)
 
-    tasks = [asyncio.create_task(stats_task())]
+    async def reconcile_task() -> None:
+        # Tick often enough to request gaps promptly once past the grace window; ACK periodically
+        # so the phone can prune what the laptop has durably received.
+        n = 0
+        while True:
+            await asyncio.sleep(0.25)
+            await reconciler.tick(time.monotonic_ns())
+            n += 1
+            if n % 8 == 0:  # ~every 2s
+                for dev, upto in reconciler.acks():
+                    await control.send_backfill_ack(dev, upto)
+
+    tasks = [asyncio.create_task(stats_task()), asyncio.create_task(reconcile_task())]
     if advertiser is not None:
         tasks.append(asyncio.create_task(beacon_task()))
     if args.selftest:
