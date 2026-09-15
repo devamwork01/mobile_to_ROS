@@ -23,6 +23,7 @@ import com.sensorstream.ui.components.SsIcons
 import com.sensorstream.ui.nav.AppNav
 import com.sensorstream.ui.nav.Screen
 import com.sensorstream.ui.nav.rememberAppNav
+import com.sensorstream.ui.screens.ConnectionScreen
 import com.sensorstream.ui.screens.HomeScreen
 import com.sensorstream.ui.screens.SensorDetailScreen
 import com.sensorstream.ui.screens.SensorsScreen
@@ -80,7 +81,7 @@ private fun AppContent(vm: StreamViewModel, nav: AppNav, current: Screen) {
     when (current) {
         is Screen.Home -> HomeScreen(vm, nav)
         is Screen.Sensors -> SensorsScreen(vm, nav)
-        is Screen.Connection -> Placeholder("Connection", "A polished connection workflow arrives in a later phase.")
+        is Screen.Connection -> ConnectionScreen(vm)
         is Screen.Settings -> Placeholder("Settings", "Theme, units and 3D preferences arrive in a later phase.")
         is Screen.Detail -> SensorDetailScreen(vm, nav, current.handle)
     }
