@@ -142,13 +142,24 @@ private fun ConnectionCard(vm: StreamViewModel, engine: com.sensorstream.stream.
                 color = if (engine.streaming) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "on-phone rec  %s  ·  buffered %ds  ·  dropped %d".format(
+                // "pruned" = records dropped by the ring when over the size/age cap (permanent gap).
+                "on-phone rec  %s  ·  buffered %ds  ·  pruned %d".format(
                     fmtBytes(engine.recBytes), engine.recOldestAgeMs / 1000, engine.recDropped
                 ),
                 fontFamily = FontFamily.Monospace,
                 style = MaterialTheme.typography.bodySmall,
                 color = if (engine.recDropped > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (engine.recFanoutDropped > 0 || engine.recWriteErrors > 0) {
+                Text(
+                    // fan-out = samples dropped before reaching the recorder (channel full);
+                    // write-err = recorder disk write failures. Both distinct from "pruned".
+                    "rec drops  fan-out %d  ·  write-err %d".format(engine.recFanoutDropped, engine.recWriteErrors),
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             engine.error?.let { Text("Error: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         }
     }

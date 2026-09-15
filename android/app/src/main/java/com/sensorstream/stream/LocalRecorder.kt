@@ -14,6 +14,12 @@ import java.nio.ByteOrder
  * later backfill can resend them verbatim. Context-free for JVM testability; callers must drive
  * write() from an IO thread, never the sensor callback.
  *
+ * Lifecycle: construct ONCE per streaming session and keep it across WS reconnects (a fresh
+ * instance per reconnect would orphan the previous instance's segment files — uncounted and never
+ * pruned — growing storage without bound). On construction it ADOPTS any pre-existing seg_*.ssbin
+ * in [dir] (from earlier reconnects this session, or a prior process) into [segments] + the
+ * (handle,seq) index, so they count toward the cap, get pruned, and can be served by readRawRange.
+ *
  * Thread-safety: write() runs on the single IO drain coroutine, but stats() is polled from the
  * heartbeat coroutine (another thread) and close() runs on the stop() caller's thread. The public
  * methods are therefore [Synchronized] on the instance monitor so a stats() poll never iterates
@@ -33,10 +39,18 @@ class LocalRecorder(
     companion object {
         val MAGIC: ByteArray = "SSLOG1\n".toByteArray(Charsets.US_ASCII)
         private const val FRAME_HEADER = 12 // i64 + u32
+        // Fixed byte offsets of (handle, seq) inside a datagram, so segments can be adopted
+        // without a decoder: packet header is HEADER_SIZE bytes, then the record's fixed fields
+        // start with sensorType(i32); handle(u16) and seq(u32) follow. Stable for flags=0 and
+        // FLAG_STAGE_TS alike (stage timestamps are appended at the record end).
+        private const val OFF_HANDLE = BinaryPacketCodec.HEADER_SIZE + 4       // 14
+        private const val OFF_SEQ = BinaryPacketCodec.HEADER_SIZE + 4 + 2      // 16
+        private const val MIN_DATAGRAM = BinaryPacketCodec.HEADER_SIZE + BinaryPacketCodec.REC_FIXED_SIZE // 30
     }
 
     private class Segment(val file: File, val startMs: Long) {
-        val out = BufferedOutputStream(FileOutputStream(file))
+        // Non-null only for the writable current segment; adopted/closed segments carry null.
+        var out: BufferedOutputStream? = null
         var bytes = 0L
         // (handle -> list of (seq, datagramOffset, datagramLen)) for readRawRange
         val index = HashMap<Int, ArrayList<Triple<Long, Long, Int>>>()
@@ -58,6 +72,7 @@ class LocalRecorder(
 
     init {
         dir.mkdirs()
+        adopt()
     }
 
     @Synchronized
@@ -69,7 +84,8 @@ class LocalRecorder(
             val header = ByteBuffer.allocate(FRAME_HEADER).order(ByteOrder.LITTLE_ENDIAN)
             header.putLong(sample.tAcquireNs); header.putInt(datagram.size)
             val datagramOffset = seg.bytes + FRAME_HEADER
-            seg.out.write(header.array()); seg.out.write(datagram)
+            val o = seg.out!!
+            o.write(header.array()); o.write(datagram)
             seg.bytes += FRAME_HEADER + datagram.size
             seg.index.getOrPut(sample.handle) { ArrayList() }
                 .add(Triple(sample.seq, datagramOffset, datagram.size))
@@ -88,7 +104,7 @@ class LocalRecorder(
             if (!overSize && !overAge) break
             // count records in the segment as dropped, then delete it
             droppedOldest += oldest.index.values.sumOf { it.size.toLong() }
-            runCatching { oldest.out.close() }
+            runCatching { oldest.out?.close() }
             oldest.file.delete()
             segments.removeAt(0)
         }
@@ -120,7 +136,7 @@ class LocalRecorder(
     }
 
     private fun rotate() {
-        current?.out?.flush(); current?.out?.close()
+        current?.let { it.out?.flush(); it.out?.close(); it.out = null }
         openSegment()
     }
 
@@ -128,19 +144,69 @@ class LocalRecorder(
         val ts = now()
         // salt with a monotonic counter: a constant/coarse clock can otherwise produce the
         // same filename across rotations, causing a later segment's FileOutputStream to
-        // truncate a still-referenced earlier segment's file.
+        // truncate a still-referenced earlier segment's file. Also advanced past adopted salts.
         val seg = Segment(File(dir, "seg_${ts}_${segmentSeq++}.ssbin"), ts)
-        seg.out.write(MAGIC)
+        seg.out = BufferedOutputStream(FileOutputStream(seg.file))
+        seg.out!!.write(MAGIC)
         seg.bytes = MAGIC.size.toLong()
         current = seg
         segments.add(seg)
         return seg
     }
 
+    /**
+     * Adopt pre-existing seg_*.ssbin so their records count toward the cap and can be served.
+     * They are read-only (out == null); the next write() opens a fresh segment rather than
+     * appending. [segmentSeq] is advanced past the highest adopted salt so new filenames can't
+     * collide with (and truncate) an adopted file.
+     */
+    private fun adopt() {
+        val files = dir.listFiles { f -> f.isFile && f.name.startsWith("seg_") && f.name.endsWith(".ssbin") }
+            ?: return
+        // filename shape: seg_<ts>_<salt>.ssbin — order oldest-first (by ts then salt) for prune.
+        val parsed = files.mapNotNull { f ->
+            val core = f.name.removePrefix("seg_").removeSuffix(".ssbin")
+            val us = core.lastIndexOf('_')
+            if (us <= 0) return@mapNotNull null
+            val ts = core.substring(0, us).toLongOrNull() ?: return@mapNotNull null
+            val salt = core.substring(us + 1).toLongOrNull() ?: return@mapNotNull null
+            Triple(f, ts, salt)
+        }.sortedWith(compareBy({ it.second }, { it.third }))
+
+        var maxSalt = -1L
+        for ((file, ts, salt) in parsed) {
+            val seg = scanSegment(file, ts) ?: continue
+            segments.add(seg)
+            if (salt > maxSalt) maxSalt = salt
+        }
+        if (maxSalt >= 0) segmentSeq = maxSalt + 1
+    }
+
+    /** Rebuild a Segment's index from an on-disk .ssbin by reading frame headers + (handle,seq). */
+    private fun scanSegment(file: File, startMs: Long): Segment? {
+        val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
+        if (bytes.size < MAGIC.size) return null
+        for (i in MAGIC.indices) if (bytes[i] != MAGIC[i]) return null // not our file
+        val seg = Segment(file, startMs) // out stays null: adopted segments are read-only
+        val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        var pos = MAGIC.size
+        while (pos + FRAME_HEADER <= bytes.size) {
+            val dlen = bb.getInt(pos + 8) // datagramLen u32 (frame header = tAcquireNs i64, dlen u32)
+            val end = pos + FRAME_HEADER + dlen
+            if (dlen < MIN_DATAGRAM || end > bytes.size) break // torn/incomplete final frame: stop
+            val datagramStart = pos + FRAME_HEADER
+            val handle = bb.getShort(datagramStart + OFF_HANDLE).toInt() and 0xFFFF
+            val seq = bb.getInt(datagramStart + OFF_SEQ).toLong() and 0xFFFFFFFFL
+            seg.index.getOrPut(handle) { ArrayList() }.add(Triple(seq, datagramStart.toLong(), dlen))
+            pos = end
+        }
+        seg.bytes = pos.toLong() // valid bytes consumed (excludes any torn tail)
+        return seg
+    }
+
     @Synchronized
     fun close() {
-        current?.out?.flush()
-        current?.out?.close()
+        current?.let { it.out?.flush(); it.out?.close(); it.out = null }
         current = null
     }
 }
