@@ -3,6 +3,7 @@ package com.sensorstream.ui.screens
 import android.hardware.Sensor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +47,7 @@ import com.sensorstream.ui.signal.SignalCatalog
 import com.sensorstream.ui.theme.Ss
 import com.sensorstream.ui.theme.SsDims
 import com.sensorstream.ui.theme.SsType
+import com.sensorstream.ui.viz.EnvironmentalHero
 import com.sensorstream.ui.viz.MiniSignalGraph
 import com.sensorstream.ui.viz.Phone3DView
 import com.sensorstream.ui.viz.Projection
@@ -60,6 +62,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
     val c = Ss.colors
     val state by vm.engineState.collectAsState()
     val previews by vm.preview.collectAsState()
+    val sel by vm.sel.collectAsState()
 
     DisposableEffect(type) {
         vm.startPreview(type, Sensor.TYPE_ROTATION_VECTOR)
@@ -71,6 +74,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
     val axisColors = listOf(c.axisX, c.axisY, c.axisZ)
     val isVector = sig.category == SensorCategory.MOTION || sig.category == SensorCategory.MAGNETIC
     val isOrientation = sig.category == SensorCategory.ORIENTATION
+    val isEnv = sig.category == SensorCategory.ENVIRONMENT || sig.category == SensorCategory.PROXIMITY
     val sensorVec = if (isVector && values != null && values.size >= 3) Vec3(values[0], values[1], values[2]) else null
 
     // Orientation-screen view controls.
@@ -102,16 +106,25 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             SamplingRateBadge(if (values != null) "live" else "—")
         }
 
-        // Hero 3D
-        Phone3DView(
-            rotationVector = orientation,
-            sensorVector = sensorVec,
-            sensorVectorColor = c.accent,
-            showAxes = if (isOrientation) showBody else true,
-            showLabels = if (isOrientation) showLabels else true,
-            showWorldFrame = isOrientation && showWorld,
-            modifier = Modifier.fillMaxWidth().aspectRatio(1.05f),
-        )
+        // Hero: 3D phone for motion/orientation/magnetic; gauge/big-value for environmental.
+        if (isEnv) {
+            EnvironmentalHero(
+                value = values?.getOrNull(0),
+                unit = sig.unit,
+                kind = sig.icon,
+                modifier = Modifier.fillMaxWidth().aspectRatio(1.15f),
+            )
+        } else {
+            Phone3DView(
+                rotationVector = orientation,
+                sensorVector = sensorVec,
+                sensorVectorColor = c.accent,
+                showAxes = if (isOrientation) showBody else true,
+                showLabels = if (isOrientation) showLabels else true,
+                showWorldFrame = isOrientation && showWorld,
+                modifier = Modifier.fillMaxWidth().aspectRatio(1.05f),
+            )
+        }
 
         // Values
         if (isOrientation) {
@@ -171,6 +184,21 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             SectionHeader("Real-time")
             SsCard(Modifier.fillMaxWidth()) {
                 MiniSignalGraph(values = values, colors = axisColors, modifier = Modifier.fillMaxWidth().aspectRatio(2.2f))
+            }
+        }
+
+        // Sampling rate — only rates the device can actually deliver (period >= minDelayUs).
+        SectionHeader("Sampling Rate")
+        val currentPeriod = sel.periodByHandle[handle] ?: 10_000
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            vm.presets.forEach { (label, periodUs) ->
+                val supported = periodUs == 0 || info.minDelayUs <= 0 || periodUs >= info.minDelayUs
+                if (supported) {
+                    ToggleChip(label, currentPeriod == periodUs) { vm.setPeriod(handle, periodUs) }
+                }
             }
         }
 
