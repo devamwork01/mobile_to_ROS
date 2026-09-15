@@ -23,6 +23,7 @@ import com.sensorstream.ui.components.SsIcons
 import com.sensorstream.ui.nav.AppNav
 import com.sensorstream.ui.nav.Screen
 import com.sensorstream.ui.nav.rememberAppNav
+import com.sensorstream.ui.screens.HomeScreen
 import com.sensorstream.ui.theme.Ss
 import com.sensorstream.vm.StreamViewModel
 
@@ -75,7 +76,7 @@ fun AppScaffold(vm: StreamViewModel) {
 @Composable
 private fun AppContent(vm: StreamViewModel, nav: AppNav, current: Screen) {
     when (current) {
-        is Screen.Home -> Placeholder("Home", "Hero dashboard arrives next.")
+        is Screen.Home -> HomeScreen(vm, nav)
         is Screen.Sensors -> Placeholder("Sensors", "Sensor selection arrives next.")
         is Screen.Connection -> Placeholder("Connection", "A polished connection workflow arrives in a later phase.")
         is Screen.Settings -> Placeholder("Settings", "Theme, units and 3D preferences arrive in a later phase.")
