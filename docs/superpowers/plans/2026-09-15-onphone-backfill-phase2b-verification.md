@@ -10,7 +10,25 @@ Date: 2026-09-15. Device: Galaxy S25 Ultra (`RZGL31H3N4V`). Branch `feat/onphone
   - `test_reconciler.py` (4) — **full round trip**: detect gap → emit resend → merge backfill → resolve; no double-request while in-flight; unavailable→permanent; **client survives device_id change** (gap tracked under a client is requested from its new device_id after reconnect).
   - `test_backfill_protocol.py` (3) — message constants + base64 frame round-trip.
 
-## On-device — live path healthy, backfill trigger NOT yet demonstrated
+## On-device e2e — PASS (backfill proven end-to-end, 2026-09-15)
+
+Deterministic loss induced via an **elevated Windows firewall block of inbound UDP 5005** while the
+WS control channel (TCP 8081) stayed open, streaming 4 sensors @116 Hz with `--record`:
+
+1. **Loss confirmed:** during the block the server packet count froze at 60119 for ~16 s (telemetry
+   genuinely dropped); the phone kept recording to its ring (control channel alive, no reconnect).
+2. **Backfill fired on unblock:** `backfilled` jumped 0 → **42767** (laptop), `permanent_gaps = 0`;
+   the phone status card showed **`backfill served 126780`**, `id=0x00000001` (same device_id — pure
+   within-session backfill, no reconnect).
+3. **Recording gap-free:** per-handle seq `0..N` with **MISSING=0** for all 4 handles.
+4. **Merge smoking gun:** on disk the backfilled frames are appended out-of-order — after live seq
+   27840 a block starting seq 16171 (~11669 samples, the outage window) was appended; dedup-on-read
+   collapses this to the gap-free timeline above.
+
+All spec §12 acceptance criteria met: gap-free after loss; live UDP unaffected (backfill rode the WS);
+permanent gaps counted (0 here, nothing aged out of the ring).
+
+## (Historical) first attempt — loss could not be induced
 - Installed the 2B build, streamed 4 sensors @116 Hz with `--record`. Live streaming, on-phone recording, and the reconciler wiring ran with **no crashes/regressions**; server started clean with all backfill wiring active.
 - Recording read back **gap-free** (per-handle seq `0..N`, MISSING=0 across ~39k samples/handle).
 - **BUT** the authoritative server counter showed **`backfilled: 0`** — i.e. no gap was ever detected, so the backfill request/serve/merge path was **not exercised end-to-end**. The recording was gap-free because no receiver-visible loss occurred, not because backfill repaired it.
