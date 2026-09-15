@@ -120,7 +120,9 @@ class StreamController(sm: SensorManager) {
         recCh?.close()
         recCh = null
         val drain = recDrainJob
-        if (drain != null) runBlocking { withTimeoutOrNull(1500) { drain.join() } }
+        // 500ms is ample: draining a closed channel of tiny disk appends finishes in ms; the cap
+        // only guards a stuck write() and keeps the main-thread ACTION_STOP block well under ANR.
+        if (drain != null) runBlocking { withTimeoutOrNull(500) { drain.join() } }
         recDrainJob = null
         scope?.cancel()
         scope = null
