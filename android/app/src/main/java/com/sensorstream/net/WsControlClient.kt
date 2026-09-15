@@ -23,6 +23,7 @@ class WsControlClient {
         fun onConnected()
         fun onHelloAck(deviceId: Int, udpPort: Int)
         fun onConfigure(msg: JSONObject)
+        fun onResend(msg: JSONObject)
         fun onRtt(ms: Float)
         fun onClosed(reason: String?)
         fun onFailure(t: Throwable)
@@ -51,6 +52,7 @@ class WsControlClient {
                 when (msg.optString("type")) {
                     "hello_ack" -> listener.onHelloAck(msg.optInt("device_id"), msg.optInt("udp_port"))
                     "configure" -> listener.onConfigure(msg)
+                    "resend" -> listener.onResend(msg)
                     "heartbeat_ack" -> {
                         val t0 = pendingPings.remove(msg.optInt("seq", -1))
                         if (t0 != null) listener.onRtt((SystemClock.elapsedRealtime() - t0).toFloat())
@@ -87,6 +89,24 @@ class WsControlClient {
         val arr = org.json.JSONArray()
         for (h in handles) arr.put(h)
         ws?.send(JSONObject().put("type", "active").put("handles", arr).toString())
+    }
+
+    /** Serve one batch of backfill datagrams (raw wire bytes, base64-encoded) for a resend range. */
+    fun sendBackfill(deviceId: Int, clientId: String, handle: Int, frames: List<ByteArray>) {
+        val arr = org.json.JSONArray()
+        for (f in frames) arr.put(android.util.Base64.encodeToString(f, android.util.Base64.NO_WRAP))
+        ws?.send(
+            JSONObject().put("type", "backfill").put("device_id", deviceId).put("client_id", clientId)
+                .put("handle", handle).put("frames", arr).toString()
+        )
+    }
+
+    /** Tell the laptop a requested range is no longer in the on-phone ring (permanent gap). */
+    fun sendBackfillUnavailable(deviceId: Int, clientId: String, handle: Int, fromSeq: Long, toSeq: Long) {
+        ws?.send(
+            JSONObject().put("type", "backfill_unavailable").put("device_id", deviceId)
+                .put("client_id", clientId).put("handle", handle).put("from", fromSeq).put("to", toSeq).toString()
+        )
     }
 
     fun close() {

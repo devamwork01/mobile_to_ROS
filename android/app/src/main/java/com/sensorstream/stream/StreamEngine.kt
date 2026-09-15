@@ -181,7 +181,28 @@ class StreamEngine(context: Context) {
                 _state.value = _state.value.copy(connecting = false, connected = true, deviceId = deviceId, udpPort = udpPort)
                 startTelemetry(udpPort)
             }
-            override fun onConfigure(msg: JSONObject) { /* laptop-driven config: Phase 2b */ }
+            override fun onConfigure(msg: JSONObject) { /* laptop-driven config: reserved */ }
+            override fun onResend(msg: JSONObject) {
+                if (gen != connGen) return
+                val rec = recorder ?: return
+                val handle = msg.optInt("handle", -1)
+                if (handle < 0) return
+                val from = msg.optLong("from", -1)
+                val to = msg.optLong("to", -1)
+                if (from < 0 || to < from) return
+                // Serve from the on-phone ring off the WS callback thread; recorder is @Synchronized.
+                scope?.launch(Dispatchers.IO) {
+                    val frames = rec.readRawRange(handle, from, to)  // List<ByteArray>, sorted by seq
+                    if (frames.isEmpty()) {
+                        control.sendBackfillUnavailable(controller.deviceId, clientId, handle, from, to)
+                        return@launch
+                    }
+                    for (batch in BackfillResponder.chunk(frames)) {
+                        control.sendBackfill(controller.deviceId, clientId, handle, batch)
+                        controller.backfillServed.addAndGet(batch.size.toLong())
+                    }
+                }
+            }
             override fun onRtt(ms: Float) { if (gen == connGen) _state.value = _state.value.copy(rttMs = ms) }
             override fun onClosed(reason: String?) { if (gen == connGen) onDropped() }
             override fun onFailure(t: Throwable) {
