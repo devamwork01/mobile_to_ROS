@@ -80,6 +80,9 @@ class StreamEngine(context: Context) {
     // carry a stale generation and are ignored, preventing a reconnect storm.
     private var connGen = 0
 
+    /** Stable per-install id sent in hello; set by the Service before start(). Empty = not set. */
+    @Volatile var clientId: String = ""
+
     private var recordDir: File? = null
     private var recMaxBytes = 150L * 1024 * 1024
     private var recMaxAgeMs = 20L * 60 * 1000
@@ -275,6 +278,7 @@ class StreamEngine(context: Context) {
             .put("manufacturer", Build.MANUFACTURER)
             .put("android", Build.VERSION.RELEASE)
             .put("app_version", "0.1.0")
+            .put("client_id", clientId)
             .put("sensors", sensors)
     }
 
