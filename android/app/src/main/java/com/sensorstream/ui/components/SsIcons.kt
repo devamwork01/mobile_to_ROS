@@ -4,7 +4,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.DeviceThermostat
+import androidx.compose.material.icons.filled.DirectionsRun
+import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
@@ -34,6 +37,9 @@ object SsIcons {
         "humidity" -> Icons.Filled.WaterDrop
         "light" -> Icons.Filled.LightMode
         "proximity" -> Icons.Filled.Straighten
+        "steps" -> Icons.Filled.DirectionsWalk
+        "motion" -> Icons.Filled.DirectionsRun
+        "heart" -> Icons.Filled.Favorite
         "other" -> Icons.Filled.Sensors
         // nav / chrome
         "home" -> Icons.Filled.Home

@@ -38,6 +38,7 @@ fun SensorCard(
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
     onOpen: (() -> Unit)? = null,
+    subtitle: String = info.description,
 ) {
     val c = Ss.colors
     Surface(
@@ -64,7 +65,7 @@ fun SensorCard(
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(info.humanName, color = c.fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text(info.description, color = c.muted, fontSize = 12.sp)
+                Text(subtitle, color = c.muted, fontSize = 12.sp)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     SamplingRateBadge(rateText)
                     if (info.unit.isNotBlank()) Text(info.unit, color = c.faint, fontSize = 11.sp)

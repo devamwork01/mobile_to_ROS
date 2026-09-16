@@ -1,6 +1,5 @@
 package com.sensorstream.ui.screens
 
-import android.hardware.Sensor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -59,20 +58,21 @@ import com.sensorstream.vm.StreamViewModel
 fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
     val info = vm.catalog.firstOrNull { it.handle == handle } ?: run { nav.back(); return }
     val type = info.type
-    val sig = SignalCatalog.of(type)
+    val sig = SignalCatalog.of(type, info.stringType)
     val c = Ss.colors
     val state by vm.engineState.collectAsState()
     val previews by vm.preview.collectAsState()
     val sel by vm.sel.collectAsState()
     val appSettings by vm.settings.collectAsState()
 
-    DisposableEffect(type) {
-        vm.startPreview(type, Sensor.TYPE_ROTATION_VECTOR)
-        onDispose { vm.stopPreview(type, Sensor.TYPE_ROTATION_VECTOR) }
+    DisposableEffect(handle) {
+        vm.startPreview(handle)
+        vm.startOrientationPreview()
+        onDispose { vm.stopPreview(handle); vm.stopOrientationPreview() }
     }
 
-    val values = previews[type]
-    val orientation = previews[Sensor.TYPE_ROTATION_VECTOR]
+    val values = previews[handle]
+    val orientation = vm.orientationHandle?.let { previews[it] }
     val axisColors = listOf(c.axisX, c.axisY, c.axisZ)
     val isVector = sig.category == SensorCategory.MOTION || sig.category == SensorCategory.MAGNETIC
     val isOrientation = sig.category == SensorCategory.ORIENTATION

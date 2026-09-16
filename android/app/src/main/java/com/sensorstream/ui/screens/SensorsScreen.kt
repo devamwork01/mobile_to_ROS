@@ -47,8 +47,8 @@ fun SensorsScreen(vm: StreamViewModel, nav: AppNav) {
 
     // Build the ordered, grouped list once per catalog (catalog is stable).
     val grouped: List<Pair<SensorCategory, List<SensorInfo>>> = CATEGORY_ORDER.mapNotNull { cat ->
-        val items = vm.catalog.filter { SignalCatalog.of(it.type).category == cat }
-            .sortedBy { SignalCatalog.of(it.type).humanName }
+        val items = vm.catalog.filter { SignalCatalog.of(it.type, it.stringType).category == cat }
+            .sortedBy { SignalCatalog.of(it.type, it.stringType).humanName }
         if (items.isEmpty()) null else cat to items
     }
 
@@ -64,7 +64,7 @@ fun SensorsScreen(vm: StreamViewModel, nav: AppNav) {
         grouped.forEach { (cat, items) ->
             item { SectionHeader(cat.title()) }
             items(items, key = { it.handle }) { info ->
-                val sig = SignalCatalog.of(info.type)
+                val sig = SignalCatalog.of(info.type, info.stringType)
                 val enabled = info.handle in sel.enabled
                 val p = vm.periodOf(info.handle)
                 val rate = if (p > 0) "${1_000_000 / p} Hz" else "Max"
@@ -74,6 +74,7 @@ fun SensorsScreen(vm: StreamViewModel, nav: AppNav) {
                     enabled = enabled,
                     onToggle = { vm.toggle(info.handle) },
                     onOpen = { nav.go(Screen.Detail(info.handle)) },
+                    subtitle = SignalCatalog.typeLabel(info.type, info.stringType),
                     modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
                 )
             }

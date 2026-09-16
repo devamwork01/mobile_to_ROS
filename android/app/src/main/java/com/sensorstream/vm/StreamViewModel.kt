@@ -86,68 +86,79 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     // Drives the 3D visualizations + detail values so screens respond to device motion whether or
     // not we're streaming. These are SEPARATE, read-only listeners purely for the visualization:
     // they do not touch SensorEventSource, the telemetry pipeline, timestamps, fusion, or the
-    // network. Registrations are ref-counted per sensor type and released when screens dispose.
+    // network. Keyed by catalog HANDLE (not type) and registered against the EXACT sensor so
+    // vendor/uncalibrated/duplicate/proximity sensors that getDefaultSensor(type) misses still
+    // deliver data. Ref-counted per handle; released when screens dispose.
     private val sensorManager = app.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val _preview = MutableStateFlow<Map<Int, FloatArray>>(emptyMap())
-    /** Latest preview values keyed by Android sensor type. */
+    /** Latest preview values keyed by catalog handle. */
     val preview: StateFlow<Map<Int, FloatArray>> = _preview.asStateFlow()
     private val previewRefs = HashMap<Int, Int>()
     private val previewAccuracy = HashMap<Int, Int>()
-    private val previewListener = object : SensorEventListener {
+    private val previewListeners = HashMap<Int, SensorEventListener>()
+
+    /** Handle of the primary orientation (rotation vector) sensor, if present. */
+    val orientationHandle: Int? = catalog.firstOrNull { it.type == Sensor.TYPE_ROTATION_VECTOR }?.handle
+
+    private fun makeListener(handle: Int) = object : SensorEventListener {
         override fun onSensorChanged(e: SensorEvent) {
-            _preview.value = _preview.value + (e.sensor.type to e.values.copyOf())
+            _preview.value = _preview.value + (handle to e.values.copyOf())
         }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
-            if (sensor != null) previewAccuracy[sensor.type] = accuracy
+            previewAccuracy[handle] = accuracy
         }
     }
 
     /** Convenience for the hero orientation. */
     val orientationPreview: StateFlow<FloatArray?> =
         MutableStateFlow<FloatArray?>(null).also { flow ->
-            viewModelScope.launch { preview.collect { flow.value = it[Sensor.TYPE_ROTATION_VECTOR] } }
+            viewModelScope.launch { preview.collect { m -> flow.value = orientationHandle?.let { m[it] } } }
         }.asStateFlow()
 
-    fun previewAccuracyOf(type: Int): Int = previewAccuracy[type] ?: -1
+    fun previewAccuracyOf(handle: Int): Int = previewAccuracy[handle] ?: -1
 
-    /** The preview sampling delay (µs) for a sensor type, taken from the user's selected rate so
+    /** The preview sampling delay (µs) for a handle, taken from the user's selected rate so
      *  changing the rate on the detail screen visibly changes the on-device preview cadence.
      *  0 / "Max" maps to the fastest the device allows. */
-    private fun previewDelayUs(type: Int): Int {
-        val handle = catalog.firstOrNull { it.type == type }?.handle
-        val periodUs = handle?.let { _sel.value.periodByHandle[it] } ?: 10_000
+    private fun previewDelayUs(handle: Int): Int {
+        val periodUs = _sel.value.periodByHandle[handle] ?: 10_000
         return if (periodUs <= 0) SensorManager.SENSOR_DELAY_FASTEST else periodUs
     }
 
-    private fun registerPreview(type: Int) {
-        sensorManager.getDefaultSensor(type)?.let {
-            sensorManager.registerListener(previewListener, it, previewDelayUs(type))
+    private fun registerPreview(handle: Int) {
+        val sensor = engine.sensorFor(handle) ?: return
+        val listener = makeListener(handle)
+        previewListeners[handle] = listener
+        sensorManager.registerListener(listener, sensor, previewDelayUs(handle))
+    }
+
+    private fun unregisterPreview(handle: Int) {
+        previewListeners.remove(handle)?.let { sensorManager.unregisterListener(it) }
+    }
+
+    /** Register read-only preview listeners for [handles] (ref-counted). */
+    fun startPreview(vararg handles: Int) {
+        for (handle in handles) {
+            if ((previewRefs[handle] ?: 0) == 0) registerPreview(handle)
+            previewRefs[handle] = (previewRefs[handle] ?: 0) + 1
         }
     }
 
-    /** Register read-only preview listeners for [types] (ref-counted). */
-    fun startPreview(vararg types: Int) {
-        for (type in types) {
-            if ((previewRefs[type] ?: 0) == 0) registerPreview(type)
-            previewRefs[type] = (previewRefs[type] ?: 0) + 1
-        }
-    }
-
-    fun stopPreview(vararg types: Int) {
-        for (type in types) {
-            val n = (previewRefs[type] ?: 0)
+    fun stopPreview(vararg handles: Int) {
+        for (handle in handles) {
+            val n = (previewRefs[handle] ?: 0)
             if (n <= 1) {
-                previewRefs.remove(type)
-                sensorManager.getDefaultSensor(type)?.let { sensorManager.unregisterListener(previewListener, it) }
+                previewRefs.remove(handle)
+                unregisterPreview(handle)
             } else {
-                previewRefs[type] = n - 1
+                previewRefs[handle] = n - 1
             }
         }
     }
 
-    /** Back-compat convenience for the Home hero (rotation vector only). */
-    fun startOrientationPreview() = startPreview(Sensor.TYPE_ROTATION_VECTOR)
-    fun stopOrientationPreview() = stopPreview(Sensor.TYPE_ROTATION_VECTOR)
+    /** Convenience for the hero orientation (rotation vector handle). */
+    fun startOrientationPreview() { orientationHandle?.let { startPreview(it) } }
+    fun stopOrientationPreview() { orientationHandle?.let { stopPreview(it) } }
 
     init {
         val defaultTypes = setOf(
@@ -192,10 +203,9 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         applyLiveReconfig()
         // If this sensor is being previewed on-screen, re-register it so the new rate takes effect
         // immediately (preview is UI-only and independent of the streaming pipeline).
-        val type = catalog.firstOrNull { it.handle == handle }?.type
-        if (type != null && (previewRefs[type] ?: 0) > 0) {
-            sensorManager.getDefaultSensor(type)?.let { sensorManager.unregisterListener(previewListener, it) }
-            registerPreview(type)
+        if ((previewRefs[handle] ?: 0) > 0) {
+            unregisterPreview(handle)
+            registerPreview(handle)
         }
     }
 
@@ -245,6 +255,7 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     // Streaming is owned by StreamingService (survives recreation); only stop discovery here.
     override fun onCleared() {
         discovery.stop()
-        sensorManager.unregisterListener(previewListener)
+        previewListeners.values.forEach { sensorManager.unregisterListener(it) }
+        previewListeners.clear()
     }
 }
