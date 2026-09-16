@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { getByType } from "../telemetry/store.js";
 import { androidToThree } from "../lib/orient.js";
 import { AXIS } from "../telemetry/signals.js";
@@ -91,6 +92,18 @@ export default function Phone3D() {
     el.appendChild(renderer.domElement);
     renderer.domElement.style.position = "absolute";
     renderer.domElement.style.inset = "0";
+
+    // Drag to orbit the camera, wheel to zoom (pan disabled so the model stays centered). The phone
+    // still shows the device's orientation and the world frame stays fixed — only the viewpoint moves.
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.enablePan = false;
+    controls.rotateSpeed = 0.9;
+    controls.minDistance = 1.5;
+    controls.maxDistance = 6;
+    controls.target.set(0, 0, 0);
+    controls.update();
 
     // Image-based lighting (procedural, offline) for realistic metal/glass reflections.
     const pmrem = new THREE.PMREMGenerator(renderer);
@@ -279,6 +292,7 @@ export default function Phone3D() {
           }
         }
       }
+      controls.update();
       renderer.render(scene, camera);
       report("3d");
     };
@@ -310,6 +324,7 @@ export default function Phone3D() {
 
     return () => {
       cancelAnimationFrame(raf);
+      controls.dispose();
       ro.disconnect();
       io.disconnect();
       pmrem.dispose();

@@ -71,16 +71,25 @@ object Projection {
         r[6] * v.x + r[7] * v.y + r[8] * v.z,
     )
 
+    /** Default camera elevation (radians): a gentle downward tilt so the phone reads as floating. */
+    const val DEFAULT_PITCH = 0.35f
+
     /**
-     * Orthographic screen projection with a fixed, slightly-elevated camera so the phone reads as
-     * floating: +X → right, +Y → up, +Z → toward the viewer (drawn with a gentle downward tilt).
-     * Returns (dxPixels, dyPixels) offsets from a center; caller adds the center + flips Y for screen.
+     * Orthographic screen projection with an orbitable camera: [yaw] rotates the viewpoint around the
+     * world up-axis, [pitch] raises/lowers it. Defaults reproduce the original fixed view (yaw 0,
+     * pitch [DEFAULT_PITCH]). +X → right, +Y → up, +Z → toward the viewer. Returns (dxPixels,
+     * dyPixels) offsets from a center; caller adds the center + flips Y for screen.
      */
-    fun project(v: Vec3, scale: Float): Pair<Float, Float> {
-        val tilt = 0.35f // radians of downward camera tilt for depth
-        val ct = kotlin.math.cos(tilt); val st = kotlin.math.sin(tilt)
-        val sx = v.x
-        val sy = v.y * ct - v.z * st
+    fun project(v: Vec3, scale: Float, yaw: Float = 0f, pitch: Float = DEFAULT_PITCH): Pair<Float, Float> {
+        // Ry(yaw): orbit horizontally around the up-axis.
+        val cyw = kotlin.math.cos(yaw); val syw = kotlin.math.sin(yaw)
+        val x1 = v.x * cyw + v.z * syw
+        val z1 = -v.x * syw + v.z * cyw
+        val y1 = v.y
+        // Rx(pitch): raise/lower the camera; drop z for the orthographic projection.
+        val cp = kotlin.math.cos(pitch); val sp = kotlin.math.sin(pitch)
+        val sx = x1
+        val sy = y1 * cp - z1 * sp
         return Pair(sx * scale, sy * scale)
     }
 
