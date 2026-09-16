@@ -27,6 +27,7 @@ import com.sensorstream.ui.screens.ConnectionScreen
 import com.sensorstream.ui.screens.HomeScreen
 import com.sensorstream.ui.screens.SensorDetailScreen
 import com.sensorstream.ui.screens.SensorsScreen
+import com.sensorstream.ui.screens.SettingsScreen
 import com.sensorstream.ui.theme.Ss
 import com.sensorstream.vm.StreamViewModel
 
@@ -82,7 +83,7 @@ private fun AppContent(vm: StreamViewModel, nav: AppNav, current: Screen) {
         is Screen.Home -> HomeScreen(vm, nav)
         is Screen.Sensors -> SensorsScreen(vm, nav)
         is Screen.Connection -> ConnectionScreen(vm)
-        is Screen.Settings -> Placeholder("Settings", "Theme, units and 3D preferences arrive in a later phase.")
+        is Screen.Settings -> SettingsScreen(vm)
         is Screen.Detail -> SensorDetailScreen(vm, nav, current.handle)
     }
 }

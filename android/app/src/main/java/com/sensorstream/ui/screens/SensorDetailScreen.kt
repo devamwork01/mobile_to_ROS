@@ -63,6 +63,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
     val state by vm.engineState.collectAsState()
     val previews by vm.preview.collectAsState()
     val sel by vm.sel.collectAsState()
+    val appSettings by vm.settings.collectAsState()
 
     DisposableEffect(type) {
         vm.startPreview(type, Sensor.TYPE_ROTATION_VECTOR)
@@ -79,8 +80,8 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
 
     // Orientation-screen view controls.
     var showBody by remember { mutableStateOf(true) }
-    var showWorld by remember { mutableStateOf(true) }
-    var showLabels by remember { mutableStateOf(true) }
+    var showWorld by remember { mutableStateOf(appSettings.default3dWorldFrame) }
+    var showLabels by remember { mutableStateOf(appSettings.default3dLabels) }
     var quatMode by remember { mutableStateOf(false) } // false = Euler, true = Quaternion
 
     Column(
