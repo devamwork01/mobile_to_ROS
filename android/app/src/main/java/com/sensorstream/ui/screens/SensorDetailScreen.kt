@@ -84,6 +84,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
     var showWorld by remember { mutableStateOf(appSettings.default3dWorldFrame) }
     var showLabels by remember { mutableStateOf(appSettings.default3dLabels) }
     var quatMode by remember { mutableStateOf(false) } // false = Euler, true = Quaternion
+    var windowSec by remember { mutableStateOf(10) } // real-time graph time window
 
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
@@ -181,15 +182,35 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             }
         }
 
-        // Mini graph (vector sensors)
-        if (isVector) {
+        // Real-time graph: multi-line for vectors, single line for environmental / single-value
+        // sensors. Orientation keeps the 3D + tiles instead. A time-window selector sets how many
+        // samples (derived from the selected rate) the graph shows.
+        val graphComponents = when {
+            isVector && values != null && values.size >= 3 -> 3
+            !isOrientation && values != null && values.isNotEmpty() -> 1
+            else -> 0
+        }
+        if (graphComponents > 0) {
             SectionHeader("Real-time")
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(5, 10, 20).forEach { w -> ToggleChip("${w}s", windowSec == w) { windowSec = w } }
+            }
+            val periodUs = sel.periodByHandle[handle] ?: 10_000
+            val rateHz = if (periodUs > 0) 1_000_000f / periodUs else 200f
+            val capacity = (windowSec * rateHz).toInt().coerceIn(30, 600)
+            val gColors = if (graphComponents == 1) listOf(c.accent) else axisColors
+            val gLabels = if (graphComponents == 1) listOf(sig.componentLabels.firstOrNull() ?: "value") else sig.componentLabels
+            val gValues = if (graphComponents == 1 && values != null) floatArrayOf(values[0]) else values
             SsCard(Modifier.fillMaxWidth()) {
                 MiniSignalGraph(
-                    values = values,
-                    colors = axisColors,
-                    labels = sig.componentLabels,
+                    values = gValues,
+                    colors = gColors,
+                    labels = gLabels,
                     unit = sig.unit,
+                    capacity = capacity,
                     modifier = Modifier.fillMaxWidth().height(190.dp),
                 )
             }

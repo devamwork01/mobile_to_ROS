@@ -2,16 +2,22 @@ package com.sensorstream.ui.viz
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.Alignment
@@ -30,10 +36,10 @@ import com.sensorstream.ui.theme.Ss
 import com.sensorstream.ui.theme.SsType
 
 /**
- * Compact rolling line graph (secondary to the 3D hero). Keeps a per-component ring buffer of the
- * most recent values it's handed; caller passes the latest sample each recomposition. Shows a legend
- * (which color is which component + its live value) and the current min/max magnitude of the window
- * so the plotted signal is readable, not just decorative.
+ * Compact rolling line graph with an interactive legend. Keeps a per-component ring buffer of the
+ * most recent values it's handed; caller passes the latest sample each recomposition. Tap a legend
+ * entry to isolate that signal (tap again for "all"), so magnitudes are readable per-signal. Shows
+ * the current window's min/max scale. [capacity] sets the visible sample window.
  */
 @Composable
 fun MiniSignalGraph(
@@ -55,10 +61,14 @@ fun MiniSignalGraph(
         }
     }
 
-    // Shared scale across components for comparability, computed here so it can be labeled.
+    // -1 = show all; otherwise the isolated component index.
+    var selected by remember(n) { mutableIntStateOf(-1) }
+    val shown: (Int) -> Boolean = { i -> selected == -1 || selected == i }
+
+    // Shared scale over the shown components so the isolated signal fills the view.
     var lo = Float.POSITIVE_INFINITY
     var hi = Float.NEGATIVE_INFINITY
-    for (ring in rings) for (v in ring) { if (v < lo) lo = v; if (v > hi) hi = v }
+    rings.forEachIndexed { i, ring -> if (shown(i)) for (v in ring) { if (v < lo) lo = v; if (v > hi) hi = v } }
     val hasData = lo != Float.POSITIVE_INFINITY
     if (!hasData) { lo = 0f; hi = 1f }
     if (hi - lo < 1e-3f) { hi += 1f; lo -= 1f }
@@ -66,15 +76,25 @@ fun MiniSignalGraph(
     val unitSuffix = if (unit.isNotBlank()) " $unit" else ""
 
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        // Legend: colored dot + component label + live value.
+        // Legend: tap to isolate / show-all. Non-selected entries dim when one is isolated.
         if (labels.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (i in 0 until n) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Box(Modifier.size(8.dp).clip(CircleShape).background(colors.getOrElse(i) { Color.Gray }))
-                        Text(labels.getOrElse(i) { "" }, color = c.muted, fontSize = 11.sp)
+                    val active = shown(i)
+                    Row(
+                        Modifier.clip(RoundedCornerShape(8.dp))
+                            .background(if (selected == i) colors.getOrElse(i) { Color.Gray }.copy(alpha = 0.16f) else Color.Transparent)
+                            .clickable { selected = if (selected == i) -1 else i }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        Box(Modifier.size(8.dp).clip(CircleShape)
+                            .background(colors.getOrElse(i) { Color.Gray }.copy(alpha = if (active) 1f else 0.35f)))
+                        Text(labels.getOrElse(i) { "" }, color = if (active) c.muted else c.faint, fontSize = 11.sp)
                         values?.getOrNull(i)?.let {
-                            Text(Fmt.signed(it), style = SsType.mono, color = c.fg, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text(Fmt.signed(it), style = SsType.mono, color = if (active) c.fg else c.faint,
+                                fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -90,7 +110,7 @@ fun MiniSignalGraph(
                     drawLine(c.line, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
                 }
                 rings.forEachIndexed { ci, ring ->
-                    if (ring.size < 2) return@forEachIndexed
+                    if (!shown(ci) || ring.size < 2) return@forEachIndexed
                     val path = Path()
                     ring.forEachIndexed { i, v ->
                         val x = w * i / (capacity - 1).toFloat()
@@ -100,7 +120,6 @@ fun MiniSignalGraph(
                     drawPath(path, colors.getOrElse(ci) { Color.Gray }, style = Stroke(width = 2.dp.toPx()))
                 }
             }
-            // Magnitude scale: max at top-left, min at bottom-left.
             Text(
                 Fmt.value(hi, 2) + unitSuffix,
                 style = SsType.mono, color = c.faint, fontSize = 10.sp,
