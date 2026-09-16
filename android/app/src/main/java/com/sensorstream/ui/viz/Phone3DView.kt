@@ -55,6 +55,7 @@ fun Phone3DView(
     showAxes: Boolean = true,
     showLabels: Boolean = true,
     showWorldFrame: Boolean = false,
+    showGrid: Boolean = true,
 ) {
     val colors = Ss.colors
     // Orbitable camera: drag to rotate the viewpoint, double-tap to reset. The phone body still
@@ -84,6 +85,26 @@ fun Phone3DView(
 
         // Contact shadow beneath the phone (soft, elliptical).
         drawOvalShadow(cx, cy + unit * 0.95f, unit * 1.1f, unit * 0.28f, colors.isDark)
+
+        // World ground grid on the horizontal (East-North) plane below the phone — a fixed spatial
+        // reference that orbits with the camera, like the laptop's grid floor.
+        if (showGrid) {
+            val gy = -unit * 0.92f          // ground level (below origin; Up is +Y)
+            val ext = unit * 1.7f
+            val step = ext / 3f
+            val gridCol = colors.line.copy(alpha = 0.6f)
+            fun gp(x: Float, z: Float): Offset {
+                val (dx, dy) = Projection.project(Vec3(x, gy, z), 1f, yaw, pitch)
+                return Offset(cx + dx, cy - dy)
+            }
+            var i = -3
+            while (i <= 3) {
+                val o = i * step
+                drawLine(gridCol, gp(-ext, o), gp(ext, o), strokeWidth = 1f) // lines running East
+                drawLine(gridCol, gp(o, -ext), gp(o, ext), strokeWidth = 1f) // lines running North
+                i++
+            }
+        }
 
         // World frame (fixed, does NOT rotate with the phone): E->+X, N->-Z, U->+Y in render space.
         // Drawn faint + dashed-ish behind the phone so it reads as the reference ground truth.
