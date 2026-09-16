@@ -47,6 +47,7 @@ fun ConnectionScreen(vm: StreamViewModel, nav: AppNav) {
     val state by vm.engineState.collectAsState()
     val sel by vm.sel.collectAsState()
     val discovering by vm.discovering.collectAsState()
+    val discoveryNotice by vm.discoveryNotice.collectAsState()
     val c = Ss.colors
 
     val phase = state.phase()
@@ -137,6 +138,16 @@ fun ConnectionScreen(vm: StreamViewModel, nav: AppNav) {
                 Spacer(Modifier.size(10.dp))
                 Text("Find Laptop Automatically")
             }
+        }
+
+        // Discovery outcome (success confirmation or "not found" guidance).
+        discoveryNotice?.let { notice ->
+            Text(
+                notice.text,
+                color = if (notice.isError) c.warn else c.ok,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
         }
 
         Spacer(Modifier.height(4.dp))

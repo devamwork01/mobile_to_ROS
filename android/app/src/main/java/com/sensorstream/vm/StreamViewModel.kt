@@ -60,6 +60,11 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     private val _discovering = MutableStateFlow(false)
     val discovering: StateFlow<Boolean> = _discovering.asStateFlow()
 
+    /** Transient result of the last "Find Laptop" run, shown on the Connection screen. */
+    data class Notice(val text: String, val isError: Boolean)
+    private val _discoveryNotice = MutableStateFlow<Notice?>(null)
+    val discoveryNotice: StateFlow<Notice?> = _discoveryNotice.asStateFlow()
+
     // --- Display settings (UI only) ------------------------------------------------------------
     // Theme + visualization defaults. Persisted to SharedPreferences; the Activity reads
     // [settings].themeMode to choose the palette. Nothing here touches the telemetry pipeline.
@@ -159,8 +164,8 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setHost(h: String) { _sel.value = _sel.value.copy(host = h) }
-    fun setPort(p: String) { _sel.value = _sel.value.copy(port = p) }
+    fun setHost(h: String) { _sel.value = _sel.value.copy(host = h); _discoveryNotice.value = null }
+    fun setPort(p: String) { _sel.value = _sel.value.copy(port = p); _discoveryNotice.value = null }
 
     fun toggle(handle: Int) {
         val e = _sel.value.enabled.toMutableSet()
@@ -198,16 +203,23 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     fun discover() {
         if (_discovering.value) return
         _discovering.value = true
+        _discoveryNotice.value = null
         discovery.start(Discovery.Listener { host, controlPort ->
             _sel.value = _sel.value.copy(host = host, port = controlPort.toString())
             discovery.stop()
             _discovering.value = false
+            _discoveryNotice.value = Notice("Found laptop at $host:$controlPort", isError = false)
         })
         viewModelScope.launch {
             delay(8000)
             if (_discovering.value) {
                 discovery.stop()
                 _discovering.value = false
+                _discoveryNotice.value = Notice(
+                    "No laptop found. Make sure the laptop app is running on the same Wi-Fi, " +
+                        "then try again — or enter the IP manually.",
+                    isError = true,
+                )
             }
         }
     }
