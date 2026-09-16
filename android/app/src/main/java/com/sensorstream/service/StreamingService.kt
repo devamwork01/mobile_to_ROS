@@ -2,6 +2,7 @@ package com.sensorstream.service
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -111,12 +112,24 @@ class StreamingService : Service() {
             .setContentText("→ $host:$port")
             .setSmallIcon(android.R.drawable.stat_sys_upload)
             .setOngoing(true)
+            .setContentIntent(openAppIntent())
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             startForeground(NOTIF_ID, notification)
         }
+    }
+
+    /** Tapping the ongoing notification returns to the running app (reuses the existing task/instance,
+     *  like tapping a launcher icon) rather than starting a fresh one. */
+    private fun openAppIntent(): PendingIntent {
+        val launch = Intent(this, com.sensorstream.MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        var flags = PendingIntent.FLAG_UPDATE_CURRENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags = flags or PendingIntent.FLAG_IMMUTABLE
+        return PendingIntent.getActivity(this, 0, launch, flags)
     }
 
     companion object {
