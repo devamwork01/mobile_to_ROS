@@ -34,6 +34,8 @@ import com.sensorstream.ui.components.SsIcons
 import com.sensorstream.ui.components.StatusBadge
 import com.sensorstream.ui.components.StreamPhase
 import com.sensorstream.ui.components.phase
+import com.sensorstream.ui.nav.AppNav
+import com.sensorstream.ui.nav.Screen
 import com.sensorstream.ui.signal.Fmt
 import com.sensorstream.ui.theme.Ss
 import com.sensorstream.ui.theme.SsDims
@@ -41,7 +43,7 @@ import com.sensorstream.ui.theme.SsType
 import com.sensorstream.vm.StreamViewModel
 
 @Composable
-fun ConnectionScreen(vm: StreamViewModel) {
+fun ConnectionScreen(vm: StreamViewModel, nav: AppNav) {
     val state by vm.engineState.collectAsState()
     val sel by vm.sel.collectAsState()
     val discovering by vm.discovering.collectAsState()
@@ -149,6 +151,17 @@ fun ConnectionScreen(vm: StreamViewModel) {
         if (!active && sel.enabled.isEmpty()) {
             Text("Select at least one sensor (Sensors tab) before connecting.",
                 color = c.warn, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+
+        // Diagnostics entry
+        OutlinedButton(
+            onClick = { nav.go(Screen.Diagnostics) },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = c.muted),
+        ) {
+            Icon(SsIcons.forKey("settings"), contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(10.dp))
+            Text("View Diagnostics")
         }
     }
 }
