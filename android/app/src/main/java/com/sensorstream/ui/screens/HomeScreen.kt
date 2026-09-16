@@ -74,7 +74,7 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
             onSettings = { nav.go(Screen.Settings) },
         )
 
-        // Hero pseudo-3D phone.
+        // Hero pseudo-3D phone (Canvas): correct orientation (matches laptop) + grid + orbit + reset.
         Phone3DView(
             rotationVector = orientation,
             modifier = Modifier.fillMaxWidth().aspectRatio(1.1f),
