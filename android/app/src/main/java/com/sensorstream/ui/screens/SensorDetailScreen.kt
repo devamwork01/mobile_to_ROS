@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sensorstream.ui.components.SamplingRateBadge
@@ -238,7 +239,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 InfoRow("Sensor", info.name.ifBlank { "—" })
                 InfoRow("Accuracy", accuracyLabel(vm.previewAccuracyOf(handle)))
-                InfoRow("Android Type", info.stringType.ifBlank { "type ${info.type}" })
+                InfoRow("Type", info.stringType.removePrefix("android.sensor.").ifBlank { "type ${info.type}" })
                 InfoRow("Vendor", info.vendor.ifBlank { "—" })
                 InfoRow("Resolution", if (info.resolution > 0f) "${Fmt.value(info.resolution, 4)} ${sig.unit}" else "—")
                 InfoRow("Maximum Range", if (info.maximumRange > 0f) "${Fmt.value(info.maximumRange, 2)} ${sig.unit}" else "—")
@@ -308,8 +309,20 @@ private fun ToggleChip(label: String, selected: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun InfoRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
         Text(label, color = Ss.colors.muted, fontSize = 13.sp)
-        Text(value, style = SsType.mono, color = Ss.colors.fg, fontSize = 13.sp)
+        // Value takes the remaining width, right-aligned, and wraps instead of overflowing.
+        Text(
+            value,
+            style = SsType.mono,
+            color = Ss.colors.fg,
+            fontSize = 13.sp,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
