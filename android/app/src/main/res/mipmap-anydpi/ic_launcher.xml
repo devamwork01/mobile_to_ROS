@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Self-contained fallback icon for API 24-25 (no adaptive-icon support): rounded dark tile
+     + the SensorStream 3-axis gizmo. Real target devices are API 26+ and use the adaptive icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M24,4 L84,4 A20,20 0 0 1 104,24 L104,84 A20,20 0 0 1 84,104 L24,104 A20,20 0 0 1 4,84 L4,24 A20,20 0 0 1 24,4 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54"
+                android:centerY="50"
+                android:gradientRadius="78"
+                android:startColor="#1C2534"
+                android:centerColor="#12161D"
+                android:endColor="#0A0D12" />
+        </aapt:attr>
+    </path>
+    <path android:pathData="M54,54 L54,29" android:strokeColor="#4C8DFF" android:strokeWidth="7" android:strokeLineCap="round" />
+    <path android:pathData="M54,54 L36,72" android:strokeColor="#FF5C5C" android:strokeWidth="7" android:strokeLineCap="round" />
+    <path android:pathData="M54,54 L72,72" android:strokeColor="#3FD07A" android:strokeWidth="7" android:strokeLineCap="round" />
+    <path android:fillColor="#4C8DFF" android:pathData="M54,29 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+    <path android:fillColor="#FF5C5C" android:pathData="M36,72 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+    <path android:fillColor="#3FD07A" android:pathData="M72,72 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+    <path android:fillColor="#F2F6FF" android:pathData="M54,54 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+</vector>
