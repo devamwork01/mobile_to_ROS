@@ -35,7 +35,10 @@ class WsControlClient {
 
     fun connect(host: String, port: Int, hello: JSONObject, listener: Listener) {
         close()
-        val http = OkHttpClient.Builder().build()
+        // Tag control-channel sockets with a high (but below-telemetry) DSCP class; best-effort QoS.
+        val http = OkHttpClient.Builder()
+            .socketFactory(DscpSocketFactory(DSCP_AF41))
+            .build()
         client = http
         // OkHttp's HttpUrl only accepts http/https; it performs the WebSocket
         // upgrade itself, so use http:// (not ws://).
