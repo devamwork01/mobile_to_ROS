@@ -15,6 +15,9 @@ import com.sensorstream.stream.EngineState
 import com.sensorstream.stream.Selection
 import com.sensorstream.stream.StreamEngine
 import com.sensorstream.stream.StreamHolder
+import com.sensorstream.ui.settings.AppSettings
+import com.sensorstream.ui.settings.SettingsStore
+import com.sensorstream.ui.settings.ThemeMode
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -56,6 +59,23 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _discovering = MutableStateFlow(false)
     val discovering: StateFlow<Boolean> = _discovering.asStateFlow()
+
+    // --- Display settings (UI only) ------------------------------------------------------------
+    // Theme + visualization defaults. Persisted to SharedPreferences; the Activity reads
+    // [settings].themeMode to choose the palette. Nothing here touches the telemetry pipeline.
+    private val settingsStore = SettingsStore(app)
+    private val _settings = MutableStateFlow(settingsStore.load())
+    val settings: StateFlow<AppSettings> = _settings.asStateFlow()
+
+    private fun updateSettings(transform: (AppSettings) -> AppSettings) {
+        val next = transform(_settings.value)
+        _settings.value = next
+        settingsStore.save(next)
+    }
+
+    fun setThemeMode(mode: ThemeMode) = updateSettings { it.copy(themeMode = mode) }
+    fun setDefault3dWorldFrame(on: Boolean) = updateSettings { it.copy(default3dWorldFrame = on) }
+    fun setDefault3dLabels(on: Boolean) = updateSettings { it.copy(default3dLabels = on) }
 
     // --- Local sensor preview (UI only) --------------------------------------------------------
     // Drives the 3D visualizations + detail values so screens respond to device motion whether or

@@ -18,10 +18,14 @@ import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.sensorstream.ui.AppScaffold
+import com.sensorstream.ui.settings.ThemeMode
 import com.sensorstream.ui.theme.SensorStreamTheme
 import com.sensorstream.vm.StreamViewModel
 
@@ -52,7 +56,13 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent {
-            SensorStreamTheme {
+            val settings by viewModel.settings.collectAsState()
+            val dark = when (settings.themeMode) {
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
+            SensorStreamTheme(dark = dark) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     AppScaffold(viewModel)
                 }
