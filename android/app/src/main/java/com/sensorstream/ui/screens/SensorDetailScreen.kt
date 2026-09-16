@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -38,8 +39,6 @@ import com.sensorstream.ui.components.SamplingRateBadge
 import com.sensorstream.ui.components.SectionHeader
 import com.sensorstream.ui.components.SignalValue
 import com.sensorstream.ui.components.SsCard
-import com.sensorstream.ui.components.StatusBadge
-import com.sensorstream.ui.components.phase
 import com.sensorstream.ui.nav.AppNav
 import com.sensorstream.ui.signal.Fmt
 import com.sensorstream.ui.signal.SensorCategory
@@ -60,7 +59,6 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
     val type = info.type
     val sig = SignalCatalog.of(type, info.stringType)
     val c = Ss.colors
-    val state by vm.engineState.collectAsState()
     val previews by vm.preview.collectAsState()
     val sel by vm.sel.collectAsState()
     val appSettings by vm.settings.collectAsState()
@@ -103,10 +101,11 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             }
         }
 
-        // Status
+        // Status: Active/Inactive pill + current rate (matches the reference top row).
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            StatusBadge(state.phase())
-            SamplingRateBadge(if (values != null) "live" else "—")
+            ActivePill(values != null)
+            val p = sel.periodByHandle[handle] ?: 10_000
+            SamplingRateBadge(if (p > 0) "${1_000_000 / p} Hz" else "Max")
         }
 
         // Hero: 3D phone for motion/orientation/magnetic; gauge/big-value for environmental.
@@ -142,15 +141,17 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
                 ToggleChip("Euler Angles", !quatMode) { quatMode = false }
                 ToggleChip("Quaternion", quatMode) { quatMode = true }
             }
-            SsCard(Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (!quatMode) {
-                        val r = Projection.rotationVectorToMatrix(orientation ?: floatArrayOf(0f, 0f, 0f))
-                        val (roll, pitch, yaw) = Projection.eulerDeg(r)
-                        SignalValue("Roll", Fmt.signed(roll, 1), "°", c.axisX)
-                        SignalValue("Pitch", Fmt.signed(pitch, 1), "°", c.axisY)
-                        SignalValue("Yaw", Fmt.value(yaw, 1), "°", c.axisZ)
-                    } else {
+            if (!quatMode) {
+                val rmat = Projection.rotationVectorToMatrix(orientation ?: floatArrayOf(0f, 0f, 0f))
+                val (roll, pitch, yaw) = Projection.eulerDeg(rmat)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(SsDims.gap)) {
+                    AngleTile("Roll", Fmt.signed(roll, 1), c.axisX, Modifier.weight(1f))
+                    AngleTile("Pitch", Fmt.signed(pitch, 1), c.axisY, Modifier.weight(1f))
+                    AngleTile("Yaw", Fmt.value(yaw, 1), c.axisZ, Modifier.weight(1f))
+                }
+            } else {
+                SsCard(Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         val q = Projection.quatFromRotationVector(orientation ?: floatArrayOf(0f, 0f, 0f))
                         SignalValue("X", Fmt.signed(q[0], 4), "", c.axisX)
                         SignalValue("Y", Fmt.signed(q[1], 4), "", c.axisY)
@@ -235,12 +236,55 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
         SectionHeader("Sensor Information")
         SsCard(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                InfoRow("Sensor", info.name.ifBlank { "—" })
+                InfoRow("Accuracy", accuracyLabel(vm.previewAccuracyOf(handle)))
                 InfoRow("Android Type", info.stringType.ifBlank { "type ${info.type}" })
                 InfoRow("Vendor", info.vendor.ifBlank { "—" })
                 InfoRow("Resolution", if (info.resolution > 0f) "${Fmt.value(info.resolution, 4)} ${sig.unit}" else "—")
                 InfoRow("Maximum Range", if (info.maximumRange > 0f) "${Fmt.value(info.maximumRange, 2)} ${sig.unit}" else "—")
                 InfoRow("Max Rate", if (info.maxFrequencyHz > 0f) Fmt.hz(info.maxFrequencyHz) else "—")
                 InfoRow("Power", if (info.power > 0f) "${Fmt.value(info.power, 2)} mA" else "—")
+            }
+        }
+    }
+}
+
+private fun accuracyLabel(acc: Int): String = when (acc) {
+    3 -> "High"
+    2 -> "Medium"
+    1 -> "Low"
+    0 -> "Unreliable"
+    else -> "—"
+}
+
+@Composable
+private fun ActivePill(active: Boolean) {
+    val c = Ss.colors
+    val col = if (active) c.ok else c.muted
+    Row(
+        Modifier.clip(RoundedCornerShape(50)).background(col.copy(alpha = 0.14f))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(col))
+        Text(if (active) "ACTIVE" else "INACTIVE", color = col, fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+    }
+}
+
+@Composable
+private fun AngleTile(label: String, value: String, color: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier) {
+    val c = Ss.colors
+    SsCard(modifier) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.size(7.dp).clip(CircleShape).background(color))
+                Text(label.uppercase(), color = c.faint, fontSize = 11.sp, letterSpacing = 0.8.sp)
+            }
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(value, style = SsType.mono, color = c.fg, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text("°", color = c.faint, fontSize = 12.sp, modifier = Modifier.padding(start = 2.dp, bottom = 2.dp))
             }
         }
     }
