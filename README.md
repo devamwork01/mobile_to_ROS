@@ -103,6 +103,24 @@ root — it builds the debug APK (JBR 21) and installs it on every connected dev
 
 Full instructions: [`docs/build.md`](docs/build.md) and [`docs/run.md`](docs/run.md).
 
+### Network priority on a busy Wi-Fi
+
+On a shared network, bandwidth is arbitrated by the router/access point, not by an
+app — an app can only *hint*. SensorStream does the hint automatically: the phone
+tags its telemetry with **DSCP EF** and its control channel with **DSCP AF41**, and
+the laptop receiver marks its socket to match. On access points that honor DSCP→WMM
+(most do), this gives the stream preferential airtime under contention. It is
+best-effort — never a guarantee — and browsers can't be tagged, so the dashboard's
+own traffic isn't prioritized.
+
+For a **reliable** result with several devices on the network, in order of ease:
+
+1. **Give phone + laptop their own link** — run the phone's Wi-Fi hotspot and connect
+   the laptop to it (or put both on a separate 5 GHz SSID). Nothing else competes.
+2. **Router QoS** — if you can reach the router admin, prioritize the laptop's IP/MAC
+   or the ports (UDP 5005, WS 8081). This truly guarantees priority, but is per-network
+   manual setup.
+
 ## Running the tests
 
 ```bash

@@ -76,4 +76,11 @@ async def start_receiver(
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcvbuf)
         except OSError:
             pass
+        # Best-effort QoS: mark this socket's outbound datagrams Expedited Forwarding (DSCP 46 ->
+        # ToS 0xB8), symmetric with the phone's telemetry class. Honored on Linux; Windows userspace
+        # generally ignores IP_TOS (the laptop is mostly a receiver, so this is a minor add).
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 0xB8)
+        except OSError:
+            pass
     return transport, protocol  # type: ignore[return-value]
