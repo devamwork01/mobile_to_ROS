@@ -36,3 +36,9 @@ Thumbs.db
 
 # Soak-test output (CSV, server logs, throwaway recordings)
 laptop/soak-out/
+
+# Kotlin incremental build logs
+android/.kotlin/
+
+# Downloaded 3D model source (not used; Canvas 3D instead)
+samsung-galaxy-s25-ultra/
