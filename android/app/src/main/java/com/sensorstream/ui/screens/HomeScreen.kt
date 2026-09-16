@@ -80,8 +80,8 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
             modifier = Modifier.fillMaxWidth().aspectRatio(1.1f),
         )
 
-        // Connection card.
-        SsCard(Modifier.fillMaxWidth()) {
+        // Connection card — tap to open the Connection screen and connect to the laptop.
+        SsCard(Modifier.fillMaxWidth().clickable { nav.go(Screen.Connection) }) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     StatusBadge(phase)
@@ -99,6 +99,11 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
                     )
                 }
                 state.error?.let { Text(it, color = c.err, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp)) }
+                Text(
+                    if (state.connected || state.streaming) "Manage connection ›" else "Tap to set up connection ›",
+                    color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
         }
 
