@@ -74,6 +74,16 @@ object Projection {
     /** Default camera elevation (radians): a gentle downward tilt so the phone reads as floating. */
     const val DEFAULT_PITCH = 0.35f
 
+    /** Camera-space depth of a world point (larger = closer to the viewer). For painter's-order
+     *  sorting of faces without a z-buffer. Uses the same Ry(yaw)·Rx(pitch) camera as [project]. */
+    fun depth(v: Vec3, yaw: Float = 0f, pitch: Float = DEFAULT_PITCH): Float {
+        val cyw = kotlin.math.cos(yaw); val syw = kotlin.math.sin(yaw)
+        val z1 = -v.x * syw + v.z * cyw
+        val y1 = v.y
+        val cp = kotlin.math.cos(pitch); val sp = kotlin.math.sin(pitch)
+        return y1 * sp + z1 * cp
+    }
+
     /**
      * Orthographic screen projection with an orbitable camera: [yaw] rotates the viewpoint around the
      * world up-axis, [pitch] raises/lowers it. Defaults reproduce the original fixed view (yaw 0,

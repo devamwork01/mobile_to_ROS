@@ -127,33 +127,67 @@ fun Phone3DView(
             }
         }
 
-        // Phone body: project its 4 corners so it tilts with orientation.
-        val hw = unit * 0.42f // half width
-        val hh = unit * 0.86f // half height
-        val corners = listOf(
-            Vec3(-hw, hh, 0f), Vec3(hw, hh, 0f), Vec3(hw, -hh, 0f), Vec3(-hw, -hh, 0f),
-        ).map { c ->
-            val rot = Projection.rotate(r, c)
+        // Phone body: an extruded slab (glass front + metallic back + camera module) so it reads as
+        // a real phone. Projected through the orbit camera; faces drawn back-to-front (painter's).
+        val hw = unit * 0.40f  // half width
+        val hh = unit * 0.82f  // half height
+        val t2 = unit * 0.055f // half thickness
+        fun proj(v: Vec3): Offset {
+            val rot = Projection.rotate(r, v)
             val (dx, dy) = Projection.project(rot, 1f, yaw, pitch)
-            Offset(cx + dx, cy - dy)
+            return Offset(cx + dx, cy - dy)
         }
-        val body = Path().apply {
-            moveTo(corners[0].x, corners[0].y)
-            for (i in 1 until corners.size) lineTo(corners[i].x, corners[i].y)
-            close()
+        fun quad(pts: List<Offset>) = Path().apply {
+            moveTo(pts[0].x, pts[0].y); for (i in 1 until pts.size) lineTo(pts[i].x, pts[i].y); close()
         }
-        // Metallic fill + edge.
-        drawPath(
-            body,
-            brush = Brush.linearGradient(
-                colors = if (colors.isDark)
-                    listOf(Color(0xFF2A313D), Color(0xFF12161D))
-                else
-                    listOf(Color(0xFFDDE3EC), Color(0xFFB9C2CE)),
-                start = corners[3], end = corners[1],
-            ),
+        val front = listOf(Vec3(-hw, hh, t2), Vec3(hw, hh, t2), Vec3(hw, -hh, t2), Vec3(-hw, -hh, t2)).map { proj(it) }
+        val back = listOf(Vec3(-hw, hh, -t2), Vec3(hw, hh, -t2), Vec3(hw, -hh, -t2), Vec3(-hw, -hh, -t2)).map { proj(it) }
+        val screenNear = Projection.depth(Projection.rotate(r, Vec3(0f, 0f, t2)), yaw, pitch) >=
+            Projection.depth(Projection.rotate(r, Vec3(0f, 0f, -t2)), yaw, pitch)
+
+        val metalBrush = Brush.linearGradient(
+            colors = if (colors.isDark) listOf(Color(0xFF3B424E), Color(0xFF1A1F27))
+            else listOf(Color(0xFFEDF1F7), Color(0xFFBFC8D4)),
+            start = back[3], end = back[1],
         )
-        drawPath(body, color = colors.line, style = Stroke(width = 2.dp.toPx()))
+        val screenBrush = Brush.linearGradient(
+            colors = if (colors.isDark) listOf(Color(0xFF141922), Color(0xFF05070B))
+            else listOf(Color(0xFF2B313B), Color(0xFF0E1116)),
+            start = front[3], end = front[1],
+        )
+        val edgeCol = if (colors.isDark) Color(0xFF2A313D) else Color(0xFFAAB3C0)
+        fun drawSides() {
+            for (i in 0 until 4) {
+                val j = (i + 1) % 4
+                drawPath(quad(listOf(front[i], front[j], back[j], back[i])), color = edgeCol)
+            }
+        }
+        // Camera module on the back face (top-left), drawn only when the back faces the viewer.
+        fun drawCamera() {
+            val z = -t2 - 0.001f
+            val mcx = -hw * 0.40f; val mcy = hh * 0.50f; val mw = hw * 0.5f; val mh = hh * 0.30f
+            val modCorners = listOf(
+                Vec3(mcx - mw, mcy + mh, z), Vec3(mcx + mw, mcy + mh, z),
+                Vec3(mcx + mw, mcy - mh, z), Vec3(mcx - mw, mcy - mh, z),
+            ).map { proj(it) }
+            drawPath(quad(modCorners), color = if (colors.isDark) Color(0xFF20262F) else Color(0xFF98A2B0))
+            val lensR = mw * 0.24f
+            listOf(mh * 0.5f, 0f, -mh * 0.5f).forEach { dy ->
+                drawCircle(Color(0xFF07090D), radius = lensR, center = proj(Vec3(mcx, mcy + dy, z)))
+                drawCircle(edgeCol, radius = lensR, center = proj(Vec3(mcx, mcy + dy, z)), style = Stroke(1.5f))
+            }
+        }
+
+        if (screenNear) {
+            drawPath(quad(back), brush = metalBrush); drawSides()
+            drawPath(quad(front), brush = screenBrush)
+            drawPath(quad(front), color = colors.line, style = Stroke(width = 2.dp.toPx()))
+        } else {
+            drawPath(quad(front), brush = screenBrush); drawSides()
+            drawPath(quad(back), brush = metalBrush)
+            drawPath(quad(back), color = colors.line, style = Stroke(width = 2.dp.toPx()))
+            drawCamera()
+        }
 
         // Axes (drawn Z first so X/Y read on top). Labels sit just past each arrow tip.
         if (showAxes) {
@@ -173,6 +207,21 @@ fun Phone3DView(
                 drawAxis(cx, cy, Pair(cx + dx, cy - dy), sensorVectorColor, thick = 5f)
             }
         }
+
+        // World-axes gizmo (top-left): a compact reference triad that orbits with the camera, so
+        // you can always read which way world X/Y/Z point in the current view.
+        val gcx = size.width * 0.13f
+        val gcy = size.height * 0.15f
+        val glen = minOf(size.width, size.height) * 0.085f
+        fun gp(v: Vec3, s: Float): Pair<Float, Float> {
+            val (dx, dy) = Projection.project(v, s, yaw, pitch); return Pair(gcx + dx, gcy - dy)
+        }
+        drawAxis(gcx, gcy, gp(Vec3(0f, 0f, 1f), glen), colors.axisZ, thick = 2.2f)
+        drawAxis(gcx, gcy, gp(Vec3(1f, 0f, 0f), glen), colors.axisX, thick = 2.2f)
+        drawAxis(gcx, gcy, gp(Vec3(0f, 1f, 0f), glen), colors.axisY, thick = 2.2f)
+        drawAxisLabel("X", gp(Vec3(1f, 0f, 0f), glen * 1.42f), colors.axisX, size = 22f)
+        drawAxisLabel("Y", gp(Vec3(0f, 1f, 0f), glen * 1.42f), colors.axisY, size = 22f)
+        drawAxisLabel("Z", gp(Vec3(0f, 0f, 1f), glen * 1.42f), colors.axisZ, size = 22f)
     }
 }
 
@@ -188,18 +237,18 @@ private fun DrawScope.drawOvalShadow(cx: Float, cy: Float, rx: Float, ry: Float,
     )
 }
 
-private fun DrawScope.drawAxisLabel(text: String, at: Pair<Float, Float>, color: Color) {
+private fun DrawScope.drawAxisLabel(text: String, at: Pair<Float, Float>, color: Color, size: Float = 34f) {
     val paint = android.graphics.Paint().apply {
         this.color = android.graphics.Color.argb(
             (color.alpha * 255).toInt(), (color.red * 255).toInt(), (color.green * 255).toInt(), (color.blue * 255).toInt(),
         )
-        textSize = 34f
+        textSize = size
         isAntiAlias = true
         isFakeBoldText = true
         textAlign = android.graphics.Paint.Align.CENTER
     }
     // Center vertically on the point (baseline offset ~ textSize/3).
-    drawContext.canvas.nativeCanvas.drawText(text, at.first, at.second + 12f, paint)
+    drawContext.canvas.nativeCanvas.drawText(text, at.first, at.second + size / 3f, paint)
 }
 
 private fun DrawScope.drawAxis(cx: Float, cy: Float, end: Pair<Float, Float>, color: Color, thick: Float = 4f) {
