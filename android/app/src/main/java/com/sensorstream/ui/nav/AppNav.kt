@@ -19,6 +19,9 @@ class AppNav(initial: Screen = Screen.Home) {
     private val stack = mutableStateListOf(initial)
     val current: Screen get() = stack.last()
 
+    /** The bottom-nav tab a pushed screen (Detail/Diagnostics) belongs under, so it stays lit. */
+    val activeTab: Screen get() = stack.lastOrNull { isTab(it) } ?: Screen.Home
+
     private fun isTab(s: Screen) =
         s is Screen.Home || s is Screen.Sensors || s is Screen.Connection || s is Screen.Settings
 
