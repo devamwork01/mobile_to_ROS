@@ -33,3 +33,6 @@ laptop/webapp/dist/
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Soak-test output (CSV, server logs, throwaway recordings)
+laptop/soak-out/
