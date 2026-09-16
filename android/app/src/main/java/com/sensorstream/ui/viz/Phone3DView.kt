@@ -1,9 +1,16 @@
 package com.sensorstream.ui.viz
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -17,10 +24,13 @@ import kotlin.math.hypot
 
 /** Pure projection of the body axes to screen offsets, so it JVM-tests without a Canvas. */
 object Phone3DConfig {
-    fun axisEndpoints(r: FloatArray, cx: Float, cy: Float, len: Float): Map<String, Pair<Float, Float>> {
+    fun axisEndpoints(
+        r: FloatArray, cx: Float, cy: Float, len: Float,
+        yaw: Float = 0f, pitch: Float = Projection.DEFAULT_PITCH,
+    ): Map<String, Pair<Float, Float>> {
         fun ep(axis: Vec3): Pair<Float, Float> {
             val rotated = Projection.rotate(r, axis)
-            val (dx, dy) = Projection.project(rotated, len)
+            val (dx, dy) = Projection.project(rotated, len, yaw, pitch)
             return Pair(cx + dx, cy - dy) // screen y grows downward
         }
         return mapOf(
@@ -47,10 +57,27 @@ fun Phone3DView(
     showWorldFrame: Boolean = false,
 ) {
     val colors = Ss.colors
-    Canvas(modifier) {
+    // Orbitable camera: drag to rotate the viewpoint, double-tap to reset. The phone body still
+    // reflects device orientation and the world frame stays fixed — only the camera moves.
+    var camYaw by remember { mutableFloatStateOf(0f) }
+    var camPitch by remember { mutableFloatStateOf(Projection.DEFAULT_PITCH) }
+    val interactive = modifier
+        .pointerInput(Unit) {
+            detectDragGestures { change, drag ->
+                change.consume()
+                camYaw += drag.x * 0.01f
+                camPitch = (camPitch + drag.y * 0.01f).coerceIn(-1.4f, 1.4f)
+            }
+        }
+        .pointerInput(Unit) {
+            detectTapGestures(onDoubleTap = { camYaw = 0f; camPitch = Projection.DEFAULT_PITCH })
+        }
+    Canvas(interactive) {
         val cx = size.width / 2f
         val cy = size.height / 2f
         val unit = minOf(size.width, size.height) * 0.34f
+        val yaw = camYaw
+        val pitch = camPitch
         // Render in the SAME space the laptop uses (Rx(-90°) ENU->Y-up) so the on-device phone's
         // orientation matches the dashboard's 3D viz exactly.
         val r = Projection.threeMatrix(rotationVector ?: floatArrayOf(0f, 0f, 0f))
@@ -64,14 +91,14 @@ fun Phone3DView(
             val wl = unit * 1.45f
             val worldCol = colors.muted.copy(alpha = 0.55f)
             fun wep(v: Vec3): Pair<Float, Float> {
-                val (dx, dy) = Projection.project(v, wl); return Pair(cx + dx, cy - dy)
+                val (dx, dy) = Projection.project(v, wl, yaw, pitch); return Pair(cx + dx, cy - dy)
             }
             drawAxis(cx, cy, wep(Vec3(0f, 1f, 0f)), worldCol, thick = 2.5f)   // Up
             drawAxis(cx, cy, wep(Vec3(1f, 0f, 0f)), worldCol, thick = 2.5f)   // East
             drawAxis(cx, cy, wep(Vec3(0f, 0f, -1f)), worldCol, thick = 2.5f)  // North
             if (showLabels) {
                 fun wlab(v: Vec3): Pair<Float, Float> {
-                    val (dx, dy) = Projection.project(v, unit * 1.62f); return Pair(cx + dx, cy - dy)
+                    val (dx, dy) = Projection.project(v, unit * 1.62f, yaw, pitch); return Pair(cx + dx, cy - dy)
                 }
                 drawAxisLabel("U", wlab(Vec3(0f, 1f, 0f)), worldCol)
                 drawAxisLabel("E", wlab(Vec3(1f, 0f, 0f)), worldCol)
@@ -86,7 +113,7 @@ fun Phone3DView(
             Vec3(-hw, hh, 0f), Vec3(hw, hh, 0f), Vec3(hw, -hh, 0f), Vec3(-hw, -hh, 0f),
         ).map { c ->
             val rot = Projection.rotate(r, c)
-            val (dx, dy) = Projection.project(rot, 1f)
+            val (dx, dy) = Projection.project(rot, 1f, yaw, pitch)
             Offset(cx + dx, cy - dy)
         }
         val body = Path().apply {
@@ -109,19 +136,19 @@ fun Phone3DView(
 
         // Axes (drawn Z first so X/Y read on top). Labels sit just past each arrow tip.
         if (showAxes) {
-            val ep = Phone3DConfig.axisEndpoints(r, cx, cy, unit * 1.15f)
+            val ep = Phone3DConfig.axisEndpoints(r, cx, cy, unit * 1.15f, yaw, pitch)
             drawAxis(cx, cy, ep["Z"]!!, colors.axisZ)
             drawAxis(cx, cy, ep["X"]!!, colors.axisX)
             drawAxis(cx, cy, ep["Y"]!!, colors.axisY)
             if (showLabels) {
-                val lp = Phone3DConfig.axisEndpoints(r, cx, cy, unit * 1.34f) // labels a bit beyond tips
+                val lp = Phone3DConfig.axisEndpoints(r, cx, cy, unit * 1.34f, yaw, pitch) // labels a bit beyond tips
                 drawAxisLabel("Z", lp["Z"]!!, colors.axisZ)
                 drawAxisLabel("X", lp["X"]!!, colors.axisX)
                 drawAxisLabel("Y", lp["Y"]!!, colors.axisY)
             }
             if (sensorVector != null && sensorVectorColor != null) {
                 val rot = Projection.rotate(r, normalize(sensorVector))
-                val (dx, dy) = Projection.project(rot, unit * 1.0f)
+                val (dx, dy) = Projection.project(rot, unit * 1.0f, yaw, pitch)
                 drawAxis(cx, cy, Pair(cx + dx, cy - dy), sensorVectorColor, thick = 5f)
             }
         }
