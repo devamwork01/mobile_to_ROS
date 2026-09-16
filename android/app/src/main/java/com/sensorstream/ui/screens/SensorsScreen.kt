@@ -1,17 +1,28 @@
 package com.sensorstream.ui.screens
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,6 +63,10 @@ fun SensorsScreen(vm: StreamViewModel, nav: AppNav) {
         if (items.isEmpty()) null else cat to items
     }
 
+    // Filter chips: null = All, else a single category.
+    var filter by remember { mutableStateOf<SensorCategory?>(null) }
+    val visible = grouped.filter { filter == null || it.first == filter }
+
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = SsDims.screenPad),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = SsDims.gap),
@@ -61,9 +76,20 @@ fun SensorsScreen(vm: StreamViewModel, nav: AppNav) {
             Text("Sensors", color = c.fg, fontSize = 24.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(bottom = 4.dp))
         }
-        grouped.forEach { (cat, items) ->
+        item {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterPill("All", filter == null) { filter = null }
+                grouped.forEach { (cat, _) ->
+                    FilterPill(cat.title(), filter == cat) { filter = cat }
+                }
+            }
+        }
+        visible.forEach { (cat, rows) ->
             item { SectionHeader(cat.title()) }
-            items(items, key = { it.handle }) { info ->
+            items(rows, key = { it.handle }) { info ->
                 val sig = SignalCatalog.of(info.type, info.stringType)
                 val enabled = info.handle in sel.enabled
                 val p = vm.periodOf(info.handle)
@@ -80,5 +106,24 @@ fun SensorsScreen(vm: StreamViewModel, nav: AppNav) {
             }
         }
         item { Column(Modifier.fillMaxWidth().padding(8.dp)) {} }
+    }
+}
+
+@Composable
+private fun FilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
+    val c = Ss.colors
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) c.accent else c.surface2)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 9.dp),
+    ) {
+        Text(
+            label,
+            color = if (selected) androidx.compose.ui.graphics.Color.White else c.muted,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+        )
     }
 }

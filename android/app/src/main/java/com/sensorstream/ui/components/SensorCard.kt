@@ -53,14 +53,15 @@ fun SensorCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            val tint = SsIconTint.forKey(info.icon)
             Box(
                 Modifier.size(38.dp).clip(RoundedCornerShape(11.dp))
-                    .background(if (enabled) c.accent.copy(alpha = 0.18f) else c.surface2),
+                    .background(tint.copy(alpha = if (enabled) 0.22f else 0.16f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     SsIcons.forKey(info.icon), contentDescription = null,
-                    tint = if (enabled) c.accent else c.muted, modifier = Modifier.size(20.dp),
+                    tint = tint, modifier = Modifier.size(20.dp),
                 )
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {

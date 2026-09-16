@@ -22,7 +22,29 @@ import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.Waves
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+
+/** A distinct, theme-agnostic accent per sensor icon key, so each sensor reads as its own thing
+ *  (the pastel tiles in the reference). Used for the icon tile tint; axis colors stay separate. */
+object SsIconTint {
+    fun forKey(key: String): Color = when (key) {
+        "accel" -> Color(0xFF34C759)
+        "gyro" -> Color(0xFFFF9F0A)
+        "gravity" -> Color(0xFF5E9CFF)
+        "orient" -> Color(0xFF7C5CFF)
+        "magnet" -> Color(0xFF22C3C9)
+        "pressure" -> Color(0xFF4FA3FF)
+        "temp" -> Color(0xFFFF6B6B)
+        "humidity" -> Color(0xFF3FA9FF)
+        "light" -> Color(0xFFFFCC33)
+        "proximity" -> Color(0xFFFF6FB5)
+        "steps" -> Color(0xFF2BD4B4)
+        "motion" -> Color(0xFFA06BFF)
+        "heart" -> Color(0xFFFF4D6D)
+        else -> Color(0xFF8B95A4)
+    }
+}
 
 /** Resolves SignalCatalog icon keys + nav/status keys to Material icons (no custom assets). */
 object SsIcons {
