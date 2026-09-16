@@ -10,6 +10,7 @@ sealed interface Screen {
     data object Sensors : Screen
     data object Connection : Screen
     data object Settings : Screen
+    data object Diagnostics : Screen
     data class Detail(val handle: Int) : Screen
 }
 

@@ -24,6 +24,7 @@ import com.sensorstream.ui.nav.AppNav
 import com.sensorstream.ui.nav.Screen
 import com.sensorstream.ui.nav.rememberAppNav
 import com.sensorstream.ui.screens.ConnectionScreen
+import com.sensorstream.ui.screens.DiagnosticsScreen
 import com.sensorstream.ui.screens.HomeScreen
 import com.sensorstream.ui.screens.SensorDetailScreen
 import com.sensorstream.ui.screens.SensorsScreen
@@ -82,8 +83,9 @@ private fun AppContent(vm: StreamViewModel, nav: AppNav, current: Screen) {
     when (current) {
         is Screen.Home -> HomeScreen(vm, nav)
         is Screen.Sensors -> SensorsScreen(vm, nav)
-        is Screen.Connection -> ConnectionScreen(vm)
+        is Screen.Connection -> ConnectionScreen(vm, nav)
         is Screen.Settings -> SettingsScreen(vm)
+        is Screen.Diagnostics -> DiagnosticsScreen(vm, nav)
         is Screen.Detail -> SensorDetailScreen(vm, nav, current.handle)
     }
 }
