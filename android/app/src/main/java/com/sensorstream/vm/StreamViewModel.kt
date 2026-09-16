@@ -110,14 +110,25 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
 
     fun previewAccuracyOf(type: Int): Int = previewAccuracy[type] ?: -1
 
+    /** The preview sampling delay (µs) for a sensor type, taken from the user's selected rate so
+     *  changing the rate on the detail screen visibly changes the on-device preview cadence.
+     *  0 / "Max" maps to the fastest the device allows. */
+    private fun previewDelayUs(type: Int): Int {
+        val handle = catalog.firstOrNull { it.type == type }?.handle
+        val periodUs = handle?.let { _sel.value.periodByHandle[it] } ?: 10_000
+        return if (periodUs <= 0) SensorManager.SENSOR_DELAY_FASTEST else periodUs
+    }
+
+    private fun registerPreview(type: Int) {
+        sensorManager.getDefaultSensor(type)?.let {
+            sensorManager.registerListener(previewListener, it, previewDelayUs(type))
+        }
+    }
+
     /** Register read-only preview listeners for [types] (ref-counted). */
     fun startPreview(vararg types: Int) {
         for (type in types) {
-            if ((previewRefs[type] ?: 0) == 0) {
-                sensorManager.getDefaultSensor(type)?.let {
-                    sensorManager.registerListener(previewListener, it, SensorManager.SENSOR_DELAY_GAME)
-                }
-            }
+            if ((previewRefs[type] ?: 0) == 0) registerPreview(type)
             previewRefs[type] = (previewRefs[type] ?: 0) + 1
         }
     }
@@ -179,6 +190,13 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     fun setPeriod(handle: Int, periodUs: Int) {
         _sel.value = _sel.value.copy(periodByHandle = _sel.value.periodByHandle + (handle to periodUs))
         applyLiveReconfig()
+        // If this sensor is being previewed on-screen, re-register it so the new rate takes effect
+        // immediately (preview is UI-only and independent of the streaming pipeline).
+        val type = catalog.firstOrNull { it.handle == handle }?.type
+        if (type != null && (previewRefs[type] ?: 0) > 0) {
+            sensorManager.getDefaultSensor(type)?.let { sensorManager.unregisterListener(previewListener, it) }
+            registerPreview(type)
+        }
     }
 
     /** When already streaming, push selection/rate changes to the engine without a reconnect. */
