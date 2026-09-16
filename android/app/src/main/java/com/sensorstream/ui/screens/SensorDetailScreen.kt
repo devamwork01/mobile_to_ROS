@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -184,7 +185,13 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
         if (isVector) {
             SectionHeader("Real-time")
             SsCard(Modifier.fillMaxWidth()) {
-                MiniSignalGraph(values = values, colors = axisColors, modifier = Modifier.fillMaxWidth().aspectRatio(2.2f))
+                MiniSignalGraph(
+                    values = values,
+                    colors = axisColors,
+                    labels = sig.componentLabels,
+                    unit = sig.unit,
+                    modifier = Modifier.fillMaxWidth().height(190.dp),
+                )
             }
         }
 
