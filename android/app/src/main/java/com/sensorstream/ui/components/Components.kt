@@ -1,5 +1,11 @@
 package com.sensorstream.ui.components
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,12 +66,27 @@ private fun StreamPhase.color(): Color = when (this) {
     StreamPhase.READY -> Ss.colors.muted
 }
 
-/** Dot + text status. Never color-only (Spec §12/§47): the label always accompanies the dot. */
+/** Dot + text status. Never color-only (Spec §12/§47): the label always accompanies the dot.
+ *  The dot gently pulses while an operation is in-flight (connecting/reconnecting/streaming). */
 @Composable
 fun StatusBadge(phase: StreamPhase, modifier: Modifier = Modifier) {
     val c = phase.color()
+    val animate = phase == StreamPhase.CONNECTING || phase == StreamPhase.RECONNECTING || phase == StreamPhase.STREAMING
+    val dotAlpha = if (animate) {
+        val transition = rememberInfiniteTransition(label = "statusPulse")
+        val a by transition.animateFloat(
+            initialValue = 1f,
+            targetValue = 0.3f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(if (phase == StreamPhase.STREAMING) 1100 else 650, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "statusPulseAlpha",
+        )
+        a
+    } else 1f
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(Modifier.size(9.dp).clip(CircleShape).background(c))
+        Box(Modifier.size(9.dp).clip(CircleShape).background(c.copy(alpha = dotAlpha)))
         Text(phase.label.uppercase(), color = c, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, letterSpacing = 0.6.sp)
     }
 }

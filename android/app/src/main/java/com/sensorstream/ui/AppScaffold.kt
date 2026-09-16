@@ -53,7 +53,7 @@ fun AppScaffold(vm: StreamViewModel) {
         bottomBar = {
             NavigationBar(containerColor = Ss.colors.surface) {
                 TABS.forEach { tab ->
-                    val selected = current::class == tab.screen::class
+                    val selected = nav.activeTab::class == tab.screen::class
                     NavigationBarItem(
                         selected = selected,
                         onClick = { nav.go(tab.screen) },
