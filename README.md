@@ -20,12 +20,15 @@ orientation. Built as a telemetry system: correctness → low latency → high-r
 | Wire protocol + Python codec | ✅ implemented, golden-vector pinned, unit tests passing |
 | Laptop receiver + async pipeline (Phases 1–8) | ✅ multi-sensor, sync, logging/replay, discovery |
 | Android app | ✅ enumeration, multi-sensor streaming, discovery, auto-reconnect, screen-off power fix — **verified on Galaxy S25 Ultra** |
-| Dashboard redesign — "SensorStream Pro" (React) | ✅ L1/L2: design system, trimmed nav, live cards, real-time graphs, sensor details modal |
+| On-phone recording + laptop backfill (screen-off data integrity) | ✅ Phase 2A+2B implemented; lossless across drops, gap detect + resend/dedup — **verified on S25 Ultra + Galaxy M36 5G**, merged to main |
+| Dashboard redesign — "SensorStream Pro" (React) | ✅ design system, trimmed nav, live cards, real-time graphs, sensor details modal, light/dark theme |
 | Premium 3D device view | ✅ rounded titanium + glass phone, image-based lighting, contact shadow (Three.js) |
+| Mobile app UI — premium redesign (Jetpack Compose) | ✅ Home / Sensors / Sensor Detail / Orientation / Connection / Settings / Diagnostics; light+dark theme override; on-device pseudo-3D orientation matching the laptop — **verified on S25 Ultra** |
+| Branding | ✅ adaptive app icon + dashboard favicon (shared 3-axis mark) |
 
-The redesigned dashboard has been verified end-to-end with the built-in `--selftest`
-synthetic stream. **Re-verification against a real phone, the light theme, and the on-phone
-3D/redesign are still pending — see [Pending / not yet verified](#pending--not-yet-verified).**
+Both the dashboard and the phone app have been verified against a real phone (S25 Ultra),
+in light and dark themes. A few larger items remain — see
+[Pending / not yet verified](#pending--not-yet-verified).
 
 ## Prerequisites
 
@@ -87,8 +90,16 @@ re-run `npm run build` so the Python server picks up the new `dist/`.
 1. Install Android Studio (`winget install --id Google.AndroidStudio -e`), open the
    `android/` folder, and let Gradle sync.
 2. Run on a physical device (USB debugging enabled).
-3. In the app: use auto-discovery, or enter the laptop's LAN IP + port `5005`, pick sensors,
-   and **Start**.
+3. In the app: open **Connection**, use **Find Laptop Automatically** (or enter the laptop's
+   LAN IP + control port `8081`), pick sensors on the **Sensors** tab, and **Connect & Stream**.
+
+The phone app has a premium redesigned UI (Home with a live pseudo-3D orientation view,
+per-sensor detail screens, a Diagnostics screen, and a Settings screen with a light/dark theme
+override). Streaming continues in the background via a foreground service; tap its notification
+to return to the app.
+
+**Quick reinstall (Windows):** with a device plugged in, run `install-phone.bat` from the repo
+root — it builds the debug APK (JBR 21) and installs it on every connected device.
 
 Full instructions: [`docs/build.md`](docs/build.md) and [`docs/run.md`](docs/run.md).
 
@@ -146,18 +157,38 @@ Tracked so the "test-as-you-build" checks don't get lost.
       screen-lock that triggers the M36 throttle; verified latency back to ~10 ms. Note: manually
       switching apps / opening recent apps still backgrounds the app (same OEM throttle) and
       recovers on return — no in-app fix for that; keep the app foreground while streaming.
-- [~] On-phone lossless recording + laptop backfill (screen-off data integrity; laptop stays
-      authoritative, live path untouched). Spec:
-      [`docs/superpowers/specs/2026-09-14-onphone-recording-backfill-design.md`](docs/superpowers/specs/2026-09-14-onphone-recording-backfill-design.md) ·
-      Plan: [`docs/superpowers/plans/2026-09-14-onphone-recording.md`](docs/superpowers/plans/2026-09-14-onphone-recording.md)
-    - [x] **Phase 1 — on-phone recording** (branch `feat/onphone-recording`): `LocalRecorder`
-          writes a bounded `.ssbin` ring (byte-compatible with `logging_sink.py`), fanned out from
-          acquisition off the sensor callback (non-blocking `trySend` → IO drain), size/age prune,
-          `(handle,seq)` index for backfill, on-device size/buffered/dropped in the status card.
-          7 JVM unit tests + `assembleDebug` green. **On-device streaming smoke test still pending.**
-    - [ ] Phase 2 — laptop gap detection + backfill request/serve + merge/dedup on read (separate plan)
+- [x] On-phone lossless recording + laptop backfill (screen-off data integrity; laptop stays
+      authoritative, live path untouched) — **implemented, verified on S25 Ultra + Galaxy M36 5G,
+      merged to main.** Spec:
+      [`docs/superpowers/specs/2026-09-14-onphone-recording-backfill-design.md`](docs/superpowers/specs/2026-09-14-onphone-recording-backfill-design.md)
+    - [x] **Phase 1 — on-phone recording**: `LocalRecorder` writes a bounded `.ssbin` ring
+          (byte-compatible with `logging_sink.py`), fanned out from acquisition off the sensor
+          callback (non-blocking `trySend` → IO drain), size/age prune, `(handle,seq)` index for
+          resend, on-device size/buffered/dropped in the status card. Acquisition keeps running and
+          the recorder keeps writing across a WS drop (session/sender split). Verified on-device.
+    - [x] **Phase 2 — laptop gap detection + backfill request/serve + merge/dedup on read**:
+          `GapTracker` (keyed by `client_id` so gaps survive device-id rotation), `Reconciler`,
+          `MSG_RESEND`/`BACKFILL` protocol, phone `BackfillResponder` (verbatim datagram resend),
+          recordings dedup by `(handle,seq)`. Verified end-to-end (firewall-induced loss →
+          backfilled, recording gap-free). 17 phone + 41 laptop tests green.
 - [ ] ROS2 bridge (`Ros2Sink` behind the `OutputSink` seam)
 - [ ] Soak test (long-run stability)
+
+### F. Mobile app UI — premium redesign (Jetpack Compose) — verified on S25 Ultra
+UI-only redesign over the existing `StreamViewModel`; the sensor/fusion/network/wire pipeline is
+untouched. Axis colors are fixed (X=red, Y=green, Z=blue) in both themes.
+- [x] Design system (theme-aware tokens, typography, dimens) + bottom-nav shell + back stack
+- [x] Home — live pseudo-3D orientation hero (Canvas, matches the laptop's `androidToThree` frame),
+      status card (tap to open Connection), active-sensor summary, start/stop
+- [x] Sensors — categorized list; Sensor Detail — live values/magnitude, mini graph, sampling-rate
+      config; Orientation — world frame + body/world/labels toggles + Euler/Quaternion
+- [x] Environmental hero (gauge for pressure, big value for temp/humidity/light)
+- [x] Connection — editable IP/port, Find Laptop, success/not-found discovery feedback
+- [x] Settings — System/Light/Dark theme override (persisted + applied), 3D defaults, about
+- [x] Diagnostics — latency/throughput, reliability counters, on-phone buffer
+- [x] Polish — pulsing status dot, tappable foreground-service notification (returns to app)
+- [ ] Reinstall the current build on the Galaxy M36 (it is on an older build)
+- [ ] Light theme + full streaming pass on a second device
 
 ### E. Dashboard performance
 - [x] 3D canvas lag on large screens / many sensors — layout was stretching the canvas to
