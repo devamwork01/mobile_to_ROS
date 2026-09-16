@@ -72,6 +72,11 @@ class StreamEngine(context: Context) {
     fun latestFor(handle: Int): SensorSample? = latest[handle]
     fun hzFor(handle: Int): Float = hz[handle] ?: 0f
 
+    /** The exact [Sensor] for a catalog handle, for read-only UI preview registration (not the
+     *  telemetry path). Lets the preview register vendor/uncalibrated/duplicate sensors that
+     *  getDefaultSensor(type) would miss. */
+    fun sensorFor(handle: Int): android.hardware.Sensor? = repo.sensorAt(handle)
+
     private var host: String = ""
     private var controlPort: Int = 0
     private var selections: List<Selection> = emptyList()
