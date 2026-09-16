@@ -174,6 +174,7 @@ Tracked so the "test-as-you-build" checks don't get lost.
 ### C. Premium 3D
 - [x] Rounded/metallic/glass phone renders in both frames; toggles work; no perf regression;
       WebGL cleanup on unmount — verified via `--selftest`
+- [x] Drag-to-orbit (OrbitControls: rotate + wheel-zoom, pan off, damping) on the dashboard 3D
 
 ### D. System items
 - [x] Live sensor reconfig — toggle a sensor on the phone while streaming adds/removes its
@@ -204,7 +205,9 @@ Tracked so the "test-as-you-build" checks don't get lost.
           recordings dedup by `(handle,seq)`. Verified end-to-end (firewall-induced loss →
           backfilled, recording gap-free). 17 phone + 41 laptop tests green.
 - [ ] ROS2 bridge (`Ros2Sink` behind the `OutputSink` seam)
-- [ ] Soak test (long-run stability)
+- [x] Soak test (long-run stability) — `tools/soak.py`; a 30-min synthetic run PASSED
+      (668k packets, 0 decode errors / permanent gaps, flat RSS ~37 MB, latency bounded, no
+      crash). A real-phone end-to-end soak remains optional.
 
 ### F. Mobile app UI — premium redesign (Jetpack Compose) — verified on S25 Ultra
 UI-only redesign over the existing `StreamViewModel`; the sensor/fusion/network/wire pipeline is
@@ -219,6 +222,25 @@ untouched. Axis colors are fixed (X=red, Y=green, Z=blue) in both themes.
 - [x] Settings — System/Light/Dark theme override (persisted + applied), 3D defaults, about
 - [x] Diagnostics — latency/throughput, reliability counters, on-phone buffer
 - [x] Polish — pulsing status dot, tappable foreground-service notification (returns to app)
+
+Refinement pass (Phases 1–5, all verified on S25 Ultra):
+- [x] **Data correctness** — proximity / uncalibrated / vendor ("naming-type") sensors now deliver
+      data (preview re-keyed by handle → registers the *exact* sensor); friendly names for every
+      sensor (prettified fallback + technical subtitle, no raw `android.sensor.*`); rate changes
+      now apply to the on-device preview (verified via `dumpsys sensorservice`)
+- [x] **Sensors pane** — per-sensor colored icon tiles + filter chips (All / Motion / Orientation /
+      Magnetic / Environment / Proximity / Other)
+- [x] **Plots** — interactive legend (tap a signal to isolate / show all), time-window (5/10/20s),
+      min/max magnitude scale, real-time graph for environmental / single-value sensors too
+- [x] **3D** — world ground grid + extruded phone (glass front / metallic back / camera module) +
+      world-axes corner gizmo + drag-to-orbit + double-tap reset. Orientation verified **identical
+      to the laptop** (`Projection.androidToThree` matches `lib/orient.js` line-for-line). A
+      SceneView/Filament photoreal-GLB route was evaluated (rendered on-device) but **dropped** —
+      GLB model-frame mismatch + ~32 MB APK; the Canvas view is the correct, lightweight choice.
+- [x] **Detail polish** — Active/Inactive pill + rate pill, Roll/Pitch/Yaw tiles, Accuracy + Sensor
+      model rows, tidy wrapping ("Android Type" → "Type")
+- [x] **Network priority** — best-effort DSCP QoS marking on the phone UDP/WS + laptop receiver
+      (docs in [Network priority](#network-priority-on-a-busy-wi-fi)); browsers can't be tagged
 - [ ] Reinstall the current build on the Galaxy M36 (it is on an older build)
 - [ ] Light theme + full streaming pass on a second device
 
