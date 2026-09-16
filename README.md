@@ -114,6 +114,20 @@ python -m pytest
 ./gradlew test        # Windows: gradlew.bat test
 ```
 
+### Soak test (long-run stability)
+
+`tools/soak.py` launches the server on isolated ports, blasts a wire-identical
+multi-sensor UDP load, samples memory/throughput/latency, and prints a PASS/FAIL
+report (no phone needed). Artifacts land in `laptop/soak-out/` (git-ignored).
+
+```bash
+cd laptop
+python tools/soak.py --minutes 30      # default; use --minutes 2 for a quick smoke
+```
+
+It fails the run if decode errors or permanent gaps appear, throughput drifts
+>10% from target, RSS grows like a leak, or the server crashes.
+
 ## Pending / not yet verified
 
 Tracked so the "test-as-you-build" checks don't get lost.
