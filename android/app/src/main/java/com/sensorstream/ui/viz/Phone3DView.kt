@@ -1,14 +1,27 @@
 package com.sensorstream.ui.viz
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Size
@@ -58,22 +71,27 @@ fun Phone3DView(
     showGrid: Boolean = true,
 ) {
     val colors = Ss.colors
-    // Orbitable camera: drag to rotate the viewpoint, double-tap to reset. The phone body still
-    // reflects device orientation and the world frame stays fixed — only the camera moves.
+    // Orbitable camera: drag rotates the viewpoint ONLY when rotate-mode is on (the corner toggle),
+    // so the 3D never steals the page scroll — important in landscape where it can fill the width.
+    // Double-tap resets. The phone body still reflects device orientation; only the camera moves.
     var camYaw by remember { mutableFloatStateOf(0f) }
     var camPitch by remember { mutableFloatStateOf(Projection.DEFAULT_PITCH) }
-    val interactive = modifier
-        .pointerInput(Unit) {
-            detectDragGestures { change, drag ->
-                change.consume()
-                camYaw += drag.x * 0.01f
-                camPitch = (camPitch + drag.y * 0.01f).coerceIn(-1.4f, 1.4f)
-            }
-        }
-        .pointerInput(Unit) {
-            detectTapGestures(onDoubleTap = { camYaw = 0f; camPitch = Projection.DEFAULT_PITCH })
-        }
-    Canvas(interactive) {
+    var rotateEnabled by remember { mutableStateOf(false) }
+    Box(modifier) {
+        val gestures = if (rotateEnabled) {
+            Modifier
+                .pointerInput(Unit) {
+                    detectDragGestures { change, drag ->
+                        change.consume()
+                        camYaw += drag.x * 0.01f
+                        camPitch = (camPitch + drag.y * 0.01f).coerceIn(-1.4f, 1.4f)
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(onDoubleTap = { camYaw = 0f; camPitch = Projection.DEFAULT_PITCH })
+                }
+        } else Modifier
+        Canvas(Modifier.fillMaxSize().then(gestures)) {
         val cx = size.width / 2f
         val cy = size.height / 2f
         val unit = minOf(size.width, size.height) * 0.34f
@@ -222,6 +240,25 @@ fun Phone3DView(
         drawAxisLabel("X", gp(Vec3(1f, 0f, 0f), glen * 1.42f), colors.axisX, size = 22f)
         drawAxisLabel("Y", gp(Vec3(0f, 1f, 0f), glen * 1.42f), colors.axisY, size = 22f)
         drawAxisLabel("Z", gp(Vec3(0f, 0f, 1f), glen * 1.42f), colors.axisZ, size = 22f)
+        }
+
+        // Rotate-mode toggle (top-end). OFF by default so a drag scrolls the page; ON = drag orbits
+        // + double-tap resets. This is the fix for the 3D "eating" scroll, especially in landscape.
+        val toggleBg = if (rotateEnabled) colors.accent else colors.surface2
+        val toggleFg = if (rotateEnabled) Color.White else colors.muted
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(8.dp).size(36.dp)
+                .clip(CircleShape).background(toggleBg)
+                .clickable { rotateEnabled = !rotateEnabled },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Refresh,
+                contentDescription = if (rotateEnabled) "Rotation on" else "Rotation off",
+                tint = toggleFg,
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 

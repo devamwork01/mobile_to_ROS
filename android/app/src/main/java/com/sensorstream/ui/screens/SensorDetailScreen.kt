@@ -32,6 +32,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -110,12 +112,17 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
         }
 
         // Hero: 3D phone for motion/orientation/magnetic; gauge/big-value for environmental.
+        // Cap the height in landscape so it doesn't fill the short viewport.
+        val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val heroMod = Modifier.fillMaxWidth().then(
+            if (landscape) Modifier.height(240.dp) else Modifier.aspectRatio(if (isEnv) 1.15f else 1.05f)
+        )
         if (isEnv) {
             EnvironmentalHero(
                 value = values?.getOrNull(0),
                 unit = sig.unit,
                 kind = sig.icon,
-                modifier = Modifier.fillMaxWidth().aspectRatio(1.15f),
+                modifier = heroMod,
             )
         } else {
             Phone3DView(
@@ -125,7 +132,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
                 showAxes = if (isOrientation) showBody else true,
                 showLabels = if (isOrientation) showLabels else true,
                 showWorldFrame = isOrientation && showWorld,
-                modifier = Modifier.fillMaxWidth().aspectRatio(1.05f),
+                modifier = heroMod,
             )
         }
 

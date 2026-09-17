@@ -1,5 +1,6 @@
 package com.sensorstream.ui.screens
 
+import android.content.res.Configuration
 import android.hardware.Sensor
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -75,9 +77,12 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
         )
 
         // Hero pseudo-3D phone (Canvas): correct orientation (matches laptop) + grid + orbit + reset.
+        // Cap the height in landscape so it doesn't dominate the (short) viewport.
+        val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
         Phone3DView(
             rotationVector = orientation,
-            modifier = Modifier.fillMaxWidth().aspectRatio(1.1f),
+            modifier = Modifier.fillMaxWidth()
+                .then(if (landscape) Modifier.height(260.dp) else Modifier.aspectRatio(1.1f)),
         )
 
         // Connection card — tap to open the Connection screen and connect to the laptop.
