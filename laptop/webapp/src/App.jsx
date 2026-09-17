@@ -6,6 +6,7 @@ import SensorModal from "./components/SensorModal.jsx";
 import PerfOverlay from "./components/PerfOverlay.jsx";
 import ThemeToggle from "./components/ThemeToggle.jsx";
 import { getStoredTheme, setTheme } from "./lib/theme.js";
+import { netLoss } from "./lib/metrics.js";
 // Heavy deps (three.js, uPlot) are code-split so the dashboard shell paints fast.
 const Phone3D = lazy(() => import("./components/Phone3D.jsx"));
 const GraphPanel = lazy(() => import("./components/GraphPanel.jsx"));
@@ -117,7 +118,7 @@ function Diagnostics({ meta }) {
         <DiagRow label="Network latency (p50 / p95)" value={`${d.latency_ms_p50 ?? "—"} / ${d.latency_ms_p95 ?? "—"} ms`} />
         <DiagRow label="Jitter" value={`${d.jitter_ms ?? "—"} ms`} />
         <DiagRow label="Phone latency (acq→send)" value={`${d.phone_latency_ms_p50 ?? "—"} / ${d.phone_latency_ms_p95 ?? "—"} ms`} />
-        <DiagRow label="Packet loss" value={`${d.loss_pct ?? 0} %`} tone={(d.loss_pct || 0) > 1 ? "text-warn" : "text-fg"} />
+        <DiagRow label="Packet loss (net of backfill)" value={`${netLoss(d, s).pct} %`} tone={netLoss(d, s).netLost > 0 ? "text-warn" : "text-ok"} />
         <DiagRow label="Throughput" value={rate} />
       </Panel>
       <Panel title="Raw pipeline (recorded losslessly)">
