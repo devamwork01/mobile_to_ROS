@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -71,8 +72,12 @@ fun AppScaffold(vm: StreamViewModel) {
             }
         },
     ) { pad ->
-        Box(Modifier.fillMaxSize().padding(pad).background(Ss.colors.bg)) {
-            AppContent(vm, nav, current)
+        // Center content and cap its width so landscape / large screens read as an intentional
+        // column instead of stretching edge-to-edge.
+        Box(Modifier.fillMaxSize().padding(pad).background(Ss.colors.bg), contentAlignment = Alignment.TopCenter) {
+            Box(Modifier.widthIn(max = 640.dp).fillMaxSize()) {
+                AppContent(vm, nav, current)
+            }
         }
     }
 }
