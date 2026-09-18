@@ -76,6 +76,8 @@ export default function Phone3D() {
   const [tog, setTog] = useState({ world: true, body: true, vector: true, labels: true });
   const togRef = useRef(tog);
   togRef.current = tog;
+  const cmdRef = useRef(null); // "recenter" | "reset", consumed by the render loop
+  const [recentered, setRecentered] = useState(false);
 
   useEffect(() => {
     const el = mount.current;
@@ -104,6 +106,11 @@ export default function Phone3D() {
     controls.maxDistance = 6;
     controls.target.set(0, 0, 0);
     controls.update();
+
+    // Double-click the 3D to reset to the default view (camera + absolute orientation), matching
+    // the phone's double-tap. Same action as the "Reset view" button.
+    const onDblClick = () => { cmdRef.current = "reset"; setRecentered(false); };
+    renderer.domElement.addEventListener("dblclick", onDblClick);
 
     // Image-based lighting (procedural, offline) for realistic metal/glass reflections.
     const pmrem = new THREE.PMREMGenerator(renderer);
@@ -249,6 +256,11 @@ export default function Phone3D() {
     label(worldLabels, "U", new THREE.Vector3(0, 1.48, 0), 0xe3b341);
 
     const target = new THREE.Quaternion();
+    // Recenter reference (display-only): show every pose relative to a captured one.
+    const refQuat = new THREE.Quaternion();
+    const invRef = new THREE.Quaternion();
+    const shown = new THREE.Quaternion();
+    let haveRef = false;
     let raf = 0;
     let lastRender = 0;
 
@@ -280,7 +292,29 @@ export default function Phone3D() {
         const q = androidToThree(x, y, z, w);
         target.set(q.x, q.y, q.z, q.w);
       }
-      phone.quaternion.slerp(target, 0.3);
+      // Recenter: capture the current pose as reference, then show every pose relative to it
+      // (ref^-1 * q) and rotate the world frame the same way so phone and world stay consistent.
+      if (cmdRef.current === "recenter") { refQuat.copy(target); haveRef = true; cmdRef.current = null; }
+      else if (cmdRef.current === "reset") {
+        haveRef = false;
+        // Snap the camera back to its start pose. Damping must be off for the reset frame, or
+        // OrbitControls re-applies leftover drag momentum on the next update() and the camera
+        // never actually returns to default.
+        const damp = controls.enableDamping;
+        controls.enableDamping = false;
+        controls.reset();
+        controls.enableDamping = damp;
+        cmdRef.current = null;
+      }
+      if (haveRef) {
+        invRef.copy(refQuat).invert();
+        shown.copy(invRef).multiply(target);
+        world.quaternion.copy(invRef);
+      } else {
+        shown.copy(target);
+        world.quaternion.identity();
+      }
+      phone.quaternion.slerp(shown, 0.3);
 
       if (t.vector) {
         for (const ty of GRAV_TYPES) {
@@ -324,6 +358,7 @@ export default function Phone3D() {
 
     return () => {
       cancelAnimationFrame(raf);
+      renderer.domElement.removeEventListener("dblclick", onDblClick);
       controls.dispose();
       ro.disconnect();
       io.disconnect();
@@ -336,10 +371,21 @@ export default function Phone3D() {
   }, []);
 
   const T = (k) => setTog((s) => ({ ...s, [k]: !s[k] }));
+  const recenter = () => { cmdRef.current = "recenter"; setRecentered(true); };
+  const resetView = () => { cmdRef.current = "reset"; setRecentered(false); };
   return (
     <div className="flex flex-col h-full">
       <div ref={mount} className="relative flex-1 min-h-[300px] rounded-xl overflow-hidden bg-[radial-gradient(120%_120%_at_50%_0%,rgba(61,123,253,0.08),rgba(0,0,0,0)_60%)]" />
-      <div className="flex flex-wrap gap-x-5 gap-y-2 pt-3">
+      <div className="flex items-center gap-2 pt-3">
+        <button onClick={recenter} className="btn-ghost text-xs" title="Zero the view to the phone's current pose">
+          Recenter
+        </button>
+        <button onClick={resetView} className="btn-ghost text-xs" title="Reset the camera and show absolute orientation">
+          Reset view
+        </button>
+        {recentered && <span className="text-[11px] text-faint">relative to captured pose</span>}
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-2 pt-2">
         <Toggle label="World Frame" on={tog.world} onClick={() => T("world")} />
         <Toggle label="Body Frame" on={tog.body} onClick={() => T("body")} />
         <Toggle label="Sensor Vector" on={tog.vector} onClick={() => T("vector")} />
