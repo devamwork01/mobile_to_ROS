@@ -47,7 +47,10 @@ function onRecord(r) {
     const sl = signalListeners.get(r.handle);
     if (sl) sl.forEach((l) => l());
   }
-  if (!activeHandles.has(r.handle)) {
+  // Reconcile the handle's type from the live record (authoritative). `active_set` can arrive
+  // before the catalog and pin a handle to the `?? 0` fallback; without this the type would stay
+  // wrong forever — mislabeling the card and dropping it from the (type-keyed) graph grouping.
+  if (activeHandles.get(r.handle) !== r.type) {
     activeHandles.set(r.handle, r.type);
     setMeta({ active: [...activeHandles.entries()].map(([handle, type]) => ({ handle, type })) });
   }

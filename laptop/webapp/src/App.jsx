@@ -86,10 +86,17 @@ function Empty({ icon, title, sub }) {
 function LiveGrid({ meta, onSelect, cols = "sm:grid-cols-2" }) {
   if (meta.active.length === 0)
     return <Empty icon="Radar" title="No sensors streaming" sub="Start streaming from the phone (or run --selftest)." />;
+  const stByHandle = new Map((meta.catalog || []).map((s) => [s.handle, s.stringType]));
   return (
     <div className={`grid grid-cols-1 ${cols} gap-3`}>
       {meta.active.map(({ handle, type }) => (
-        <SignalCard key={handle} handle={handle} type={type} onSelect={() => onSelect({ handle, type })} />
+        <SignalCard
+          key={handle}
+          handle={handle}
+          type={type}
+          stringType={stByHandle.get(handle)}
+          onSelect={() => onSelect({ handle, type })}
+        />
       ))}
     </div>
   );
@@ -163,11 +170,12 @@ export default function App() {
 
   const graphSensors = [];
   const seen = new Set();
+  const stByType = new Map((meta.catalog || []).map((s) => [s.type, s.stringType]));
   meta.active.forEach(({ type }) => {
-    const k = signalMeta(type).kind;
-    if ((k === "vector" || k === "orientation") && !seen.has(type)) {
+    const m = signalMeta(type, stByType.get(type));
+    if ((m.kind === "vector" || m.kind === "orientation") && !seen.has(type)) {
       seen.add(type);
-      graphSensors.push({ type, name: signalMeta(type).name });
+      graphSensors.push({ type, name: m.name });
     }
   });
 
