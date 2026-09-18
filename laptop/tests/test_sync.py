@@ -66,3 +66,47 @@ def test_multi_sensor_independent_loss():
     assert snap["active_sensors"] == 2
     assert st.total_lost == 1  # gyro skipped seq 1
     assert snap["received"] == 4
+
+
+def test_reordering_is_not_loss():
+    """UDP delivers datagrams out of order; every seq still arrives, just not in order.
+
+    The old strictly-increasing gap counter fabricated loss on the forward hops and never
+    took it back when the late packet showed up, so loss climbed forever with zero real
+    data missing. Loss must be immune to pure reordering.
+    """
+    st = SyncTracker()
+    order = [0, 1, 2, 4, 3, 6, 5, 7, 9, 8, 10]  # all present 0..10, several swaps
+    for i, seq in enumerate(order):
+        st.observe(_dg([p.Record(1, 0, seq, 1000 + i, 3, [0.0])]), t_recv_ns=2000 + i)
+    snap = st.snapshot()
+    assert snap["received"] == len(order)
+    assert st.total_lost == 0
+    assert snap["loss_pct"] == 0.0
+
+
+def test_real_loss_survives_reordering():
+    """A genuinely missing seq is still counted even when the rest arrives out of order."""
+    st = SyncTracker()
+    order = [0, 2, 1, 4, 6, 5]  # seq 3 never arrives; others reordered
+    for i, seq in enumerate(order):
+        st.observe(_dg([p.Record(1, 0, seq, 1000 + i, 3, [0.0])]), t_recv_ns=2000 + i)
+    snap = st.snapshot()
+    assert snap["received"] == 6
+    assert st.total_lost == 1  # only seq 3 is missing (span 0..6 = 7, received 6)
+
+
+def test_seq_reset_is_not_loss():
+    """Toggling a sensor off/on restarts its per-handle seq at 0 (SensorEventSource).
+
+    A shared, long-lived SyncTracker must treat that restart as a new epoch, not as a
+    ~5000-sample loss spike.
+    """
+    st = SyncTracker()
+    for seq in range(5000):  # clean run
+        st.observe(_dg([p.Record(1, 0, seq, seq, 3, [0.0])]), t_recv_ns=seq)
+    for seq in range(100):  # phone re-toggled the sensor; seq restarts at 0
+        st.observe(_dg([p.Record(1, 0, seq, 10_000_000 + seq, 3, [0.0])]), t_recv_ns=10_000_000 + seq)
+    snap = st.snapshot()
+    assert snap["received"] == 5100
+    assert st.total_lost == 0
