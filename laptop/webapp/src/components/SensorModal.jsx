@@ -16,9 +16,9 @@ function Row({ label, value, mono = true }) {
 
 export default function SensorModal({ sensor, catalog, onClose }) {
   const rec = useSignal(sensor.handle);
-  const meta = signalMeta(sensor.type);
-  const Icon = Icons[meta.icon] || Icons.CircleDot;
   const cat = (catalog || []).find((s) => s.handle === sensor.handle) || {};
+  const meta = signalMeta(sensor.type, cat.stringType);
+  const Icon = Icons[meta.icon] || Icons.CircleDot;
   const v = rec?.v || [];
   const isVec = meta.kind === "vector" || meta.kind === "orientation";
   const labels = meta.kind === "orientation" ? ["qx", "qy", "qz", "qw"] : ["X", "Y", "Z", "W"];

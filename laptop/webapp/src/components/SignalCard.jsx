@@ -61,9 +61,9 @@ function ScalarValue({ v, unit }) {
   );
 }
 
-export default function SignalCard({ handle, type, onSelect }) {
+export default function SignalCard({ handle, type, stringType, onSelect }) {
   const rec = useSignal(handle);
-  const meta = signalMeta(type);
+  const meta = signalMeta(type, stringType);
   const Icon = Icons[meta.icon] || Icons.CircleDot;
   const v = rec?.v || [];
   const active = !!rec;

@@ -31,18 +31,29 @@ const S = {
   8: { name: "Proximity", sub: "Proximity Sensor", type: "TYPE_PROXIMITY", unit: "cm", cat: "environment", kind: "scalar", icon: "Ruler" },
 };
 
-export function signalMeta(type) {
-  return (
-    S[type] || {
-      name: `Type ${type}`,
-      sub: "Sensor",
-      type: `TYPE_${type}`,
-      unit: "",
-      cat: "other",
-      kind: type >= 3 ? "vector" : "scalar",
-      icon: "CircleDot",
-    }
-  );
+// "android.sensor.step_counter" -> "Step Counter"; "com.samsung.sensor.super_accel" -> "Super Accel".
+// Uses only the tail after the last dot, so vendor namespaces don't leak into the label.
+function humanizeStringType(stringType) {
+  const tail = String(stringType).split(".").pop().replace(/_/g, " ").trim();
+  if (!tail) return null;
+  return tail.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// `stringType` is the Android string type from the phone's catalog (e.g. "android.sensor.gyroscope").
+// It is used only to name sensor types we don't curate above, so vendor/unlisted sensors get a real
+// name instead of a bare "Type N". Curated (known) types keep their names for cross-device consistency.
+export function signalMeta(type, stringType) {
+  if (S[type]) return S[type];
+  const human = stringType ? humanizeStringType(stringType) : null;
+  return {
+    name: human || `Type ${type}`,
+    sub: "Sensor",
+    type: stringType || `TYPE_${type}`,
+    unit: "",
+    cat: "other",
+    kind: type >= 3 ? "vector" : "scalar",
+    icon: "CircleDot",
+  };
 }
 
 export const magnitude = (v) => (v && v.length >= 3 ? Math.hypot(v[0], v[1], v[2]) : NaN);
