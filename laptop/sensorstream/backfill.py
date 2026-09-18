@@ -10,25 +10,48 @@ from typing import Dict, List, Tuple
 
 Key = Tuple[str, int]  # (client_id, handle)
 
+# Per-handle sequence numbers are uint32 and restart at 0 when a sensor is re-toggled
+# (SensorEventSource) or wrap after 2**32. These bound what counts as reordering vs. a restart,
+# so a rogue/huge seq can never materialize a giant `missing` set and a re-toggle is not read as
+# millions of lost samples. (Mirrors the loss accounting in sync.py.)
+_REORDER_WINDOW = 4096      # a seq this far *below* max_seq is still just a late/reordered arrival
+_RESET_GAP = 100_000        # a forward jump this large is a counter reset/wrap, not real loss
+
 
 class _PerSensor:
-    __slots__ = ("missing", "permanent", "backfilled", "max_seq")
+    __slots__ = ("missing", "permanent", "backfilled", "permanent_evicted", "max_seq")
 
     def __init__(self) -> None:
         self.missing: Dict[int, int] = {}     # seq -> t_recv_ns when first noticed missing
-        self.permanent: set[int] = set()
-        self.backfilled = 0
+        self.permanent: set[int] = set()      # irrecoverable seqs in the current epoch
+        self.backfilled = 0                   # lifetime (carried across resets)
+        self.permanent_evicted = 0            # permanent seqs from prior epochs (lifetime stat)
         self.max_seq = -1
+
+    def _restart(self, seq: int) -> None:
+        """Counter reset (sensor re-toggle) or wrap: abandon the old seq epoch, keep lifetime
+        totals. The old open holes live in a seq space the phone no longer serves, so requesting
+        them is pointless; starting fresh lets gap detection track the new epoch immediately."""
+        self.permanent_evicted += len(self.permanent)
+        self.permanent.clear()
+        self.missing.clear()
+        self.max_seq = seq
 
     def observe(self, seq: int, t_recv_ns: int) -> None:
         if self.max_seq < 0:
             self.max_seq = seq
             return
         if seq > self.max_seq:
+            if seq - self.max_seq >= _RESET_GAP:        # implausible forward jump -> reset/wrap
+                self._restart(seq)
+                return
             for s in range(self.max_seq + 1, seq):      # newly-missing interior seqs
                 if s not in self.permanent:
                     self.missing.setdefault(s, t_recv_ns)
             self.max_seq = seq
+        elif self.max_seq - seq > _REORDER_WINDOW:      # implausible backward jump -> restart
+            self._restart(seq)
+            return
         self.missing.pop(seq, None)                     # a late/backfilled arrival fills a hole
 
     def contiguous_upto(self) -> int:
@@ -85,6 +108,6 @@ class GapTracker:
 
     def stats(self) -> dict:
         open_gaps = sum(len(ps.missing) for ps in self._sensors.values())
-        permanent = sum(len(ps.permanent) for ps in self._sensors.values())
+        permanent = sum(len(ps.permanent) + ps.permanent_evicted for ps in self._sensors.values())
         backfilled = sum(ps.backfilled for ps in self._sensors.values())
         return {"open_gaps": open_gaps, "permanent": permanent, "backfilled": backfilled}
