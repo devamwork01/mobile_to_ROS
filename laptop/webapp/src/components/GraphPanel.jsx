@@ -68,7 +68,17 @@ export default function GraphPanel({ sensors }) {
     // Redraw budget from the shared scheduler: ~30 Hz idle, ~10 Hz while scrolling (coalesced,
     // never frozen — data keeps buffering between draws). Skip entirely only when off-screen (§8).
     let visible = true;
-    const vio = new IntersectionObserver(([e]) => { visible = e.isIntersecting; }, { threshold: 0.01 });
+    const vio = new IntersectionObserver(([e]) => {
+      const nowVisible = e.isIntersecting;
+      // Coming back on-screen: the chart may have been created/buffered while below the fold and
+      // so never painted (draws are gated on `visible`). Re-measure width (it can be created at a
+      // stale size) and force one draw so it isn't left blank. This is the "tab exists, chart blank" fix.
+      if (nowVisible && !visible) {
+        u.setSize({ width: host.current.clientWidth || 600, height: 260 });
+        dirty = true;
+      }
+      visible = nowVisible;
+    }, { threshold: 0.01 });
     vio.observe(host.current);
     const tick = (now) => {
       raf = requestAnimationFrame(tick);
