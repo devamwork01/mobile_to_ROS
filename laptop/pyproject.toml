@@ -25,4 +25,9 @@ include = ["sensorstream*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-ra"
+# -p no:launch_testing / no:launch_ros: when a ROS environment is sourced (needed for
+# tests/test_ros_sink.py), those packages auto-register as pytest plugins via entry
+# points and one of them imports `yaml`, which this venv doesn't have (it's unrelated
+# to sensorstream, which never uses ROS launch-testing). Disabling them keeps the
+# suite runnable both with and without ROS sourced.
+addopts = "-ra -p no:launch_testing -p no:launch_ros"

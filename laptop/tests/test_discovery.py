@@ -4,6 +4,7 @@ mDNS service registration."""
 from __future__ import annotations
 
 import socket
+import uuid
 
 from sensorstream.discovery import Advertiser, BEACON_MAGIC, beacon_payload, parse_beacon
 
@@ -35,7 +36,14 @@ def test_beacon_send_recv_loopback():
 
 
 def test_mdns_register_and_unregister():
-    adv = Advertiser(ip="127.0.0.1", control_port=8081, udp_port=5005)
+    # A fixed instance name (the Advertiser's own default, "SensorStream") would collide
+    # with a real sensorstream.app already running and advertising under that same name on
+    # the network -- mDNS enforces the full service name be unique network-wide, not just
+    # within this test's own Zeroconf instance, so registration would fail with
+    # NonUniqueNameException. Use a unique name so this test is isolated from anything else
+    # on the network, the same way test_beacon_send_recv_loopback uses an ephemeral port.
+    instance = f"pytest-{uuid.uuid4().hex[:8]}"
+    adv = Advertiser(ip="127.0.0.1", control_port=8081, udp_port=5005, instance=instance)
     try:
         adv.start_mdns()
         assert adv._info is not None
