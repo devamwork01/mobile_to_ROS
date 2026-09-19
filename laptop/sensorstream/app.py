@@ -95,6 +95,14 @@ async def run(args: argparse.Namespace) -> None:
     await dash.start()
     sink = DashboardSink(dash.broadcast, max_ui_hz=args.ui_hz)
 
+    ros_sink = None
+    if args.ros:
+        try:
+            from .ros_sink import Ros2Sink
+            ros_sink = Ros2Sink()
+        except Exception as exc:
+            print(f"   (--ros requested but ROS unavailable, continuing without it: {exc})")
+
     recorder = Recorder()
     sync = SyncTracker()
 
@@ -116,6 +124,8 @@ async def run(args: argparse.Namespace) -> None:
 
     def on_dg(dg, addr, t_recv_ns):
         sink.on_datagram(dg, addr, t_recv_ns)
+        if ros_sink is not None:
+            ros_sink.on_datagram(dg, addr, t_recv_ns)
         sync.observe(dg, t_recv_ns)
         reconciler.on_live(dg.device_id, dg, t_recv_ns)
         if recorder.is_recording:
@@ -224,6 +234,8 @@ async def run(args: argparse.Namespace) -> None:
     print("   (the phone learns the UDP port from the control channel - don't type it)")
     if advertiser is not None:
         print(f"   discovery : mDNS + UDP beacon :{args.beacon_port}   (phone can auto-find this PC)")
+    if ros_sink is not None:
+        print("   ROS       : publishing /phone/accelerometer, /phone/gyroscope, /phone/magnetic_field, /phone/orientation")
     if args.selftest:
         print("   MODE      : SELF-TEST (synthetic accelerometer)")
     if args.record:
@@ -290,6 +302,8 @@ async def run(args: argparse.Namespace) -> None:
         recorder.stop()
         if advertiser is not None:
             advertiser.stop()
+        if ros_sink is not None:
+            ros_sink.close()
         transport.close()
         await dash.stop()
 
@@ -308,6 +322,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--log-dir", default="./recordings", help="directory for recordings")
     ap.add_argument("--record", action="store_true", help="record the session from start")
     ap.add_argument("--no-discovery", action="store_true", help="disable mDNS + UDP beacon advertising")
+    ap.add_argument("--ros", action="store_true", help="publish decoded sensor data to ROS 2 topics (requires a sourced ROS environment)")
     ap.add_argument("--beacon-port", type=int, default=BEACON_PORT, help="UDP discovery beacon port")
     ap.add_argument("--beacon-addr", default="255.255.255.255", help="UDP beacon destination (broadcast)")
     return ap
