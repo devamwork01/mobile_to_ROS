@@ -47,13 +47,14 @@ The debug APK is side-loaded over USB. One-time phone setup: enable **Developer 
 debugging**, plug in, and accept the "Allow USB debugging?" prompt.
 
 ```bash
-# Build the APK (JBR 21 — Android Studio's bundled Java 25 breaks Gradle 8.9)
+# Build the APK. Use JBR 21 (the JDK bundled with Android Studio); newer JDKs (e.g. Java 25)
+# break Gradle 8.9. Point JAVA_HOME at your JBR 21 install:
 cd android
-JAVA_HOME="/path/to/jbr-21" ./gradlew assembleDebug
+JAVA_HOME="/path/to/jbr-21" ./gradlew assembleDebug   # Windows: JAVA_HOME=<AndroidStudio>\jbr
 #   -> app/build/outputs/apk/debug/app-debug.apk
 
-# adb lives here on this PC:
-ADB="adb"
+# `adb` ships with the Android SDK platform-tools; add it to PATH, or reference it directly:
+ADB="adb"   # or "$ANDROID_HOME/platform-tools/adb"
 
 # List attached devices (copy the serial from the left column)
 "$ADB" devices
@@ -62,8 +63,7 @@ ADB="adb"
 "$ADB" -s <serial> install -r app/build/outputs/apk/debug/app-debug.apk   # expect: Success
 ```
 
-Known device serials: **Galaxy S25 Ultra** (`SM-S938B`) = `REDACTED` ·
-**Galaxy M36 5G** (`SM-M366B`) = `REDACTED`.
+Run `"$ADB" devices` to list attached devices and copy the serial from the left column.
 
 ## 7. Verify on-phone recording (Phase 1)
 
@@ -72,7 +72,7 @@ the laptop stays authoritative). The phone status card shows a line like:
 `on-phone rec  1.7 MB  ·  buffered 75s  ·  pruned 0`.
 
 ```bash
-ADB="adb"; D=<serial>
+ADB="adb"; D=<serial>   # adb on PATH (Android SDK platform-tools)
 
 # Segments accumulate under app-private storage, rotating every ~10 s with a monotonic salt:
 "$ADB" -s $D exec-out run-as com.sensorstream sh -c 'ls -la files/onphone'

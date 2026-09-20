@@ -29,10 +29,11 @@ laptop/webapp/dist/
 *.zip
 *.tar.gz
 
-# OS / editor
+# OS / editor / local agent state
 .DS_Store
 Thumbs.db
 .vscode/
+.claude/
 
 # Soak-test output (CSV, server logs, throwaway recordings)
 laptop/soak-out/

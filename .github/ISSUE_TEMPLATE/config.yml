@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions & usage help
+    url: https://github.com/devamwork01/mobile_to_ROS#readme
+    about: Check the README (setup, no-phone testing, troubleshooting) before filing an issue.
