@@ -128,6 +128,35 @@ npm run dev        # Vite dev server; keep the Python server running alongside f
 The phone and laptop must be on the **same Wi-Fi/LAN**. Streaming continues in the
 background via a foreground service; tap its notification to return to the app.
 
+## Using the app
+
+Once the laptop server is running and the phone is streaming, here's what you're looking at.
+
+### On the phone
+
+<p>
+  <img src="docs/images/phone-home.png" alt="Phone Home — live 3D orientation while streaming" width="270">
+  <img src="docs/images/phone-sensors.png" alt="Phone Sensors — categorized list with per-sensor toggles" width="270">
+</p>
+
+- **Home** shows a live 3D view of the phone's orientation (device axes vs. the world frame), plus connection status, latency, and the active-sensor rate.
+- **Sensors** lists every sensor grouped by category (Motion / Orientation / Magnetic / …) with a per-sensor toggle and sampling-rate control — pick what you want to stream.
+- **Connection** links to the laptop (Find Laptop Automatically, or enter the LAN IP + control port `8081`).
+
+### On the laptop dashboard (`http://localhost:8080`)
+
+<img src="docs/images/dashboard.jpg" alt="Dashboard — 3D orientation, live sensor cards, real-time graphs" width="820">
+
+The **Dashboard** mirrors the phone's 3D orientation and adds live per-sensor cards and real-time graphs. Two more tabs are worth knowing:
+
+- **Diagnostics** — end-to-end latency (p50/p95), jitter, on-phone latency, packet loss *net of backfill*, and recording-integrity counters.
+
+  <img src="docs/images/dashboard-diagnostics.jpg" alt="Diagnostics — latency, loss, and backfill metrics" width="820">
+
+- **Recordings** — browse recorded sessions and inspect their signals (server-side level-of-detail history).
+
+  <img src="docs/images/dashboard-recordings.jpg" alt="Recordings browser" width="600">
+
 ## ROS 2 bridge (optional)
 
 With a ROS 2 environment sourced, `--ros` publishes decoded sensors as standard messages:
