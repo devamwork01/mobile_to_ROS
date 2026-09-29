@@ -109,6 +109,12 @@ class StreamEngine(context: Context) {
 
     fun recorderStats(): LocalRecorder.Stats? = controller.recorderStats()
 
+    /** Packet-batching window for the UDP sender (0 = no added latency). Takes effect on the next
+     *  datagram, so it can be changed while streaming. */
+    var batchWindowMs: Long
+        get() = controller.batchWindowMs
+        set(v) { controller.batchWindowMs = v.coerceIn(0L, 20L) }
+
     fun start(host: String, controlPort: Int, selections: List<Selection>) {
         stop()
         this.host = host
@@ -225,7 +231,8 @@ class StreamEngine(context: Context) {
     private fun onDropped() {
         controller.disconnectSender()
         // streaming stays true — the recorder is still capturing; only network delivery paused.
-        _state.value = _state.value.copy(connected = false)
+        // Latency is meaningless without a link, so clear it rather than show a stale value.
+        _state.value = _state.value.copy(connected = false, rttMs = 0f)
         if (!desired) {
             _state.value = _state.value.copy(connecting = false, streaming = false)
             controller.stopSession()
@@ -315,7 +322,7 @@ class StreamEngine(context: Context) {
             .put("model", Build.MODEL)
             .put("manufacturer", Build.MANUFACTURER)
             .put("android", Build.VERSION.RELEASE)
-            .put("app_version", "0.1.0")
+            .put("app_version", com.sensorstream.BuildConfig.VERSION_NAME)
             .put("client_id", clientId)
             .put("sensors", sensors)
     }
@@ -331,6 +338,6 @@ class StreamEngine(context: Context) {
         recorder?.close()          // now safe: StreamEngine owns the recorder's lifecycle
         recorder = null
         sessionStarted = false
-        _state.value = _state.value.copy(connecting = false, connected = false, streaming = false)
+        _state.value = _state.value.copy(connecting = false, connected = false, streaming = false, rttMs = 0f)
     }
 }

@@ -34,11 +34,22 @@ class AppNav(initial: Screen = Screen.Home) {
         }
     }
 
-    /** Returns true if it consumed the back press (popped), false if at the root. */
+    /** True when a back press has somewhere to go inside the app: a pushed screen to pop, or a
+     *  non-Home tab to return from. False on Home -> the system handles back (exits the app).
+     *  Reads snapshot state, so a BackHandler keyed on it updates automatically. */
+    val canGoBack: Boolean get() = stack.size > 1 || stack.last() != Screen.Home
+
+    /** Pop a pushed screen, else fall back from a non-Home tab to Home. Returns false at Home. */
     fun back(): Boolean {
-        if (stack.size <= 1) return false
-        stack.removeAt(stack.lastIndex)
-        return true
+        if (stack.size > 1) {
+            stack.removeAt(stack.lastIndex)
+            return true
+        }
+        if (stack.last() != Screen.Home) {
+            go(Screen.Home)
+            return true
+        }
+        return false
     }
 }
 

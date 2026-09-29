@@ -44,7 +44,6 @@ class MainActivity : ComponentActivity() {
         ) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        requestBatteryExemption()
         // Keep the screen on while streaming: on this class of device, locking the phone
         // backgrounds the app and the OEM throttles delivery (latency ~7ms -> ~150ms). Holding
         // the screen on keeps the app foreground, so the live stream stays low-latency. The
@@ -53,6 +52,9 @@ class MainActivity : ComponentActivity() {
             viewModel.engineState.collect { st ->
                 if (st.streaming) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                // Ask for the Doze/battery exemption the first time streaming starts — when it
+                // actually matters — and only once; Settings offers it again if declined.
+                if (st.streaming) maybeAskBatteryExemptionOnce()
             }
         }
         setContent {
@@ -70,20 +72,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Ask the OS to exempt the app from Doze / battery optimization so long
-     *  screen-off streaming isn't throttled. One-time system dialog until granted. */
-    @SuppressLint("BatteryLife")
-    private fun requestBatteryExemption() {
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+    private fun maybeAskBatteryExemptionOnce() {
+        val prefs = getSharedPreferences("sensorstream", Context.MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_ASKED_BATTERY, false)) return
+        prefs.edit().putBoolean(KEY_ASKED_BATTERY, true).apply()
+        requestBatteryExemption(this)
+    }
+
+    companion object {
+        private const val KEY_ASKED_BATTERY = "asked_battery_exemption"
+
+        /** Ask the OS to exempt the app from Doze / battery optimization so long screen-off
+         *  streaming isn't throttled. No-op if already exempt. */
+        @SuppressLint("BatteryLife")
+        fun requestBatteryExemption(context: Context) {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (pm.isIgnoringBatteryOptimizations(context.packageName)) return
             runCatching {
-                startActivity(
-                    Intent(
-                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                        Uri.parse("package:$packageName"),
-                    )
+                context.startActivity(
+                    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${context.packageName}"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }
         }
     }
+
 }

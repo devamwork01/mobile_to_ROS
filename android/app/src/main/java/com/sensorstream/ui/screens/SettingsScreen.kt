@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sensorstream.ui.components.SectionHeader
 import com.sensorstream.ui.components.SsCard
+import com.sensorstream.ui.settings.BatchMode
 import com.sensorstream.ui.settings.ThemeMode
 import com.sensorstream.ui.theme.Ss
 import com.sensorstream.ui.theme.SsDims
@@ -88,6 +89,27 @@ fun SettingsScreen(vm: StreamViewModel) {
             }
         }
 
+        // --- Streaming --------------------------------------------------------------------------
+        SectionHeader("Streaming")
+        SsCard(Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Packet batching", color = c.fg, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    when (settings.batchMode) {
+                        BatchMode.LOW_LATENCY -> "Send each sample immediately — lowest latency."
+                        BatchMode.BALANCED -> "Pack samples for up to 2 ms — fewer packets, +2 ms latency."
+                        BatchMode.BATTERY -> "Pack samples for up to 5 ms — fewest packets and radio wake-ups, +5 ms latency."
+                    },
+                    color = c.muted, fontSize = 12.sp,
+                )
+                SegmentedControl(
+                    options = listOf("Low latency" to BatchMode.LOW_LATENCY, "Balanced" to BatchMode.BALANCED, "Battery" to BatchMode.BATTERY),
+                    selected = settings.batchMode,
+                    onSelect = { vm.setBatchMode(it) },
+                )
+            }
+        }
+
         // --- About ------------------------------------------------------------------------------
         SectionHeader("About")
         SsCard(Modifier.fillMaxWidth()) {
@@ -101,7 +123,8 @@ fun SettingsScreen(vm: StreamViewModel) {
 
         Text(
             "SensorStream streams multi-sensor telemetry over UDP to your laptop. " +
-                "These preferences affect display only — they never change what is measured or sent.",
+                "Appearance and 3D preferences affect display only; packet batching changes how samples " +
+                "are grouped into packets, never the values sent.",
             color = c.faint, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
         )
     }

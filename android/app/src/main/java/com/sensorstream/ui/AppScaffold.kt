@@ -47,7 +47,8 @@ fun AppScaffold(vm: StreamViewModel) {
     val nav: AppNav = rememberAppNav()
     val current = nav.current
 
-    BackHandler(enabled = true) { nav.back() }
+    // Only intercept back when the app has somewhere to go; on Home the system exits the app.
+    BackHandler(enabled = nav.canGoBack) { nav.back() }
 
     Scaffold(
         containerColor = Ss.colors.bg,

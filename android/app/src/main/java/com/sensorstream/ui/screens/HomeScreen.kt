@@ -47,6 +47,8 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
     val state by vm.engineState.collectAsState()
     val sel by vm.sel.collectAsState()
     val orientation by vm.orientationPreview.collectAsState()
+    val hasSavedTarget by vm.hasSavedTarget.collectAsState()
+    val connectNotice by vm.connectNotice.collectAsState()
     val c = Ss.colors
 
     // Drive the hero phone from a local orientation preview so it responds to device motion whether
@@ -93,7 +95,11 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
                     Text(if (state.connected || state.streaming) "Wi-Fi" else "—", color = c.faint, fontSize = 12.sp)
                 }
                 Text(
-                    if (state.connected || state.streaming) "Laptop · ${sel.host}" else "Not connected · ${sel.host}",
+                    when {
+                        state.connected || state.streaming -> "Laptop · ${sel.host}"
+                        hasSavedTarget -> "Last laptop · ${sel.host}:${sel.port}"
+                        else -> "No laptop set up yet"
+                    },
                     color = c.muted, fontSize = 13.sp,
                 )
                 Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -142,7 +148,7 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
                         shown.forEach { handle ->
                             val info = vm.catalog.firstOrNull { it.handle == handle }
                             val type = info?.type ?: return@forEach
-                            val sig = SignalCatalog.of(type)
+                            val sig = SignalCatalog.of(type, info.stringType)
                             val p = vm.periodOf(handle)
                             val hz = if (p > 0) "${1_000_000 / p} Hz" else "Max"
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -158,13 +164,26 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
             }
         }
 
-        // Primary action.
+        // Primary action. With a remembered laptop, one tap reconnects to it; with none yet, the
+        // button leads to Connection instead of trying a placeholder address.
         PrimaryActionButton(
-            text = if (streamingLike) "Stop Streaming" else "Start Streaming",
-            onClick = { vm.toggleStreaming() },
+            text = when {
+                streamingLike -> "Stop Streaming"
+                hasSavedTarget -> "Start Streaming"
+                else -> "Connect to a Laptop"
+            },
+            onClick = { if (streamingLike || hasSavedTarget) vm.toggleStreaming() else nav.go(Screen.Connection) },
             enabled = sel.enabled.isNotEmpty() || streamingLike,
             danger = streamingLike,
         )
+        if (!streamingLike && hasSavedTarget) {
+            Text("→ ${sel.host}:${sel.port}", color = c.faint, fontSize = 12.sp, style = SsType.mono,
+                modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
+        connectNotice?.let {
+            Text(it.text, color = c.warn, fontSize = 12.sp, modifier = Modifier.fillMaxWidth(),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
         Spacer(Modifier.height(4.dp))
     }
 }

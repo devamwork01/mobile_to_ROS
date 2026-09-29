@@ -8,7 +8,9 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.sensorstream.core.SelectionCodec
 import com.sensorstream.core.SensorInfo
+import com.sensorstream.core.TargetValidator
 import com.sensorstream.net.Discovery
 import com.sensorstream.service.StreamingService
 import com.sensorstream.stream.EngineState
@@ -65,6 +67,30 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     private val _discoveryNotice = MutableStateFlow<Notice?>(null)
     val discoveryNotice: StateFlow<Notice?> = _discoveryNotice.asStateFlow()
 
+    /** Why the last Connect/Start was refused (bad address), shown on Home + Connection. */
+    private val _connectNotice = MutableStateFlow<Notice?>(null)
+    val connectNotice: StateFlow<Notice?> = _connectNotice.asStateFlow()
+
+    // --- Persisted connection target + sensor selection -----------------------------------------
+    // Remembered across launches so the app can reconnect to the last laptop in one tap instead
+    // of resetting to a placeholder IP and default sensors every time.
+    private val prefs = app.getSharedPreferences("sensorstream", Context.MODE_PRIVATE)
+    private val catalogTypes: Map<Int, Int> by lazy { catalog.associate { it.handle to it.type } }
+
+    /** True once the user has connected / discovered / typed a laptop address at least once. */
+    private val _hasSavedTarget = MutableStateFlow(prefs.contains(KEY_HOST))
+    val hasSavedTarget: StateFlow<Boolean> = _hasSavedTarget.asStateFlow()
+
+    private fun saveTarget() {
+        prefs.edit().putString(KEY_HOST, _sel.value.host).putString(KEY_PORT, _sel.value.port).apply()
+        _hasSavedTarget.value = true
+    }
+
+    private fun saveSelection() {
+        val v = _sel.value
+        prefs.edit().putString(KEY_SELECTION, SelectionCodec.encode(v.enabled, v.periodByHandle) { catalogTypes[it] }).apply()
+    }
+
     // --- Display settings (UI only) ------------------------------------------------------------
     // Theme + visualization defaults. Persisted to SharedPreferences; the Activity reads
     // [settings].themeMode to choose the palette. Nothing here touches the telemetry pipeline.
@@ -81,6 +107,10 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     fun setThemeMode(mode: ThemeMode) = updateSettings { it.copy(themeMode = mode) }
     fun setDefault3dWorldFrame(on: Boolean) = updateSettings { it.copy(default3dWorldFrame = on) }
     fun setDefault3dLabels(on: Boolean) = updateSettings { it.copy(default3dLabels = on) }
+    fun setBatchMode(mode: com.sensorstream.ui.settings.BatchMode) {
+        updateSettings { it.copy(batchMode = mode) }
+        engine.batchWindowMs = mode.windowMs
+    }
 
     // --- Local sensor preview (UI only) --------------------------------------------------------
     // Drives the 3D visualizations + detail values so screens respond to device motion whether or
@@ -167,9 +197,16 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
             Sensor.TYPE_MAGNETIC_FIELD,
             Sensor.TYPE_ROTATION_VECTOR,
         )
-        val enabled = catalog.filter { it.type in defaultTypes }.map { it.handle }.toSet()
-        val periods = catalog.associate { it.handle to 10_000 } // default 100 Hz
-        _sel.value = _sel.value.copy(enabled = enabled, periodByHandle = periods)
+        engine.batchWindowMs = _settings.value.batchMode.windowMs
+        val defaultEnabled = catalog.filter { it.type in defaultTypes }.map { it.handle }.toSet()
+        val defaultPeriods = catalog.associate { it.handle to 10_000 } // default 100 Hz
+        val saved = SelectionCodec.decode(prefs.getString(KEY_SELECTION, null), catalogTypes)
+        _sel.value = _sel.value.copy(
+            host = prefs.getString(KEY_HOST, null) ?: _sel.value.host,
+            port = prefs.getString(KEY_PORT, null) ?: _sel.value.port,
+            enabled = saved?.enabled ?: defaultEnabled,
+            periodByHandle = defaultPeriods + (saved?.periods ?: emptyMap()),
+        )
 
         viewModelScope.launch {
             while (true) {
@@ -186,13 +223,18 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setHost(h: String) { _sel.value = _sel.value.copy(host = h); _discoveryNotice.value = null }
-    fun setPort(p: String) { _sel.value = _sel.value.copy(port = p); _discoveryNotice.value = null }
+    fun setHost(h: String) {
+        _sel.value = _sel.value.copy(host = h); _discoveryNotice.value = null; _connectNotice.value = null; saveTarget()
+    }
+    fun setPort(p: String) {
+        _sel.value = _sel.value.copy(port = p); _discoveryNotice.value = null; _connectNotice.value = null; saveTarget()
+    }
 
     fun toggle(handle: Int) {
         val e = _sel.value.enabled.toMutableSet()
         if (!e.add(handle)) e.remove(handle)
         _sel.value = _sel.value.copy(enabled = e)
+        saveSelection()
         applyLiveReconfig()
     }
 
@@ -200,6 +242,7 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setPeriod(handle: Int, periodUs: Int) {
         _sel.value = _sel.value.copy(periodByHandle = _sel.value.periodByHandle + (handle to periodUs))
+        saveSelection()
         applyLiveReconfig()
         // If this sensor is being previewed on-screen, re-register it so the new rate takes effect
         // immediately (preview is UI-only and independent of the streaming pipeline).
@@ -221,11 +264,18 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
             StreamingService.stop(getApplication())
             return
         }
-        val port = _sel.value.port.trim().toIntOrNull()
-        if (port == null || port !in 1..65535) return
+        TargetValidator.validate(_sel.value.host, _sel.value.port)?.let {
+            _connectNotice.value = Notice(it, isError = true)
+            return
+        }
         val selections = _sel.value.enabled.map { Selection(it, periodOf(it)) }
-        if (selections.isEmpty()) return
-        StreamingService.start(getApplication(), _sel.value.host.trim(), port, selections)
+        if (selections.isEmpty()) {
+            _connectNotice.value = Notice("Select at least one sensor on the Sensors tab first.", isError = true)
+            return
+        }
+        _connectNotice.value = null
+        saveTarget()
+        StreamingService.start(getApplication(), _sel.value.host.trim(), _sel.value.port.trim().toInt(), selections)
     }
 
     fun discover() {
@@ -234,6 +284,8 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         _discoveryNotice.value = null
         discovery.start(Discovery.Listener { host, controlPort ->
             _sel.value = _sel.value.copy(host = host, port = controlPort.toString())
+            _connectNotice.value = null
+            saveTarget()
             discovery.stop()
             _discovering.value = false
             _discoveryNotice.value = Notice("Found laptop at $host:$controlPort", isError = false)
@@ -250,6 +302,12 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
         }
+    }
+
+    private companion object {
+        const val KEY_HOST = "target_host"
+        const val KEY_PORT = "target_port"
+        const val KEY_SELECTION = "selection_v1"
     }
 
     // Streaming is owned by StreamingService (survives recreation); only stop discovery here.

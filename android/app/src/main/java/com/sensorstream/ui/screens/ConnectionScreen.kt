@@ -48,6 +48,7 @@ fun ConnectionScreen(vm: StreamViewModel, nav: AppNav) {
     val sel by vm.sel.collectAsState()
     val discovering by vm.discovering.collectAsState()
     val discoveryNotice by vm.discoveryNotice.collectAsState()
+    val connectNotice by vm.connectNotice.collectAsState()
     val c = Ss.colors
 
     val phase = state.phase()
@@ -156,9 +157,12 @@ fun ConnectionScreen(vm: StreamViewModel, nav: AppNav) {
         PrimaryActionButton(
             text = if (active) "Disconnect" else "Connect & Stream",
             onClick = { vm.toggleStreaming() },
-            enabled = active || (sel.enabled.isNotEmpty() && sel.port.trim().toIntOrNull() != null),
+            enabled = active || sel.enabled.isNotEmpty(),
             danger = active,
         )
+        connectNotice?.let {
+            Text(it.text, color = c.warn, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+        }
         if (!active && sel.enabled.isEmpty()) {
             Text("Select at least one sensor (Sensors tab) before connecting.",
                 color = c.warn, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))

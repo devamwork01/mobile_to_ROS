@@ -32,7 +32,10 @@ class SensorEventSource(private val sm: SensorManager) : SensorEventListener {
     private var thread: HandlerThread? = null
     private var handler: Handler? = null
 
-    private val handleByType = ConcurrentHashMap<Int, Int>()
+    // Keyed by the exact Sensor, not its type: phones often expose several sensors of one type
+    // (wake-up + non-wake-up variants, vendor duplicates). Keying by type would merge their
+    // samples under one handle and interleave their sequence numbers.
+    private val handleBySensor = ConcurrentHashMap<Sensor, Int>()
     private val seqByHandle = ConcurrentHashMap<Int, Long>()
     private val accuracyByHandle = ConcurrentHashMap<Int, Int>()
     private val activeRegs = ConcurrentHashMap<Int, Reg>() // handle -> currently-registered Reg
@@ -63,7 +66,7 @@ class SensorEventSource(private val sm: SensorManager) : SensorEventListener {
                 sm.unregisterListener(this, reg.sensor)
                 activeRegs.remove(handle)
                 if (nr == null) {
-                    handleByType.remove(reg.sensor.type)
+                    handleBySensor.remove(reg.sensor)
                     seqByHandle.remove(handle)
                     accuracyByHandle.remove(handle)
                 }
@@ -74,7 +77,7 @@ class SensorEventSource(private val sm: SensorManager) : SensorEventListener {
     }
 
     private fun registerOne(r: Reg, h: Handler) {
-        handleByType[r.sensor.type] = r.handle
+        handleBySensor[r.sensor] = r.handle
         seqByHandle.putIfAbsent(r.handle, 0L)
         accuracyByHandle.putIfAbsent(r.handle, SensorManager.SENSOR_STATUS_ACCURACY_HIGH)
         sm.registerListener(this, r.sensor, r.periodUs, r.maxReportLatencyUs, h)
@@ -86,14 +89,14 @@ class SensorEventSource(private val sm: SensorManager) : SensorEventListener {
         thread?.quitSafely()
         thread = null
         handler = null
-        handleByType.clear()
+        handleBySensor.clear()
         seqByHandle.clear()
         accuracyByHandle.clear()
         activeRegs.clear()
     }
 
     override fun onSensorChanged(event: SensorEvent) {
-        val handle = handleByType[event.sensor.type] ?: return
+        val handle = handleBySensor[event.sensor] ?: return
         val n = event.values.size
         val vals = FloatArray(n)
         System.arraycopy(event.values, 0, vals, 0, n)
@@ -114,7 +117,7 @@ class SensorEventSource(private val sm: SensorManager) : SensorEventListener {
     }
 
     override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {
-        val handle = handleByType[sensor.type] ?: return
+        val handle = handleBySensor[sensor] ?: return
         accuracyByHandle[handle] = accuracy
     }
 }

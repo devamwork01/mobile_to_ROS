@@ -8,6 +8,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
  * Control-channel client (WebSocket JSON) to `ws://host:port/phone`.
@@ -38,6 +39,11 @@ class WsControlClient {
         // Tag control-channel sockets with a high (but below-telemetry) DSCP class; best-effort QoS.
         val http = OkHttpClient.Builder()
             .socketFactory(DscpSocketFactory(DSCP_AF41))
+            .connectTimeout(5, TimeUnit.SECONDS)
+            // Keep-alive: ping every 3 s. If the laptop stops answering (Wi-Fi dropped silently,
+            // laptop asleep), OkHttp fails the socket -> onFailure -> the engine reconnects,
+            // instead of sitting on a half-open "connected" socket until TCP gives up minutes later.
+            .pingInterval(3, TimeUnit.SECONDS)
             .build()
         client = http
         // OkHttp's HttpUrl only accepts http/https; it performs the WebSocket
