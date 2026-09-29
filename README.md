@@ -33,8 +33,8 @@ optional ROS 2 bridge.
 | Wire protocol | Compact little-endian binary over UDP; golden-vector-pinned codec (Python + Kotlin) |
 | Receiver pipeline | Multi-sensor, per-sensor rate/loss metrics, latency without a clock handshake (min-filter), decode-error accounting |
 | Reliability | On-phone bounded recording + laptop **backfill** (gap detect → resend → dedup) for lossless capture across Wi-Fi drops / screen-off |
-| Dashboard | Live cards, real-time graphs (uPlot), 3D orientation (Three.js) with recenter/reset, recordings browser with server-side LOD, light/dark themes |
-| Phone app | Categorized sensors, per-sensor detail + sampling-rate config with **live actual Hz**, on-device pseudo-3D orientation, diagnostics, background streaming with a **Stop** action in the notification, **one-tap reconnect** to the last laptop, optional **packet batching**, and **export/share** of the on-phone recording |
+| Dashboard | Live cards, real-time graphs (uPlot), 3D orientation (Three.js) with recenter/reset, paged recordings browser with server-side LOD, light/dark themes |
+| Phone app | Categorized sensors, per-sensor detail + sampling-rate config with **live actual Hz**, on-device pseudo-3D orientation with **recenter**, diagnostics, background streaming with a **Stop** action in the notification, **one-tap reconnect** to the last laptop, optional **packet batching**, and **export/share** of the on-phone recording |
 | Discovery | mDNS + UDP beacon so the phone can auto-find the laptop |
 | ROS 2 | Optional `--ros` sink publishing `sensor_msgs/Imu`, `MagneticField`, `QuaternionStamped` |
 
@@ -143,7 +143,7 @@ Once the laptop server is running and the phone is streaming, here's what you're
   <img src="docs/images/phone-sensors.png" alt="Phone Sensors — categorized list with per-sensor toggles" width="270">
 </p>
 
-- **Home** shows a live 3D view of the phone's orientation (device axes vs. the world frame), plus connection status, latency, and the active-sensor rate.
+- **Home** shows a live 3D view of the phone's orientation (device axes vs. the world frame), plus connection status, latency, and the active-sensor rate. Tap the **recenter** button (target icon) on the 3D view to zero it on the current pose; double-tap the 3D to return to the default view. If the Wi-Fi link drops, the status shows **Reconnecting** and the app reconnects on its own (the phone keeps recording meanwhile, so the gap is backfilled).
 - **Sensors** lists every sensor grouped by category (Motion / Orientation / Magnetic / …) with a per-sensor toggle and sampling-rate control — pick what you want to stream.
 - **Connection** links to the laptop (Find Laptop Automatically, or enter the LAN IP + control port `8081`). The address is remembered, and Home offers one-tap reconnect.
 - While streaming, sensor cards show the requested rate **and** the rate the sensor actually delivers (e.g. `100 Hz · 116 live`) — Android treats the requested rate as a hint.
@@ -162,7 +162,7 @@ The **Dashboard** mirrors the phone's 3D orientation and adds live per-sensor ca
 
   <img src="docs/images/dashboard-diagnostics.jpg" alt="Diagnostics — latency, loss, and backfill metrics" width="820">
 
-- **Recordings** — browse recorded sessions and inspect their signals (server-side level-of-detail history).
+- **Recordings** — browse recorded sessions and inspect their signals (server-side level-of-detail history). The list loads 50 at a time, newest first, with **Load more**.
 
   <img src="docs/images/dashboard-recordings.jpg" alt="Recordings browser" width="600">
 
@@ -219,8 +219,10 @@ drift >10%, RSS growth like a leak, or a crash.
 - [x] ROS 2 output sink (`--ros`)
 - [ ] Verify screen-off streaming end-to-end against the redesigned dashboard UI
 - [ ] Second-device / light-theme streaming pass on more hardware
-- [ ] Recordings pagination once a session's list grows large
+- [x] Recordings pagination
+- [x] Phone app: 3D recenter, reconnect status, packet batching, recording export
 - [ ] Real-phone long-run soak (synthetic soak already passes)
+- [ ] Phone-vs-phone comparison: still test (noise / bias vs. gravity & zero-rate) and same-motion overlay
 
 ## Contributing & reporting bugs
 
