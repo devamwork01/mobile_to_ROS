@@ -34,7 +34,7 @@ optional ROS 2 bridge.
 | Receiver pipeline | Multi-sensor, per-sensor rate/loss metrics, latency without a clock handshake (min-filter), decode-error accounting |
 | Reliability | On-phone bounded recording + laptop **backfill** (gap detect → resend → dedup) for lossless capture across Wi-Fi drops / screen-off |
 | Dashboard | Live cards, real-time graphs (uPlot), 3D orientation (Three.js) with recenter/reset, recordings browser with server-side LOD, light/dark themes |
-| Phone app | Categorized sensors, per-sensor detail + sampling-rate config, on-device pseudo-3D orientation, diagnostics, background streaming |
+| Phone app | Categorized sensors, per-sensor detail + sampling-rate config with **live actual Hz**, on-device pseudo-3D orientation, diagnostics, background streaming with a **Stop** action in the notification, **one-tap reconnect** to the last laptop, optional **packet batching**, and **export/share** of the on-phone recording |
 | Discovery | mDNS + UDP beacon so the phone can auto-find the laptop |
 | ROS 2 | Optional `--ros` sink publishing `sensor_msgs/Imu`, `MagneticField`, `QuaternionStamped` |
 
@@ -112,9 +112,11 @@ npm run dev        # Vite dev server; keep the Python server running alongside f
 
 ## Run — Android app
 
-**Easiest:** download the APK from [Releases](../../releases), enable
-*Settings → Developer options → Install unknown apps* (or `adb install app.apk`), and open
-**SensorStream**. No Android Studio needed.
+**Easiest:** download the APK from [Releases](../../releases) on the phone and open it.
+Android will ask you to allow installs from your browser or file manager (on Android 8+ this
+is per-app: *Settings → Apps → Special access → Install unknown apps*). Or install from a
+computer with `adb install -r app.apk`. No Android Studio needed; installing a newer APK over
+an older one keeps your settings.
 
 **From source:**
 
@@ -125,8 +127,10 @@ npm run dev        # Vite dev server; keep the Python server running alongside f
    laptop's LAN IP + control port `8081`), pick sensors on the **Sensors** tab, and
    **Connect & Stream**.
 
-The phone and laptop must be on the **same Wi-Fi/LAN**. Streaming continues in the
-background via a foreground service; tap its notification to return to the app.
+The phone and laptop must be on the **same Wi-Fi/LAN**. The app remembers the last laptop,
+so next time **Start Streaming** on Home reconnects in one tap. Streaming continues in the
+background via a foreground service; tap its notification to return to the app, or use its
+**Stop** button to end the stream without opening it.
 
 ## Using the app
 
@@ -141,7 +145,12 @@ Once the laptop server is running and the phone is streaming, here's what you're
 
 - **Home** shows a live 3D view of the phone's orientation (device axes vs. the world frame), plus connection status, latency, and the active-sensor rate.
 - **Sensors** lists every sensor grouped by category (Motion / Orientation / Magnetic / …) with a per-sensor toggle and sampling-rate control — pick what you want to stream.
-- **Connection** links to the laptop (Find Laptop Automatically, or enter the LAN IP + control port `8081`).
+- **Connection** links to the laptop (Find Laptop Automatically, or enter the LAN IP + control port `8081`). The address is remembered, and Home offers one-tap reconnect.
+- While streaming, sensor cards show the requested rate **and** the rate the sensor actually delivers (e.g. `100 Hz · 116 live`) — Android treats the requested rate as a hint.
+- **Settings** adds:
+  - **Packet batching** — *Low latency* (default, no added delay), *Balanced* (+~2 ms) or *Battery* (+~5 ms). Measured at 4 sensors × 100 Hz (≈430 samples/s): ~335, ~222 and ~132 packets/s respectively. Same data either way; only how samples are grouped into packets changes.
+  - **Background streaming** status, with an *Allow* button if battery optimization could throttle screen-off streaming.
+  - **Share recording** — exports the phone's rolling on-phone recording (up to 20 min) as a laptop-native `.ssbin` + `.meta.json` via the share sheet. Put both files in the laptop's `recordings/` folder to open them in the dashboard's **Recordings** view.
 
 ### On the laptop dashboard (`http://localhost:8080`)
 
