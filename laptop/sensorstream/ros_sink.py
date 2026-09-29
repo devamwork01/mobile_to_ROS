@@ -30,7 +30,9 @@ SENSOR_TYPE_ROTATION_VECTOR = 11
 
 class Ros2Sink(OutputSink):
     def __init__(self, node_name: str = "sensorstream_ros_sink"):
-        if not rclpy.ok():
+        # Only shut rclpy down on close() if this sink started it (a host process may own it).
+        self._owns_rclpy = not rclpy.ok()
+        if self._owns_rclpy:
             rclpy.init()
         self._node: Node = rclpy.create_node(node_name)
         self._accel_pub = self._node.create_publisher(Imu, "/phone/accelerometer", qos_profile_sensor_data)
@@ -77,3 +79,5 @@ class Ros2Sink(OutputSink):
 
     def close(self) -> None:
         self._node.destroy_node()
+        if self._owns_rclpy and rclpy.ok():
+            rclpy.shutdown()

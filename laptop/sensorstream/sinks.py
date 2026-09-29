@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, Dict, Tuple
 
 from .protocol import Datagram
+from .seqloss import SeqLoss
 
 Key = Tuple[int, int]  # (sensor_type, sensor_handle)
 
@@ -31,7 +32,7 @@ class DashboardSink(OutputSink):
     * Measures the true per-sensor output rate from the phone's own
       ``t_sensor_ns`` deltas (an EWMA), so the dashboard shows the *actual*
       frequency, not the requested one.
-    * Detects per-sensor packet loss from sequence gaps.
+    * Tracks per-sensor packet loss from sequence numbers (reorder/reset tolerant; see seqloss).
     * Decimates to ``max_ui_hz`` per sensor so a 200 Hz stream does not flood
       the browser (the raw stream still flows unthrottled to loggers).
     """
@@ -42,8 +43,7 @@ class DashboardSink(OutputSink):
         self._last_emit: Dict[Key, float] = {}
         self._last_t: Dict[Key, int] = {}
         self._hz: Dict[Key, float] = {}
-        self._last_seq: Dict[Key, int] = {}
-        self._lost: Dict[Key, int] = {}
+        self._loss: Dict[Key, SeqLoss] = {}
         # Health: records seen vs records forwarded to the browser. The gap is *coalesced*
         # presentation updates (intentional decimation) — NOT lost raw data.
         self.records_in = 0
@@ -65,12 +65,12 @@ class DashboardSink(OutputSink):
                     self._hz[key] = inst if prev is None else 0.9 * prev + 0.1 * inst
             self._last_t[key] = r.t_sensor_ns
 
-            last_seq = self._last_seq.get(key)
-            if last_seq is not None:
-                gap = (r.seq - last_seq - 1) & 0xFFFFFFFF
-                if 0 < gap < 1_000_000:  # ignore wrap / reset artefacts
-                    self._lost[key] = self._lost.get(key, 0) + gap
-            self._last_seq[key] = r.seq
+            # Same reorder/reset-tolerant accounting as the diagnostics tracker (a naive gap
+            # counter reported false, ever-growing loss under ordinary UDP reordering).
+            loss = self._loss.get(key)
+            if loss is None:
+                loss = self._loss[key] = SeqLoss()
+            loss.observe(r.seq)
 
             if now - self._last_emit.get(key, 0.0) >= self._min_emit_dt:
                 self._last_emit[key] = now
@@ -84,7 +84,7 @@ class DashboardSink(OutputSink):
                         "acc": r.accuracy,
                         "v": [round(x, 6) for x in r.values],
                         "hz": round(self._hz.get(key, 0.0), 1),
-                        "lost": self._lost.get(key, 0),
+                        "lost": loss.lost,
                     }
                 )
         if out:
