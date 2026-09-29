@@ -57,10 +57,12 @@ fun SensorsScreen(vm: StreamViewModel, nav: AppNav) {
     val c = Ss.colors
 
     // Build the ordered, grouped list once per catalog (catalog is stable).
-    val grouped: List<Pair<SensorCategory, List<SensorInfo>>> = CATEGORY_ORDER.mapNotNull { cat ->
-        val items = vm.catalog.filter { SignalCatalog.of(it.type, it.stringType).category == cat }
-            .sortedBy { SignalCatalog.of(it.type, it.stringType).humanName }
-        if (items.isEmpty()) null else cat to items
+    val grouped: List<Pair<SensorCategory, List<SensorInfo>>> = remember(vm.catalog) {
+        CATEGORY_ORDER.mapNotNull { cat ->
+            val items = vm.catalog.filter { SignalCatalog.of(it.type, it.stringType).category == cat }
+                .sortedBy { SignalCatalog.of(it.type, it.stringType).humanName }
+            if (items.isEmpty()) null else cat to items
+        }
     }
 
     // Filter chips: null = All, else a single category.

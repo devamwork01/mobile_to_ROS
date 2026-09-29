@@ -24,6 +24,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -121,18 +122,27 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     // deliver data. Ref-counted per handle; released when screens dispose.
     private val sensorManager = app.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val _preview = MutableStateFlow<Map<Int, FloatArray>>(emptyMap())
-    /** Latest preview values keyed by catalog handle. */
+    /** Latest preview values keyed by catalog handle. Written from the preview sensor thread; the
+     *  StateFlow is conflated, so the UI picks up only the newest map once per frame. */
     val preview: StateFlow<Map<Int, FloatArray>> = _preview.asStateFlow()
     private val previewRefs = HashMap<Int, Int>()
-    private val previewAccuracy = HashMap<Int, Int>()
+    private val previewAccuracy = java.util.concurrent.ConcurrentHashMap<Int, Int>()
     private val previewListeners = HashMap<Int, SensorEventListener>()
+
+    // Preview sensor callbacks run on a background thread so the per-event map copy never lands on
+    // the main thread; Compose collects the conflated StateFlow and coalesces updates per frame.
+    // (A fixed-rate ticker publishing instead was measured WORSE on a 120 Hz display: updates out
+    // of phase with vsync pushed ~50% of frames past deadline, vs ~7.5% baseline.)
+    private val previewThread = android.os.HandlerThread("sensor-preview").apply { start() }
+    private val previewHandler = android.os.Handler(previewThread.looper)
 
     /** Handle of the primary orientation (rotation vector) sensor, if present. */
     val orientationHandle: Int? = catalog.firstOrNull { it.type == Sensor.TYPE_ROTATION_VECTOR }?.handle
 
     private fun makeListener(handle: Int) = object : SensorEventListener {
         override fun onSensorChanged(e: SensorEvent) {
-            _preview.value = _preview.value + (handle to e.values.copyOf())
+            val v = e.values.copyOf()
+            _preview.update { it + (handle to v) }
         }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
             previewAccuracy[handle] = accuracy
@@ -159,11 +169,12 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         val sensor = engine.sensorFor(handle) ?: return
         val listener = makeListener(handle)
         previewListeners[handle] = listener
-        sensorManager.registerListener(listener, sensor, previewDelayUs(handle))
+        sensorManager.registerListener(listener, sensor, previewDelayUs(handle), previewHandler)
     }
 
     private fun unregisterPreview(handle: Int) {
         previewListeners.remove(handle)?.let { sensorManager.unregisterListener(it) }
+        _preview.update { it - handle }
     }
 
     /** Register read-only preview listeners for [handles] (ref-counted). */
@@ -315,5 +326,6 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         discovery.stop()
         previewListeners.values.forEach { sensorManager.unregisterListener(it) }
         previewListeners.clear()
+        previewThread.quitSafely()
     }
 }

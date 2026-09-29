@@ -72,6 +72,7 @@ class StreamingService : Service() {
 
     /** Keep Wi-Fi and the CPU awake while streaming so screen-off / Doze / battery
      *  saver don't drop the link. Released on stop / destroy. */
+    @android.annotation.SuppressLint("WakelockTimeout") // intentional, see comment below
     private fun acquireLocks() {
         if (wifiLock == null) {
             val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -90,6 +91,8 @@ class StreamingService : Service() {
             wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "sensorstream:cpu")
                 .apply { setReferenceCounted(false) }
         }
+        // Deliberately no timeout: a streaming/recording session can legitimately run for hours, and a
+        // timeout would silently let the CPU sleep mid-session. Released on stop and in onDestroy.
         if (wakeLock?.isHeld == false) wakeLock?.acquire()
     }
 
