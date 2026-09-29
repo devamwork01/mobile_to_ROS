@@ -174,7 +174,12 @@ async def run(args: argparse.Namespace) -> None:
         """Read-only recordings API (ADR-001). Filesystem-backed; safe off the event loop."""
         parts = [x for x in path.split("/") if x]  # e.g. ['api','recordings', <id>, 'signals', <handle>]
         if parts == ["api", "recordings"]:
-            return 200, recordings.list_recordings(args.log_dir)
+            # Paged (newest first): ?limit=50&cursor=<next_cursor from the previous page>
+            try:
+                limit = int(query.get("limit", 50))
+            except (TypeError, ValueError):
+                limit = 50
+            return 200, recordings.list_recordings_page(args.log_dir, limit, query.get("cursor"))
         if len(parts) == 5 and parts[:2] == ["api", "recordings"] and parts[3] == "signals":
             rec_id, handle = parts[2], parts[4]
             start = query.get("start")

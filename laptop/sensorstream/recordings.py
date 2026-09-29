@@ -90,33 +90,86 @@ def _peek_sensors(path: str, meta: Optional[dict], max_frames: int = 1000) -> Li
     return sorted(found.values(), key=lambda s: s["handle"])
 
 
+def _describe(ssbin: str) -> Optional[dict]:
+    """Metadata for one recording (header-only frame scan + meta), or None if unreadable."""
+    base = _base_of(ssbin)
+    try:
+        st = os.stat(ssbin)
+        meta = _load_meta(base)
+        n_frames, first, last = _scan_frames(ssbin)
+    except (OSError, ValueError):
+        return None
+    duration_ms = (last - first) / 1e6 if (first is not None and last is not None) else None
+    return {
+        "id": os.path.basename(base),
+        "sizeBytes": st.st_size,
+        "modified": int(st.st_mtime * 1000),
+        "frames": n_frames,
+        "durationMs": duration_ms,
+        "model": (meta or {}).get("model"),
+        "android": (meta or {}).get("android"),
+        "sensors": _peek_sensors(ssbin, meta),
+    }
+
+
+def _sorted_ssbins(log_dir: str) -> List[tuple]:
+    """(mtime_ms, id, path) newest first; ties broken by id (descending) for a total order."""
+    out = []
+    for path in glob.glob(os.path.join(log_dir, "*" + _SSBIN)):
+        try:
+            mtime_ms = int(os.stat(path).st_mtime * 1000)
+        except OSError:
+            continue
+        out.append((mtime_ms, os.path.basename(_base_of(path)), path))
+    out.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return out
+
+
+def _cursor_key(cursor: Optional[str]):
+    """Cursor = "<mtime_ms>:<id>" of the last item already returned. It encodes a POSITION in the
+    sort order (not a file), so it stays valid even if that file is deleted between pages."""
+    if not cursor:
+        return None
+    mtime, _, rid = cursor.partition(":")
+    try:
+        return (int(mtime), rid)
+    except ValueError:
+        return None
+
+
+def list_recordings_page(log_dir: str, limit: int = 50, cursor: Optional[str] = None) -> dict:
+    """One page of recordings, newest first. Only the files on the page are scanned, so listing
+    stays fast as the folder grows. Returns ``{"items", "next_cursor", "total"}``."""
+    if not os.path.isdir(log_dir):
+        return {"items": [], "next_cursor": None, "total": 0}
+    limit = max(1, min(int(limit), 200))
+    files = _sorted_ssbins(log_dir)
+    after = _cursor_key(cursor)
+    if after is not None:
+        files_after = [f for f in files if (f[0], f[1]) < after]
+    else:
+        files_after = files
+    items: List[dict] = []
+    last_key = None
+    consumed = 0
+    for mtime_ms, rid, path in files_after:
+        consumed += 1
+        last_key = (mtime_ms, rid)
+        info = _describe(path)
+        if info is not None:
+            items.append(info)
+        if len(items) >= limit:
+            break
+    more = consumed < len(files_after)
+    next_cursor = f"{last_key[0]}:{last_key[1]}" if (more and last_key) else None
+    return {"items": items, "next_cursor": next_cursor, "total": len(files)}
+
+
 def list_recordings(log_dir: str) -> List[dict]:
-    """Metadata for every recording in ``log_dir`` (newest first). Cheap: stat + header scan."""
+    """Metadata for every recording in ``log_dir`` (newest first). Prefer the paged variant for UIs."""
     if not os.path.isdir(log_dir):
         return []
-    out: List[dict] = []
-    for ssbin in sorted(glob.glob(os.path.join(log_dir, "*" + _SSBIN)), reverse=True):
-        base = _base_of(ssbin)
-        try:
-            st = os.stat(ssbin)
-            meta = _load_meta(base)
-            n_frames, first, last = _scan_frames(ssbin)
-            duration_ms = (last - first) / 1e6 if (first is not None and last is not None) else None
-            out.append(
-                {
-                    "id": os.path.basename(base),
-                    "sizeBytes": st.st_size,
-                    "modified": int(st.st_mtime * 1000),
-                    "frames": n_frames,
-                    "durationMs": duration_ms,
-                    "model": (meta or {}).get("model"),
-                    "android": (meta or {}).get("android"),
-                    "sensors": _peek_sensors(ssbin, meta),
-                }
-            )
-        except (OSError, ValueError):
-            continue
-    return out
+    return [i for i in (_describe(p) for _, _, p in _sorted_ssbins(log_dir)) if i is not None]
 
 
 def query_signal(

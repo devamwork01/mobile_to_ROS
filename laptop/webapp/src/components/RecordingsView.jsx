@@ -16,6 +16,9 @@ const sensorLabel = (s) => signalMeta(s.type).name || s.name || `Type ${s.type}`
 
 export default function RecordingsView() {
   const [recs, setRecs] = useState(null); // null = loading
+  const [nextCursor, setNextCursor] = useState(null); // null = no more pages
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [err, setErr] = useState(null);
   const [sel, setSel] = useState(null); // selected recording
   const [handle, setHandle] = useState(null); // selected signal handle
@@ -25,8 +28,23 @@ export default function RecordingsView() {
   const chartWrap = useRef(null);
 
   useEffect(() => {
-    listRecordings().then(setRecs).catch((e) => { setErr(e.message); setRecs([]); });
+    listRecordings()
+      .then((page) => { setRecs(page.items); setNextCursor(page.next_cursor); setTotal(page.total); })
+      .catch((e) => { setErr(e.message); setRecs([]); });
   }, []);
+
+  const loadMore = () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    listRecordings({ cursor: nextCursor })
+      .then((page) => {
+        setRecs((prev) => [...prev, ...page.items]);
+        setNextCursor(page.next_cursor);
+        setTotal(page.total);
+      })
+      .catch((e) => setErr(e.message))
+      .finally(() => setLoadingMore(false));
+  };
 
   // ~1 bucket per pixel, so zooming into a narrower range yields higher effective resolution.
   const runQuery = (rec, h, r) => {
@@ -62,7 +80,7 @@ export default function RecordingsView() {
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)] gap-4 items-start">
       {/* Recordings list */}
       <section className="panel p-3 max-h-[70vh] overflow-y-auto">
-        <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted mb-3 px-1">Recordings ({recs.length})</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted mb-3 px-1">Recordings ({recs.length < total ? `${recs.length} of ${total}` : total})</h2>
         <div className="flex flex-col gap-2">
           {recs.map((r) => (
             <button
@@ -75,6 +93,11 @@ export default function RecordingsView() {
               <div className="text-[11px] text-muted mt-1">{r.sensors.length} signals · {r.frames.toLocaleString()} frames</div>
             </button>
           ))}
+          {nextCursor && (
+            <button onClick={loadMore} disabled={loadingMore} className="btn-ghost text-xs justify-center py-2">
+              {loadingMore ? "Loading…" : `Load more (${total - recs.length} left)`}
+            </button>
+          )}
         </div>
       </section>
 

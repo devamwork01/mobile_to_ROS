@@ -1,8 +1,12 @@
 // Thin client for the server-side recordings API (ADR-001). The browser never
 // downloads raw recordings — it asks the server for metadata and LOD buckets.
 
-export async function listRecordings() {
-  const r = await fetch("/api/recordings");
+// One page of recordings, newest first: { items, next_cursor, total }. Pass the previous
+// page's next_cursor to fetch the next page (null when there are no more).
+export async function listRecordings({ cursor, limit = 50 } = {}) {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (cursor) q.set("cursor", cursor);
+  const r = await fetch(`/api/recordings?${q}`);
   if (!r.ok) throw new Error(`recordings list: HTTP ${r.status}`);
   return r.json();
 }
