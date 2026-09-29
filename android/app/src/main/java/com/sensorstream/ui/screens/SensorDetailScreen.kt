@@ -192,8 +192,8 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
         }
 
         // Real-time graph: multi-line for vectors, single line for environmental / single-value
-        // sensors. Orientation keeps the 3D + tiles instead. A time-window selector sets how many
-        // samples (derived from the selected rate) the graph shows.
+        // sensors. Orientation keeps the 3D + tiles instead. The time-window selector sets the
+        // graph's visible time span (5 / 10 / 20 s).
         val graphComponents = when {
             isVector && values != null && values.size >= 3 -> 3
             !isOrientation && values != null && values.isNotEmpty() -> 1
@@ -207,9 +207,6 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             ) {
                 listOf(5, 10, 20).forEach { w -> ToggleChip("${w}s", windowSec == w) { windowSec = w } }
             }
-            val periodUs = sel.periodByHandle[handle] ?: 10_000
-            val rateHz = if (periodUs > 0) 1_000_000f / periodUs else 200f
-            val capacity = (windowSec * rateHz).toInt().coerceIn(30, 600)
             val gColors = if (graphComponents == 1) listOf(c.accent) else axisColors
             val gLabels = if (graphComponents == 1) listOf(sig.componentLabels.firstOrNull() ?: "value") else sig.componentLabels
             val gValues = if (graphComponents == 1 && values != null) floatArrayOf(values[0]) else values
@@ -219,7 +216,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
                     colors = gColors,
                     labels = gLabels,
                     unit = sig.unit,
-                    capacity = capacity,
+                    windowMs = windowSec * 1000L,
                     modifier = Modifier.fillMaxWidth().height(190.dp),
                 )
             }

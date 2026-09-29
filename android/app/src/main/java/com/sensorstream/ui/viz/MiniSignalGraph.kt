@@ -1,5 +1,6 @@
 package com.sensorstream.ui.viz
 
+import android.os.SystemClock
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -18,8 +19,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshots.SnapshotStateList
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,10 +35,11 @@ import com.sensorstream.ui.theme.Ss
 import com.sensorstream.ui.theme.SsType
 
 /**
- * Compact rolling line graph with an interactive legend. Keeps a per-component ring buffer of the
- * most recent values it's handed; caller passes the latest sample each recomposition. Tap a legend
- * entry to isolate that signal (tap again for "all"), so magnitudes are readable per-signal. Shows
- * the current window's min/max scale. [capacity] sets the visible sample window.
+ * Compact rolling line graph with an interactive legend. Caller passes the latest sample each
+ * recomposition; a new point is recorded only when a new sample array arrives, timestamped on
+ * arrival. [windowMs] is the visible time span (e.g. 5 s / 10 s / 20 s) — the x-axis is time, so
+ * the window is exact regardless of sensor rate or recomposition cadence. Tap a legend entry to
+ * isolate that signal (tap again for "all"). Shows the current window's min/max scale.
  */
 @Composable
 fun MiniSignalGraph(
@@ -48,18 +48,18 @@ fun MiniSignalGraph(
     modifier: Modifier = Modifier,
     labels: List<String> = emptyList(),
     unit: String = "",
-    capacity: Int = 140,
+    windowMs: Long = 10_000L,
 ) {
     val c = Ss.colors
     val n = colors.size
-    val rings: List<SnapshotStateList<Float>> = remember(n) { List(n) { mutableStateListOf<Float>() } }
-    if (values != null) {
-        for (i in 0 until minOf(n, values.size)) {
-            val ring = rings[i]
-            ring.add(values[i])
-            while (ring.size > capacity) ring.removeAt(0)
-        }
+    val buffer = remember(n) { TimeWindowBuffer() }
+    val lastSample = remember(n) { arrayOfNulls<FloatArray>(1) }
+    // Each sensor event delivers a fresh array; unrelated recompositions re-pass the same one.
+    if (values != null && values !== lastSample[0]) {
+        lastSample[0] = values
+        buffer.add(SystemClock.uptimeMillis(), values.copyOf(minOf(n, values.size)))
     }
+    val pts = buffer.visible(windowMs)
 
     // -1 = show all; otherwise the isolated component index.
     var selected by remember(n) { mutableIntStateOf(-1) }
@@ -68,7 +68,9 @@ fun MiniSignalGraph(
     // Shared scale over the shown components so the isolated signal fills the view.
     var lo = Float.POSITIVE_INFINITY
     var hi = Float.NEGATIVE_INFINITY
-    rings.forEachIndexed { i, ring -> if (shown(i)) for (v in ring) { if (v < lo) lo = v; if (v > hi) hi = v } }
+    for (p in pts) for (i in 0 until minOf(n, p.v.size)) if (shown(i)) {
+        val v = p.v[i]; if (v < lo) lo = v; if (v > hi) hi = v
+    }
     val hasData = lo != Float.POSITIVE_INFINITY
     if (!hasData) { lo = 0f; hi = 1f }
     if (hi - lo < 1e-3f) { hi += 1f; lo -= 1f }
@@ -109,15 +111,21 @@ fun MiniSignalGraph(
                     val y = h * g / 3f
                     drawLine(c.line, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
                 }
-                rings.forEachIndexed { ci, ring ->
-                    if (!shown(ci) || ring.size < 2) return@forEachIndexed
-                    val path = Path()
-                    ring.forEachIndexed { i, v ->
-                        val x = w * i / (capacity - 1).toFloat()
-                        val y = h - ((v - lo) / span) * h
-                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                if (pts.size >= 2) {
+                    // Right edge = newest sample; left edge = newest - window.
+                    val tStart = pts.last().tMs - windowMs
+                    for (ci in 0 until n) {
+                        if (!shown(ci)) continue
+                        val path = Path()
+                        var started = false
+                        for (p in pts) {
+                            if (ci >= p.v.size) continue
+                            val x = w * (p.tMs - tStart) / windowMs.toFloat()
+                            val y = h - ((p.v[ci] - lo) / span) * h
+                            if (!started) { path.moveTo(x, y); started = true } else path.lineTo(x, y)
+                        }
+                        drawPath(path, colors.getOrElse(ci) { Color.Gray }, style = Stroke(width = 2.dp.toPx()))
                     }
-                    drawPath(path, colors.getOrElse(ci) { Color.Gray }, style = Stroke(width = 2.dp.toPx()))
                 }
             }
             Text(
@@ -129,6 +137,11 @@ fun MiniSignalGraph(
                 Fmt.value(lo, 2) + unitSuffix,
                 style = SsType.mono, color = c.faint, fontSize = 10.sp,
                 modifier = Modifier.align(Alignment.BottomStart),
+            )
+            Text(
+                "${windowMs / 1000}s",
+                style = SsType.mono, color = c.faint, fontSize = 10.sp,
+                modifier = Modifier.align(Alignment.BottomEnd),
             )
         }
     }
