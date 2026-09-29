@@ -32,6 +32,7 @@ import com.sensorstream.ui.components.SensorCard
 import com.sensorstream.ui.nav.AppNav
 import com.sensorstream.ui.nav.Screen
 import com.sensorstream.ui.signal.SensorCategory
+import com.sensorstream.ui.signal.Fmt
 import com.sensorstream.ui.signal.SignalCatalog
 import com.sensorstream.ui.theme.Ss
 import com.sensorstream.ui.theme.SsDims
@@ -54,6 +55,8 @@ private fun SensorCategory.title() = when (this) {
 @Composable
 fun SensorsScreen(vm: StreamViewModel, nav: AppNav) {
     val sel by vm.sel.collectAsState()
+    val live by vm.live.collectAsState()
+    val state by vm.engineState.collectAsState()
     val c = Ss.colors
 
     // Build the ordered, grouped list once per catalog (catalog is stable).
@@ -95,7 +98,11 @@ fun SensorsScreen(vm: StreamViewModel, nav: AppNav) {
                 val sig = SignalCatalog.of(info.type, info.stringType)
                 val enabled = info.handle in sel.enabled
                 val p = vm.periodOf(info.handle)
-                val rate = if (p > 0) "${1_000_000 / p} Hz" else "Max"
+                val requested = if (p > 0) "${1_000_000 / p} Hz" else "Max"
+                // While streaming, also show the rate the sensor actually delivers (measured from its
+                // timestamps) — Android treats the requested rate as a hint, not a guarantee.
+                val actual = if (state.streaming && enabled) live[info.handle]?.hz?.takeIf { it > 0f } else null
+                val rate = if (actual != null) "$requested · ${Fmt.value(actual, 0)} live" else requested
                 SensorCard(
                     info = sig,
                     rateText = rate,

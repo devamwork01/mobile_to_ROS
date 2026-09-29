@@ -294,7 +294,17 @@ class StreamEngine(context: Context) {
         control.sendActive(regs.map { it.handle })
     }
 
-    private fun buildHello(): JSONObject {
+    private fun buildHello(): JSONObject = JSONObject()
+        .put("type", "hello")
+        .put("model", Build.MODEL)
+        .put("manufacturer", Build.MANUFACTURER)
+        .put("android", Build.VERSION.RELEASE)
+        .put("app_version", com.sensorstream.BuildConfig.VERSION_NAME)
+        .put("client_id", clientId)
+        .put("sensors", catalogJson())
+
+    /** The sensor catalog as sent in `hello` — also used for an exported recording's .meta.json. */
+    fun catalogJson(): JSONArray {
         val sensors = JSONArray()
         for (info in catalog) {
             sensors.put(
@@ -317,14 +327,7 @@ class StreamEngine(context: Context) {
                     .put("maxHz", info.maxFrequencyHz.toDouble())
             )
         }
-        return JSONObject()
-            .put("type", "hello")
-            .put("model", Build.MODEL)
-            .put("manufacturer", Build.MANUFACTURER)
-            .put("android", Build.VERSION.RELEASE)
-            .put("app_version", com.sensorstream.BuildConfig.VERSION_NAME)
-            .put("client_id", clientId)
-            .put("sensors", sensors)
+        return sensors
     }
 
     fun stop() {

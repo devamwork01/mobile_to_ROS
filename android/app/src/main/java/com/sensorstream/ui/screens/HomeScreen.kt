@@ -48,6 +48,7 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
     val sel by vm.sel.collectAsState()
     val orientation by vm.orientationPreview.collectAsState()
     val hasSavedTarget by vm.hasSavedTarget.collectAsState()
+    val live by vm.live.collectAsState()
     val connectNotice by vm.connectNotice.collectAsState()
     val c = Ss.colors
 
@@ -111,7 +112,11 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
                 }
                 state.error?.let { Text(it, color = c.err, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp)) }
                 Text(
-                    if (state.connected || state.streaming) "Manage connection ›" else "Tap to set up connection ›",
+                    when {
+                        state.connected || state.streaming -> "Manage connection ›"
+                        hasSavedTarget -> "Change connection ›"
+                        else -> "Tap to set up connection ›"
+                    },
                     color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(top = 2.dp),
                 )
@@ -150,7 +155,8 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
                             val type = info?.type ?: return@forEach
                             val sig = SignalCatalog.of(type, info.stringType)
                             val p = vm.periodOf(handle)
-                            val hz = if (p > 0) "${1_000_000 / p} Hz" else "Max"
+                            val actual = if (state.streaming) live[handle]?.hz?.takeIf { it > 0f } else null
+                            val hz = actual?.let { "${Fmt.value(it, 0)} Hz live" } ?: if (p > 0) "${1_000_000 / p} Hz" else "Max"
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                 Text(sig.humanName, color = c.fg, fontSize = 14.sp)
                                 SamplingRateBadge(hz)

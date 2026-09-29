@@ -1,6 +1,22 @@
 package com.sensorstream.ui.screens
 
+import android.content.Context
+import android.content.Intent
 import android.os.Build
+import android.os.PowerManager
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.sensorstream.ui.signal.Fmt
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +62,24 @@ fun SettingsScreen(vm: StreamViewModel) {
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
             .getOrNull() ?: "—"
     }
+    val state by vm.engineState.collectAsState()
+    val streamingLike = state.streaming || state.connecting || state.connected
+    val scope = rememberCoroutineScope()
+    var recInfo by remember { mutableStateOf(vm.recordingInfo()) }
+    var exporting by remember { mutableStateOf(false) }
+    var exportMsg by remember { mutableStateOf<String?>(null) }
+    var batteryExempt by remember { mutableStateOf(isBatteryExempt(context)) }
+
+    // Refresh on return to the app (after the battery dialog / share sheet) and when streaming stops.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) { batteryExempt = isBatteryExempt(context); recInfo = vm.recordingInfo() }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    LaunchedEffect(streamingLike) { recInfo = vm.recordingInfo() }
 
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
@@ -107,6 +141,61 @@ fun SettingsScreen(vm: StreamViewModel) {
                     selected = settings.batchMode,
                     onSelect = { vm.setBatchMode(it) },
                 )
+                Box(Modifier.fillMaxWidth().padding(vertical = 6.dp).height(1.dp).background(c.line))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Background streaming", color = c.fg, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(
+                            if (batteryExempt) "Unrestricted — keeps streaming reliably with the screen off."
+                            else "Battery-optimized — Android may throttle streaming when the screen is off.",
+                            color = if (batteryExempt) c.muted else c.warn, fontSize = 12.sp,
+                        )
+                    }
+                    if (!batteryExempt) {
+                        OutlinedButton(
+                            onClick = { com.sensorstream.MainActivity.requestBatteryExemption(context) },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = c.accent),
+                        ) { Text("Allow") }
+                    }
+                }
+            }
+        }
+
+        // --- On-phone recording -----------------------------------------------------------------
+        SectionHeader("On-phone recording")
+        SsCard(Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    if (recInfo.segments == 0) "Nothing buffered yet. The phone keeps a rolling recording (up to 20 min) while streaming."
+                    else "${Fmt.value(recInfo.bytes / 1_048_576f, 1)} MB buffered on the phone (${recInfo.segments} segments).",
+                    color = c.muted, fontSize = 12.sp,
+                )
+                OutlinedButton(
+                    onClick = {
+                        exportMsg = null
+                        exporting = true
+                        scope.launch {
+                            val r = vm.exportRecording()
+                            exporting = false
+                            if (r.error != null) exportMsg = r.error
+                            else {
+                                exportMsg = "Exported ${r.frames} samples."
+                                shareFiles(context, r.files)
+                            }
+                        }
+                    },
+                    enabled = !streamingLike && recInfo.segments > 0 && !exporting,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = c.accent),
+                ) { Text(if (exporting) "Preparing…" else "Share recording") }
+                Text(
+                    when {
+                        exportMsg != null -> exportMsg!!
+                        streamingLike -> "Stop streaming to export."
+                        else -> "Shares a .ssbin + .meta.json. Put both in the laptop's recordings/ folder to open them in the dashboard's Recordings view."
+                    },
+                    color = c.faint, fontSize = 11.sp,
+                )
             }
         }
 
@@ -131,6 +220,20 @@ fun SettingsScreen(vm: StreamViewModel) {
 }
 
 
+
+private fun isBatteryExempt(context: Context): Boolean =
+    (context.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(context.packageName)
+
+/** Hand the exported files to the Android share sheet (email, Drive, Nearby Share, …). */
+private fun shareFiles(context: Context, files: List<java.io.File>) {
+    val uris = ArrayList(files.map { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it) })
+    val send = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+        type = "application/octet-stream"
+        putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(send, "Share recording"))
+}
 
 @Composable
 private fun <T> SegmentedControl(

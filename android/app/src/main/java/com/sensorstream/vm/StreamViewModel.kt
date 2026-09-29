@@ -315,6 +315,47 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // --- On-phone recording export ---------------------------------------------------------------
+    private val recordingDir get() = java.io.File(getApplication<Application>().filesDir, "onphone")
+
+    /** What is currently buffered on the phone (segments on disk). */
+    data class RecordingInfo(val segments: Int, val bytes: Long)
+
+    fun recordingInfo(): RecordingInfo {
+        val segs = com.sensorstream.stream.RecordingExporter.segmentsIn(recordingDir)
+        return RecordingInfo(segs.size, segs.sumOf { it.length() })
+    }
+
+    /** Result of an export: the files to share (recording + metadata), or an error message. */
+    data class Export(val files: List<java.io.File>, val frames: Long, val error: String?)
+
+    /** Merge the on-phone segments into one laptop-format .ssbin + .meta.json in the cache dir.
+     *  Only allowed while not streaming, so every segment is complete and flushed. */
+    suspend fun exportRecording(): Export = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val st = engine.state.value
+        if (st.streaming || st.connecting || st.connected) return@withContext Export(emptyList(), 0, "Stop streaming first, then export.")
+        val segs = com.sensorstream.stream.RecordingExporter.segmentsIn(recordingDir)
+        if (segs.isEmpty()) return@withContext Export(emptyList(), 0, "Nothing recorded yet — the phone records while streaming.")
+        val outDir = java.io.File(getApplication<Application>().cacheDir, "exports").apply { deleteRecursively(); mkdirs() }
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
+        val base = "sensorstream-${android.os.Build.MODEL.replace(Regex("[^A-Za-z0-9-]"), "_")}-$stamp"
+        val bin = java.io.File(outDir, "$base.ssbin")
+        val r = com.sensorstream.stream.RecordingExporter.merge(segs, bin)
+        if (r.frames == 0L) return@withContext Export(emptyList(), 0, "The on-phone recording is empty.")
+        val meta = java.io.File(outDir, "$base.meta.json")
+        meta.writeText(
+            org.json.JSONObject()
+                .put("model", android.os.Build.MODEL)
+                .put("android", android.os.Build.VERSION.RELEASE)
+                .put("app_version", com.sensorstream.BuildConfig.VERSION_NAME)
+                .put("device_id", st.deviceId)
+                .put("source", "phone-export")
+                .put("sensors", engine.catalogJson())
+                .toString(2)
+        )
+        Export(listOf(bin, meta), r.frames, null)
+    }
+
     private companion object {
         const val KEY_HOST = "target_host"
         const val KEY_PORT = "target_port"

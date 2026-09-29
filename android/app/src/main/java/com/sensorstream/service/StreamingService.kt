@@ -116,6 +116,8 @@ class StreamingService : Service() {
             .setSmallIcon(android.R.drawable.stat_sys_upload)
             .setOngoing(true)
             .setContentIntent(openAppIntent())
+            // Stop straight from the notification, without opening the app.
+            .addAction(android.R.drawable.ic_media_pause, "Stop", stopIntent())
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -133,6 +135,11 @@ class StreamingService : Service() {
         var flags = PendingIntent.FLAG_UPDATE_CURRENT
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags = flags or PendingIntent.FLAG_IMMUTABLE
         return PendingIntent.getActivity(this, 0, launch, flags)
+    }
+
+    private fun stopIntent(): PendingIntent {
+        val stop = Intent(this, StreamingService::class.java).setAction(ACTION_STOP)
+        return PendingIntent.getService(this, 1, stop, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
     companion object {
