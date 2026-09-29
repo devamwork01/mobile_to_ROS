@@ -52,6 +52,9 @@ enum class StreamPhase(val label: String) {
 /** Derive a user-facing phase from the engine's boolean state (Spec §12). */
 fun EngineState.phase(): StreamPhase = when {
     error != null && !connected && !streaming -> StreamPhase.ERROR
+    // A dropped link keeps `streaming` true (the phone keeps recording for backfill) while the
+    // control channel reconnects — show that honestly instead of a green "Streaming".
+    streaming && !connected -> StreamPhase.RECONNECTING
     streaming -> StreamPhase.STREAMING
     connected -> StreamPhase.CONNECTED
     connecting -> StreamPhase.CONNECTING
