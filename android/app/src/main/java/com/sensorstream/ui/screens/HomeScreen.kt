@@ -46,7 +46,9 @@ import com.sensorstream.vm.StreamViewModel
 fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
     val state by vm.engineState.collectAsState()
     val sel by vm.sel.collectAsState()
-    val orientation by vm.orientationPreview.collectAsState()
+    // Kept as a State (not `by`) and read only inside the 3D view's draw phase, so orientation
+    // updates redraw the Canvas without recomposing the whole Home screen.
+    val orientation = vm.orientationPreview.collectAsState()
     val hasSavedTarget by vm.hasSavedTarget.collectAsState()
     val live by vm.live.collectAsState()
     val connectNotice by vm.connectNotice.collectAsState()
@@ -83,7 +85,7 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
         // Cap the height in landscape so it doesn't dominate the (short) viewport.
         val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
         Phone3DView(
-            rotationVector = orientation,
+            rotationVector = { orientation.value },
             modifier = Modifier.fillMaxWidth()
                 .then(if (landscape) Modifier.height(260.dp) else Modifier.aspectRatio(1.1f)),
         )

@@ -11,8 +11,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -61,7 +64,9 @@ object Phone3DConfig {
  */
 @Composable
 fun Phone3DView(
-    rotationVector: FloatArray?,
+    /** Read inside the draw phase only, so orientation updates redraw the Canvas without
+     *  recomposing the surrounding screen. */
+    rotationVector: () -> FloatArray?,
     modifier: Modifier = Modifier,
     sensorVector: Vec3? = null,
     sensorVectorColor: Color? = null,
@@ -77,21 +82,26 @@ fun Phone3DView(
     var camYaw by remember { mutableFloatStateOf(0f) }
     var camPitch by remember { mutableFloatStateOf(Projection.DEFAULT_PITCH) }
     var rotateEnabled by remember { mutableStateOf(false) }
+    // Recenter (display-only, mirrors the laptop): the reference pose captured on tap; the phone is
+    // then drawn relative to it and the world frame/grid rotate the same way so they stay consistent.
+    var refR by remember { mutableStateOf<FloatArray?>(null) }
+    val lastR = remember { FloatArray(9).also { Projection.IDENTITY.copyInto(it) } }
     Box(modifier) {
-        val gestures = if (rotateEnabled) {
-            Modifier
-                .pointerInput(Unit) {
-                    detectDragGestures { change, drag ->
-                        change.consume()
-                        camYaw += drag.x * 0.01f
-                        camPitch = (camPitch + drag.y * 0.01f).coerceIn(-1.4f, 1.4f)
-                    }
+        val orbit = if (rotateEnabled) {
+            Modifier.pointerInput(Unit) {
+                detectDragGestures { change, drag ->
+                    change.consume()
+                    camYaw += drag.x * 0.01f
+                    camPitch = (camPitch + drag.y * 0.01f).coerceIn(-1.4f, 1.4f)
                 }
-                .pointerInput(Unit) {
-                    detectTapGestures(onDoubleTap = { camYaw = 0f; camPitch = Projection.DEFAULT_PITCH })
-                }
+            }
         } else Modifier
-        Canvas(Modifier.fillMaxSize().then(gestures)) {
+        // Double-tap always resets to the default view: camera angle AND recenter (taps don't
+        // conflict with page scrolling, so this works whether rotate-mode is on or off).
+        val resetGesture = Modifier.pointerInput(Unit) {
+            detectTapGestures(onDoubleTap = { camYaw = 0f; camPitch = Projection.DEFAULT_PITCH; refR = null })
+        }
+        Canvas(Modifier.fillMaxSize().then(orbit).then(resetGesture)) {
         val cx = size.width / 2f
         val cy = size.height / 2f
         val unit = minOf(size.width, size.height) * 0.34f
@@ -99,7 +109,13 @@ fun Phone3DView(
         val pitch = camPitch
         // Render in the SAME space the laptop uses (Rx(-90°) ENU->Y-up) so the on-device phone's
         // orientation matches the dashboard's 3D viz exactly.
-        val r = Projection.threeMatrix(rotationVector ?: floatArrayOf(0f, 0f, 0f))
+        val rAbs = Projection.threeMatrix(rotationVector() ?: floatArrayOf(0f, 0f, 0f))
+        rAbs.copyInto(lastR)
+        val ref = refR
+        // World rotation W = refᵀ (identity when not recentered); phone r = W·rAbs.
+        val w = if (ref != null) Projection.transpose(ref) else Projection.IDENTITY
+        val r = if (ref != null) Projection.mul(w, rAbs) else rAbs
+        fun world(v: Vec3): Vec3 = if (ref != null) Projection.rotate(w, v) else v
 
         // Contact shadow beneath the phone (soft, elliptical).
         drawOvalShadow(cx, cy + unit * 0.95f, unit * 1.1f, unit * 0.28f, colors.isDark)
@@ -112,7 +128,7 @@ fun Phone3DView(
             val step = ext / 3f
             val gridCol = colors.line.copy(alpha = 0.6f)
             fun gp(x: Float, z: Float): Offset {
-                val (dx, dy) = Projection.project(Vec3(x, gy, z), 1f, yaw, pitch)
+                val (dx, dy) = Projection.project(world(Vec3(x, gy, z)), 1f, yaw, pitch)
                 return Offset(cx + dx, cy - dy)
             }
             var i = -3
@@ -130,14 +146,14 @@ fun Phone3DView(
             val wl = unit * 1.45f
             val worldCol = colors.muted.copy(alpha = 0.55f)
             fun wep(v: Vec3): Pair<Float, Float> {
-                val (dx, dy) = Projection.project(v, wl, yaw, pitch); return Pair(cx + dx, cy - dy)
+                val (dx, dy) = Projection.project(world(v), wl, yaw, pitch); return Pair(cx + dx, cy - dy)
             }
             drawAxis(cx, cy, wep(Vec3(0f, 1f, 0f)), worldCol, thick = 2.5f)   // Up
             drawAxis(cx, cy, wep(Vec3(1f, 0f, 0f)), worldCol, thick = 2.5f)   // East
             drawAxis(cx, cy, wep(Vec3(0f, 0f, -1f)), worldCol, thick = 2.5f)  // North
             if (showLabels) {
                 fun wlab(v: Vec3): Pair<Float, Float> {
-                    val (dx, dy) = Projection.project(v, unit * 1.62f, yaw, pitch); return Pair(cx + dx, cy - dy)
+                    val (dx, dy) = Projection.project(world(v), unit * 1.62f, yaw, pitch); return Pair(cx + dx, cy - dy)
                 }
                 drawAxisLabel("U", wlab(Vec3(0f, 1f, 0f)), worldCol)
                 drawAxisLabel("E", wlab(Vec3(1f, 0f, 0f)), worldCol)
@@ -232,7 +248,7 @@ fun Phone3DView(
         val gcy = size.height * 0.15f
         val glen = minOf(size.width, size.height) * 0.085f
         fun gp(v: Vec3, s: Float): Pair<Float, Float> {
-            val (dx, dy) = Projection.project(v, s, yaw, pitch); return Pair(gcx + dx, gcy - dy)
+            val (dx, dy) = Projection.project(world(v), s, yaw, pitch); return Pair(gcx + dx, gcy - dy)
         }
         drawAxis(gcx, gcy, gp(Vec3(0f, 0f, 1f), glen), colors.axisZ, thick = 2.2f)
         drawAxis(gcx, gcy, gp(Vec3(1f, 0f, 0f), glen), colors.axisX, thick = 2.2f)
@@ -242,8 +258,32 @@ fun Phone3DView(
         drawAxisLabel("Z", gp(Vec3(0f, 0f, 1f), glen * 1.42f), colors.axisZ, size = 22f)
         }
 
-        // Rotate-mode toggle (top-end). OFF by default so a drag scrolls the page; ON = drag orbits
-        // + double-tap resets. This is the fix for the 3D "eating" scroll, especially in landscape.
+        // Recenter toggle (left of the rotate toggle): tap to zero the view on the current pose, tap
+        // again (or double-tap the 3D) to return to absolute orientation.
+        val recentered = refR != null
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 52.dp).size(36.dp)
+                .clip(CircleShape).background(if (recentered) colors.accent else colors.surface2)
+                .clickable { refR = if (recentered) null else lastR.copyOf() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.CenterFocusStrong,
+                contentDescription = if (recentered) "Recentered — tap for absolute" else "Recenter on current pose",
+                tint = if (recentered) Color.White else colors.muted,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        if (recentered) {
+            Text(
+                "Relative to captured pose · double-tap to reset",
+                color = colors.faint, fontSize = 10.sp,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp),
+            )
+        }
+
+        // Rotate-mode toggle (top-end). OFF by default so a drag scrolls the page; ON = drag orbits.
+        // This is the fix for the 3D "eating" scroll, especially in landscape.
         val toggleBg = if (rotateEnabled) colors.accent else colors.surface2
         val toggleFg = if (rotateEnabled) Color.White else colors.muted
         Box(
@@ -274,15 +314,20 @@ private fun DrawScope.drawOvalShadow(cx: Float, cy: Float, rx: Float, ry: Float,
     )
 }
 
+// One reusable Paint for axis labels: drawing always happens on the UI thread, and allocating a
+// Paint per label (9 per frame) was avoidable garbage on every redraw.
+private val labelPaint = android.graphics.Paint().apply {
+    isAntiAlias = true
+    isFakeBoldText = true
+    textAlign = android.graphics.Paint.Align.CENTER
+}
+
 private fun DrawScope.drawAxisLabel(text: String, at: Pair<Float, Float>, color: Color, size: Float = 34f) {
-    val paint = android.graphics.Paint().apply {
+    val paint = labelPaint.apply {
         this.color = android.graphics.Color.argb(
             (color.alpha * 255).toInt(), (color.red * 255).toInt(), (color.green * 255).toInt(), (color.blue * 255).toInt(),
         )
         textSize = size
-        isAntiAlias = true
-        isFakeBoldText = true
-        textAlign = android.graphics.Paint.Align.CENTER
     }
     // Center vertically on the point (baseline offset ~ textSize/3).
     drawContext.canvas.nativeCanvas.drawText(text, at.first, at.second + size / 3f, paint)

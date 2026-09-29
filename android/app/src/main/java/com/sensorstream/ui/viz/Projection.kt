@@ -64,6 +64,26 @@ object Projection {
     /** Render-space (Three-matching) rotation matrix for the 3D phone. */
     fun threeMatrix(rv: FloatArray): FloatArray = quatToMatrix(androidToThree(quatFromRotationVector(rv)))
 
+    val IDENTITY: FloatArray get() = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
+
+    /** Transpose of a row-major 3×3 matrix (= inverse for a rotation). */
+    fun transpose(m: FloatArray): FloatArray = floatArrayOf(
+        m[0], m[3], m[6],
+        m[1], m[4], m[7],
+        m[2], m[5], m[8],
+    )
+
+    /** Row-major 3×3 product a·b. */
+    fun mul(a: FloatArray, b: FloatArray): FloatArray = FloatArray(9) { i ->
+        val r = i / 3; val c = i % 3
+        a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c]
+    }
+
+    /** Orientation [r] expressed relative to a captured reference pose [ref] (refᵀ·r): the phone
+     *  reads as identity when held in the reference pose. Display-only "recenter"; mirrors the
+     *  laptop's ref⁻¹·q. */
+    fun relativeTo(ref: FloatArray, r: FloatArray): FloatArray = mul(transpose(ref), r)
+
     /** Apply a row-major 3×3 matrix to a vector. */
     fun rotate(r: FloatArray, v: Vec3): Vec3 = Vec3(
         r[0] * v.x + r[1] * v.y + r[2] * v.z,

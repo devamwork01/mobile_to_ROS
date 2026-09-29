@@ -126,7 +126,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             )
         } else {
             Phone3DView(
-                rotationVector = orientation,
+                rotationVector = { orientation },
                 sensorVector = sensorVec,
                 sensorVectorColor = c.accent,
                 showAxes = if (isOrientation) showBody else true,
