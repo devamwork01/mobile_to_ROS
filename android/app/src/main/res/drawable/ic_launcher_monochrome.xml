@@ -1,15 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Monochrome layer for Android 13+ themed icons. The system tints this single color. -->
+<!-- Generated from the SensorStream icon master (phone + XYZ gizmo + orbit ring + stream arcs). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path android:pathData="M54,54 L54,29" android:strokeColor="#FF000000" android:strokeWidth="7" android:strokeLineCap="round" />
-    <path android:pathData="M54,54 L36,72" android:strokeColor="#FF000000" android:strokeWidth="7" android:strokeLineCap="round" />
-    <path android:pathData="M54,54 L72,72" android:strokeColor="#FF000000" android:strokeWidth="7" android:strokeLineCap="round" />
-    <path android:fillColor="#FF000000" android:pathData="M54,29 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
-    <path android:fillColor="#FF000000" android:pathData="M36,72 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
-    <path android:fillColor="#FF000000" android:pathData="M72,72 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
-    <path android:fillColor="#FF000000" android:pathData="M54,54 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- fit the artwork inside the 66dp safe zone -->
+    <group android:pivotX="52" android:pivotY="55" android:scaleX="0.82" android:scaleY="0.82" android:translateX="2" android:translateY="-1">
+        <group android:pivotX="50" android:pivotY="60" android:rotation="-14">
+            <path android:pathData="M20,60 A30,9.5 0 0 1 80,60" android:strokeColor="#FFFFFFFF" android:strokeAlpha="1" android:strokeWidth="3.2" android:strokeLineCap="round" />
+        </group>
+        <group android:pivotX="48" android:pivotY="56" android:rotation="-12">
+            <path android:pathData="M40.5,31 H55.5 A6.5,6.5 0 0 1 62,37.5 V74.5 A6.5,6.5 0 0 1 55.5,81 H40.5 A6.5,6.5 0 0 1 34,74.5 V37.5 A6.5,6.5 0 0 1 40.5,31 Z" android:strokeColor="#FFFFFFFF" android:strokeWidth="3" />
+            <path android:pathData="M48,58 L48,44.5" android:strokeColor="#FFFFFFFF" android:strokeWidth="2.6" android:strokeLineCap="round" />
+            <path android:pathData="M48,58 L57.5,58" android:strokeColor="#FFFFFFFF" android:strokeWidth="2.6" android:strokeLineCap="round" />
+            <path android:pathData="M48,58 L41.2,64.8" android:strokeColor="#FFFFFFFF" android:strokeWidth="2.6" android:strokeLineCap="round" />
+            <path android:pathData="M48,41.2 L51.2,46 L44.8,46 Z" android:fillColor="#FFFFFFFF" />
+            <path android:pathData="M60.8,58 L56,61.2 L56,54.8 Z" android:fillColor="#FFFFFFFF" />
+            <path android:pathData="M38.8,67.2 L40,61.6 L44.4,66 Z" android:fillColor="#FFFFFFFF" />
+            <path android:pathData="M45.6,58 A2.4,2.4 0 1 0 50.4,58 A2.4,2.4 0 1 0 45.6,58 Z" android:fillColor="#FFFFFFFF" />
+        </group>
+        <group android:pivotX="50" android:pivotY="60" android:rotation="-14">
+            <path android:pathData="M80,60 A30,9.5 0 0 1 20,60" android:strokeColor="#FFFFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" />
+        </group>
+        <path android:pathData="M67.5,38.5 A7,7 0 0 1 70.5,47.5" android:strokeColor="#FFFFFFFF" android:strokeAlpha="1" android:strokeWidth="3" android:strokeLineCap="round" />
+        <path android:pathData="M71.5,33.5 A13,13 0 0 1 77,50" android:strokeColor="#FFFFFFFF" android:strokeAlpha="1" android:strokeWidth="3" android:strokeLineCap="round" />
+        <path android:pathData="M75.5,28.5 A19,19 0 0 1 83.5,52.5" android:strokeColor="#FFFFFFFF" android:strokeAlpha="1" android:strokeWidth="3" android:strokeLineCap="round" />
+    </group>
 </vector>

@@ -1,3 +1,5 @@
+<p align="center"><img src="laptop/webapp/public/favicon.svg" alt="SensorStream icon" width="112"></p>
+
 # SensorStream — Real-Time Mobile Sensor Telemetry & Visualization
 
 Turn an Android phone into a low-latency, multi-sensor telemetry device and stream its
@@ -33,7 +35,7 @@ optional ROS 2 bridge.
 | Wire protocol | Compact little-endian binary over UDP; golden-vector-pinned codec (Python + Kotlin) |
 | Receiver pipeline | Multi-sensor, per-sensor rate/loss metrics, latency without a clock handshake (min-filter), decode-error accounting |
 | Reliability | On-phone bounded recording + laptop **backfill** (gap detect → resend → dedup) for lossless capture across Wi-Fi drops / screen-off |
-| Dashboard | Live cards, real-time graphs (uPlot), 3D orientation (Three.js) with recenter/reset, paged recordings browser with server-side LOD, light/dark themes |
+| Dashboard | Mission-control layout: always-on link KPIs (latency, jitter, loss, throughput), a sensor picker with live Hz + health dots, and **pinnable panels** you can collapse or maximise — several live graphs at once (uPlot), 3D orientation (Three.js) with recenter/reset, **Snapshot → CSV** of the last 10–60 s, paged recordings browser with server-side LOD, light/dark themes |
 | Phone app | Categorized sensors, per-sensor detail + sampling-rate config with **live actual Hz**, on-device pseudo-3D orientation with **recenter**, diagnostics, background streaming with a **Stop** action in the notification, **one-tap reconnect** to the last laptop, optional **packet batching**, and **export/share** of the on-phone recording |
 | Discovery | mDNS + UDP beacon so the phone can auto-find the laptop |
 | ROS 2 | Optional `--ros` sink publishing `sensor_msgs/Imu`, `MagneticField`, `QuaternionStamped` |
@@ -94,6 +96,7 @@ python -m sensorstream.app          # add --selftest to demo without a phone
 ```bash
 cd laptop/webapp
 npm run dev        # Vite dev server; keep the Python server running alongside for live data
+npm test           # unit tests (Vitest): history buffer, layout store, pin resolution, CSV
 ```
 
 ### Server flags
@@ -154,9 +157,16 @@ Once the laptop server is running and the phone is streaming, here's what you're
 
 ### On the laptop dashboard (`http://localhost:8080`)
 
-<img src="docs/images/dashboard.jpg" alt="Dashboard — 3D orientation, live sensor cards, real-time graphs" width="820">
+<img src="docs/images/dashboard.jpg" alt="Dashboard — KPI strip, sensor picker, 3D orientation and pinned live graphs" width="820">
 
-The **Dashboard** mirrors the phone's 3D orientation and adds live per-sensor cards and real-time graphs. Two more tabs are worth knowing:
+The **Dashboard** is built for watching and comparing sensors:
+
+- **KPI strip** (every page) — device, latency with a trend line, jitter, loss, throughput and session time, plus **Snapshot** and **Record**.
+- **Sensor picker** (left) — every sensor the phone offers, with live Hz and a health dot (amber when a sensor's rate drops or it goes quiet). **Pin** a sensor to give it a panel; the ones not streaming are folded away.
+- **Panels** — the 3D orientation (drag to orbit, double-click to reset, **Recenter** to zero the current pose) and one live graph per pinned sensor. Each panel can be collapsed, **maximised** (Esc to restore; adds per-axis and |v| toggles), paused, and switched between 5/10/30/60 s windows. Your layout is remembered — and carries over when you switch phones.
+- **Snapshot** — downloads the last 10/30/60 s of the pinned (or all) sensors as a CSV. This is the display-rate stream; use **Record** for the full-rate, lossless capture.
+
+Two more views are worth knowing:
 
 - **Diagnostics** — end-to-end latency (p50/p95), jitter, on-phone latency, packet loss *net of backfill*, and recording-integrity counters.
 
@@ -215,6 +225,9 @@ drift >10%, RSS growth like a leak, or a crash.
 - [x] Wire protocol + codecs, receiver pipeline, discovery, auto-reconnect
 - [x] On-phone recording + laptop backfill (lossless across drops)
 - [x] Dashboard (cards, graphs, 3D, recordings browser, light/dark)
+- [x] Dashboard redesign: KPI strip, sensor picker, pinnable/maximisable panels, Snapshot CSV
+- [ ] Dashboard insights: per-axis stats, noise, spectrum (FFT), drift, rate stability
+- [ ] Recording tools: naming/tags, playback scrubber, CSV export of recordings
 - [x] Phone app redesign (Compose) with on-device 3D orientation
 - [x] ROS 2 output sink (`--ros`)
 - [ ] Verify screen-off streaming end-to-end against the redesigned dashboard UI

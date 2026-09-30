@@ -27,9 +27,7 @@ function RailButton({ label, icon, on = false, onClick }) {
 export default function IconRail({ view, onView, theme, onTheme }) {
   return (
     <aside className="w-14 shrink-0 h-full flex flex-col items-center gap-1.5 py-3 bg-surface border-r border-line">
-      <div className="grid place-items-center w-9 h-9 mb-3 rounded-xl bg-accent-soft text-accent shadow-glow" title="SensorStream">
-        <Icons.Box size={18} />
-      </div>
+      <img src="./favicon.svg" alt="SensorStream" title="SensorStream" className="w-10 h-10 mb-3 rounded-xl shadow-glow" />
       {NAV.map(([label, icon]) => (
         <RailButton key={label} label={label} icon={icon} on={view === label} onClick={() => onView(label)} />
       ))}
