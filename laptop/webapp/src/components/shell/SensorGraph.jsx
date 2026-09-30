@@ -6,9 +6,19 @@ import { AXIS } from "../../telemetry/signals.js";
 import { frameIntervalMs, report } from "../../lib/renderBudget.js";
 import { useThemeStamp } from "../../lib/theme.js";
 
-import { seriesSpec } from "./seriesSpec.js";
+import { seriesSpec, withGaps } from "./seriesSpec.js";
 
 const COLORS = [AXIS.X, AXIS.Y, AXIS.Z, "#b57edc"];
+
+// Break threshold: well above this sensor's normal spacing (median of recent intervals).
+function gapThreshold(t) {
+  const n = Math.min(t.length - 1, 50);
+  if (n < 1) return 0.5;
+  const d = [];
+  for (let i = t.length - n; i < t.length; i++) d.push(t[i] - t[i - 1]);
+  d.sort((a, b) => a - b);
+  return Math.max(0.5, 5 * d[d.length >> 1]);
+}
 
 const token = (css, name) => `rgb(${css.getPropertyValue(name).trim().split(/\s+/).join(",")})`;
 
@@ -89,7 +99,7 @@ export default function SensorGraph({ handle, kind, window: win, paused, show })
         for (let j = 0; j < t.length; j++) m[j] = Math.hypot(data[1][j] ?? NaN, data[2][j] ?? NaN, data[3][j] ?? NaN);
         data.push(m);
       }
-      u.setData(data);
+      u.setData(withGaps(data, gapThreshold(t)));
       report("plot");
     };
     raf = requestAnimationFrame(tick);
