@@ -7,6 +7,7 @@ import { getByType } from "../telemetry/store.js";
 import { androidToThree } from "../lib/orient.js";
 import { AXIS } from "../telemetry/signals.js";
 import { frameIntervalMs, report } from "../lib/renderBudget.js";
+import { useThemeStamp } from "../lib/theme.js";
 
 const ORI_TYPES = [11, 15, 20]; // rotation vector / game / geomagnetic
 const GRAV_TYPES = [9, 1]; // gravity preferred, else accelerometer
@@ -24,6 +25,23 @@ function makeLabel(text, color) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false }));
   sp.scale.set(0.3, 0.3, 0.3);
   return sp;
+}
+
+// Floor grid tinted from the active theme's tokens (cyan-leaning lines on either background).
+function themedGrid() {
+  const css = getComputedStyle(document.documentElement);
+  const rgb = (name) => {
+    const [r, g, b] = css.getPropertyValue(name).trim().split(/\s+/).map(Number);
+    return new THREE.Color().setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace); // CSS tokens are sRGB
+  };
+  const accent = rgb("--accent");
+  const center = rgb("--line2").lerp(accent, 0.35);
+  const lines = rgb("--line").lerp(accent, 0.12);
+  const grid = new THREE.GridHelper(8, 16, center, lines);
+  grid.material.transparent = true;
+  grid.material.opacity = 0.45; // a backdrop: the phone and axes stay the focus
+  grid.position.y = -1.25;
+  return grid;
 }
 
 // Rounded-rectangle outline centered on the origin (the phone's face / profile).
@@ -104,6 +122,8 @@ export default function Phone3D() {
   togRef.current = tog;
   const cmdRef = useRef(null); // "recenter" | "reset", consumed by the render loop
   const [recentered, setRecentered] = useState(false);
+  const gridRef = useRef(null); // { scene, grid } so a theme switch can re-tint the floor
+  const themeStamp = useThemeStamp();
 
   useEffect(() => {
     const el = mount.current;
@@ -160,9 +180,9 @@ export default function Phone3D() {
     rim.position.set(-3, 1.5, -2.5);
     scene.add(rim);
 
-    const grid = new THREE.GridHelper(8, 16, 0x1e4a55, 0x16222b);
-    grid.position.y = -1.25;
+    const grid = themedGrid();
     scene.add(grid);
+    gridRef.current = { scene, grid };
 
     // soft contact shadow catcher
     const ground = new THREE.Mesh(
@@ -180,20 +200,21 @@ export default function Phone3D() {
 
     // --- Phone model: a modern flagship silhouette (rounded-rectangle profile extruded with soft
     // beveled edges), edge-to-edge glass, side buttons, a vertical rear camera column, and the
-    // mission-control look: graphite body with a thin cyan outline.
+    // mission-control look: titanium-blue body with a glowing cyan rim.
     const W = 0.74, H = 1.52, T = 0.082; // outer size (device axes: X width, Y height, Z thickness)
     const R = 0.11; // corner radius of the outline
     const BEVEL = 0.013; // how far the rounded edge rolls in, both across the face and the thickness
     const D = T - 2 * BEVEL; // straight side-wall height
     const FRONT = T / 2; // front glass plane (+Z, screen side)
 
-    const graphite = new THREE.MeshPhysicalMaterial({
-      color: 0x2b3038,
-      metalness: 0.9,
-      roughness: 0.32,
-      clearcoat: 0.6,
-      clearcoatRoughness: 0.25,
-      envMapIntensity: 1.2,
+    // "Titanium silverblue": a light brushed-metal frame that reads clearly on the dark scene
+    const titanium = new THREE.MeshPhysicalMaterial({
+      color: 0x9aa8ba,
+      metalness: 1.0,
+      roughness: 0.3,
+      clearcoat: 0.5,
+      clearcoatRoughness: 0.2,
+      envMapIntensity: 1.35,
     });
     const glass = new THREE.MeshPhysicalMaterial({
       color: 0x030509,
@@ -204,9 +225,9 @@ export default function Phone3D() {
       envMapIntensity: 1.5,
     });
     const backGlass = new THREE.MeshPhysicalMaterial({
-      color: 0x1b2027,
-      metalness: 0.35,
-      roughness: 0.28,
+      color: 0x4a5a70,
+      metalness: 0.45,
+      roughness: 0.34,
       clearcoat: 1.0,
       clearcoatRoughness: 0.12,
       envMapIntensity: 1.1,
@@ -222,7 +243,7 @@ export default function Phone3D() {
         bevelSegments: 6,
         curveSegments: 20,
       }),
-      graphite
+      titanium
     );
     body.geometry.translate(0, 0, -D / 2);
     body.castShadow = true;
@@ -253,7 +274,7 @@ export default function Phone3D() {
 
     // side buttons (right edge): volume rocker above the power key
     for (const [y, len] of [[0.36, 0.2], [0.14, 0.1]]) {
-      const b = new THREE.Mesh(new RoundedBoxGeometry(0.012, len, 0.026, 2, 0.005), graphite);
+      const b = new THREE.Mesh(new RoundedBoxGeometry(0.012, len, 0.026, 2, 0.005), titanium);
       b.position.set(W / 2 + 0.003, y, 0);
       phone.add(b);
     }
@@ -278,12 +299,13 @@ export default function Phone3D() {
     flash.rotation.y = Math.PI;
     phone.add(flash);
 
-    // mission-control accent: a thin cyan outline around the silhouette, front and back
-    const outlineMat = new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.85 });
-    const outlinePts = roundedRect(W + 0.004, H + 0.004, R + 0.002).getPoints(24);
+    // mission-control accent: a glowing cyan rim around the silhouette, front and back. A thin
+    // tube rather than a line: WebGL draws lines 1 px wide whatever linewidth says.
+    const outlineMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee, toneMapped: false });
+    const outlinePts = roundedRect(W + 0.006, H + 0.006, R + 0.003).getPoints(24);
     for (const z of [D / 2, -D / 2]) {
-      const g = new THREE.BufferGeometry().setFromPoints(outlinePts.map((pt) => new THREE.Vector3(pt.x, pt.y, z)));
-      phone.add(new THREE.LineLoop(g, outlineMat));
+      const curve = new THREE.CatmullRomCurve3(outlinePts.map((pt) => new THREE.Vector3(pt.x, pt.y, z)), true);
+      phone.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 480, 0.0055, 8, true), outlineMat));
     }
 
     const arrow = (parent, dir, len, color, head = 0.16) => {
@@ -439,6 +461,16 @@ export default function Phone3D() {
       el.removeChild(renderer.domElement);
     };
   }, []);
+
+  useEffect(() => {
+    const g = gridRef.current;
+    if (!g || themeStamp === 0) return;
+    g.scene.remove(g.grid);
+    g.grid.geometry.dispose();
+    g.grid.material.dispose();
+    g.grid = themedGrid();
+    g.scene.add(g.grid);
+  }, [themeStamp]);
 
   const T = (k) => setTog((s) => ({ ...s, [k]: !s[k] }));
   const recenter = () => { cmdRef.current = "recenter"; setRecentered(true); };
