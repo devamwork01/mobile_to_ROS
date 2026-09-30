@@ -2,6 +2,7 @@ import { Icons } from "../../icons.js";
 
 const NAV = [
   ["Dashboard", "LayoutDashboard"],
+  ["Insights", "Sigma"],
   ["Recordings", "Database"],
   ["Diagnostics", "Activity"],
 ];
