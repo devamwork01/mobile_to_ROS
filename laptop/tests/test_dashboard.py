@@ -97,3 +97,29 @@ def test_dashboard_ui_command_dispatch():
 
     got = asyncio.run(run())
     assert got and got[0]["cmd"] == "record_start"
+
+
+def test_page_is_revalidated_but_hashed_assets_are_cached(tmp_path):
+    # After a dashboard update the browser must fetch the new index.html (it names the new
+    # hashed bundles); the hashed files themselves never change and can be cached for good.
+    (tmp_path / "index.html").write_text("<html></html>")
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "index-abc123.js").write_text("x")
+
+    async def run():
+        dash = DashboardServer(str(tmp_path), "127.0.0.1", 0, "127.0.0.1", 0)
+        await dash.start()
+        try:
+            loop = asyncio.get_running_loop()
+            get = lambda path: urllib.request.urlopen(f"http://127.0.0.1:{dash.http_port}{path}", timeout=3)
+            root = await loop.run_in_executor(None, lambda: get("/"))
+            page = await loop.run_in_executor(None, lambda: get("/index.html"))
+            asset = await loop.run_in_executor(None, lambda: get("/assets/index-abc123.js"))
+            return root.headers.get("Cache-Control"), page.headers.get("Cache-Control"), asset.headers.get("Cache-Control")
+        finally:
+            await dash.stop()
+
+    root, page, asset = asyncio.run(run())
+    assert root == "no-cache"
+    assert page == "no-cache"
+    assert asset == "public, max-age=31536000, immutable"

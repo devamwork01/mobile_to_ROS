@@ -42,11 +42,11 @@ export default {
       boxShadow: {
         card: "inset 0 1px 0 rgba(255,255,255,0.04), 0 10px 30px -12px rgba(0,0,0,0.6)",
         panel: "inset 0 1px 0 rgba(255,255,255,0.03), 0 24px 60px -30px rgba(0,0,0,0.8)",
-        glow: "0 0 0 1px rgba(61,123,253,0.45), 0 0 26px -4px rgba(61,123,253,0.35)",
+        glow: "0 0 0 1px rgba(34,211,238,0.40), 0 0 22px -4px rgba(34,211,238,0.35)",
       },
       backgroundImage: {
         "surface-grad": "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0) 40%)",
-        "hero-grad": "radial-gradient(120% 120% at 50% 0%, rgba(61,123,253,0.10), rgba(0,0,0,0) 55%)",
+        "hero-grad": "radial-gradient(90% 70% at 40% 0%, rgba(34,211,238,0.07), rgba(0,0,0,0) 60%)",
       },
       keyframes: {
         "fade-in": { from: { opacity: 0, transform: "translateY(6px)" }, to: { opacity: 1, transform: "none" } },

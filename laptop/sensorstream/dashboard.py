@@ -52,6 +52,15 @@ class _QuietHandler(http.server.SimpleHTTPRequestHandler):
             return
         super().do_GET()
 
+    def end_headers(self):
+        # Vite bundles are content-hashed (/assets/index-<hash>.js), so they can be cached for
+        # good; the page that names them must be re-checked, or a browser keeps running the old
+        # dashboard after an update.
+        if not self.path.startswith("/api/"):
+            immutable = self.path.startswith("/assets/")
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable" if immutable else "no-cache")
+        super().end_headers()
+
 
 class _ReusableTCPServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
