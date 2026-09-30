@@ -46,18 +46,27 @@ const aliasKey = (r) => sensorKey(r.type, r.label);
 const matches = (key, r) => r.key === key || aliasKey(r) === key;
 
 /** The pin key (from `pinKeys`) that shows this row, or null when it is not pinned. */
-export function pinKeyFor(row, pinKeys) {
-  for (const k of pinKeys) if (matches(k, row)) return k;
+export function pinKeyFor(row, pinKeys, rows) {
+  for (const k of pinKeys) if (k !== PIN_3D && resolveKey(k, rows) === row) return k;
   return null;
 }
 
+const keyType = (key) => Number(key.slice(0, key.indexOf(":")));
+
+// Best row for a pin: exact (or pre-catalog alias) match first; otherwise this phone's sensor of
+// the same type, so a layout made with one phone carries over to another. Active rows and then
+// the lowest handle win ties.
 export function resolveKey(key, rows) {
-  let best = null;
+  const better = (r, best) => !best || (r.active && !best.active) || (r.active === best.active && r.handle < best.handle);
+  let exact = null;
+  let sameType = null;
+  const type = keyType(key);
   for (const r of rows) {
-    if (!matches(key, r)) continue;
-    if (!best || (r.active && !best.active) || (r.active === best.active && r.handle < best.handle)) best = r;
+    if (matches(key, r)) {
+      if (better(r, exact)) exact = r;
+    } else if (r.type === type && better(r, sameType)) sameType = r;
   }
-  return best;
+  return exact || sameType;
 }
 
 export function defaultPinKeys(rows) {

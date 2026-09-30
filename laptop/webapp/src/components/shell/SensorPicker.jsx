@@ -48,6 +48,7 @@ function Row({ r, pinKey, health, hz, onInfo }) {
 export default function SensorPicker({ rows, onInfo }) {
   const L = useLayout();
   const [q, setQ] = useState("");
+  const [showOff, setShowOff] = useState(false); // "Not streaming" can be dozens of sensors
   useTick(1000); // live Hz + health refresh
   if (L.pickerCollapsed) {
     return (
@@ -58,7 +59,7 @@ export default function SensorPicker({ rows, onInfo }) {
   }
   const now = Date.now();
   const pinKeys = L.pins.map((p) => p.key);
-  const keyOf = (r) => (r.key === PIN_3D ? (pinKeys.includes(PIN_3D) ? PIN_3D : null) : pinKeyFor(r, pinKeys));
+  const keyOf = (r) => (r.key === PIN_3D ? (pinKeys.includes(PIN_3D) ? PIN_3D : null) : pinKeyFor(r, pinKeys, rows));
   const anyOrientation = rows.some((r) => r.active && r.kind === "orientation");
   const threeD = { key: PIN_3D, label: "3D Orientation", detail: "Rotation vector", active: anyOrientation, handle: null, kind: "3d" };
   const f = q.trim().toLowerCase();
@@ -88,21 +89,29 @@ export default function SensorPicker({ rows, onInfo }) {
         <IconBtn title="Hide sensors" icon="PanelLeftClose" onClick={layout.togglePicker} />
       </div>
       <div className="flex-1 overflow-y-auto px-2 pb-3">
-        {groups.map(([title, items]) =>
-          items.length ? (
+        {groups.map(([title, items]) => {
+          if (!items.length) return null;
+          const foldable = title === "Not streaming" && !f; // a filter always shows matches
+          const open = !foldable || showOff;
+          return (
             <div key={title} className="mt-2">
-              <div className="flex justify-between px-2 mb-1 text-[9px] uppercase tracking-[0.12em] text-faint">
-                <span>
+              <button
+                disabled={!foldable}
+                onClick={() => setShowOff((v) => !v)}
+                className="w-full flex items-center justify-between px-2 mb-1 text-[9px] uppercase tracking-[0.12em] text-faint enabled:hover:text-muted"
+              >
+                <span className="flex items-center gap-1">
+                  {foldable && (open ? <Icons.ChevronDown size={11} /> : <Icons.ChevronRight size={11} />)}
                   {title} · {items.length}
                 </span>
-                <span>Hz</span>
-              </div>
-              {items.map((r) => (
+                {open && <span>Hz</span>}
+              </button>
+              {open && items.map((r) => (
                 <Row key={`${r.key}#${r.handle}`} r={r} pinKey={keyOf(r)} health={healthOf(r)} hz={hzOf(r)} onInfo={onInfo} />
               ))}
             </div>
-          ) : null
-        )}
+          );
+        })}
         {rows.length === 0 && <div className="px-2 pt-4 text-xs text-faint">No sensors yet. Start streaming from the phone (or run --selftest).</div>}
       </div>
     </aside>

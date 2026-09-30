@@ -62,7 +62,39 @@ describe("review fixes: pins made before the catalog arrived", () => {
     const key = early[0].key; // "1:Acceleration"
     const late = listSensors([{ handle: 1, type: 1, name: "LSM6DSO Accelerometer" }], [{ handle: 1, type: 1 }]);
     expect(resolveKey(key, late).handle).toBe(1);
-    expect(pinKeyFor(late[0], [key, "3d"])).toBe(key);
-    expect(pinKeyFor(late[0], ["3d"])).toBeNull();
+    expect(pinKeyFor(late[0], [key, "3d"], late)).toBe(key);
+    expect(pinKeyFor(late[0], ["3d"], late)).toBeNull();
+  });
+});
+
+describe("pins across phones", () => {
+  const s25 = listSensors(
+    [
+      { handle: 10, type: 1, name: "LSM6DSV Accelerometer" },
+      { handle: 11, type: 4, name: "LSM6DSV Gyroscope" },
+      { handle: 12, type: 5, name: "TCS Light" },
+    ],
+    [{ handle: 10, type: 1 }, { handle: 11, type: 4 }]
+  );
+
+  it("a pin made on another phone attaches to this phone's sensor of the same type", () => {
+    expect(resolveKey("1:Synthetic Accelerometer", s25).handle).toBe(10);
+    expect(resolveKey("4:Synthetic Gyroscope", s25).handle).toBe(11);
+    expect(resolveKey("9:Synthetic Gravity", s25)).toBeNull();
+  });
+
+  it("an exact match wins over a same-type fallback", () => {
+    const two = listSensors(
+      [{ handle: 1, type: 1, name: "Acc A" }, { handle: 2, type: 1, name: "Acc B" }],
+      [{ handle: 1, type: 1 }, { handle: 2, type: 1 }]
+    );
+    expect(resolveKey("1:Acc B", two).handle).toBe(2);
+    expect(resolveKey("1:Other", two).handle).toBe(1);
+  });
+
+  it("pinKeyFor reports the pin that resolves to the row", () => {
+    const acc = s25.find((r) => r.handle === 10);
+    expect(pinKeyFor(acc, ["3d", "1:Synthetic Accelerometer"], s25)).toBe("1:Synthetic Accelerometer");
+    expect(pinKeyFor(s25.find((r) => r.handle === 12), ["1:Synthetic Accelerometer"], s25)).toBeNull();
   });
 });

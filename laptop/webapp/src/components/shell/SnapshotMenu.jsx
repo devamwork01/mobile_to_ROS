@@ -38,7 +38,7 @@ export default function SnapshotMenu({ meta, rows }) {
   function download() {
     const handles =
       scope === "pinned"
-        ? L.pins.filter((p) => p.key !== PIN_3D).map((p) => resolveKey(p.key, rows)?.handle).filter((h) => h != null)
+        ? [...new Set(L.pins.filter((p) => p.key !== PIN_3D).map((p) => resolveKey(p.key, rows)?.handle).filter((h) => h != null))]
         : meta.active.length
         ? meta.active.map((a) => a.handle)
         : history.handles();

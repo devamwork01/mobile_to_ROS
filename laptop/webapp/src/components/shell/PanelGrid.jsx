@@ -46,7 +46,18 @@ export default function PanelGrid({ meta, rows }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const items = L.pins.map((pin) => ({ pin, row: pin.key === PIN_3D ? null : resolveKey(pin.key, rows) }));
+  // Pins resolve by name, then by sensor type (a layout made with another phone). Two pins that
+  // land on the same sensor show one panel.
+  const seen = new Set();
+  const items = [];
+  for (const pin of L.pins) {
+    const row = pin.key === PIN_3D ? null : resolveKey(pin.key, rows);
+    if (row) {
+      if (seen.has(row.handle)) continue;
+      seen.add(row.handle);
+    }
+    items.push({ pin, row });
+  }
 
   const max = L.maximized && items.find((i) => i.pin.key === L.maximized);
   if (max) return <div className="h-full p-3 flex flex-col">{renderItem(max, true, connected)}</div>;
