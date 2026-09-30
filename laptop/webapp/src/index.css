@@ -9,18 +9,18 @@
      (:root:not([data-theme]) under the media query). An explicit [data-theme="dark"] always
      wins back to dark even on a light OS. Axis colors (X/Y/Z) are fixed hex, not themed. */
   :root {
-    --ink: 10 13 18;
-    --surface: 18 22 29;
-    --surface-2: 23 28 37;
-    --surface-3: 31 37 48;
-    --line: 39 46 57;
-    --line2: 51 60 73;
-    --fg: 232 237 244;
-    --muted: 139 149 164;
-    --faint: 90 100 114;
-    --accent: 61 123 253;
-    --accent-hover: 90 144 255;
-    --accent-soft: 23 35 61;
+    --ink: 7 9 12;
+    --surface: 13 17 23;
+    --surface-2: 19 25 34;
+    --surface-3: 26 33 44;
+    --line: 31 40 51;
+    --line2: 45 56 70;
+    --fg: 230 237 245;
+    --muted: 131 144 162;
+    --faint: 86 98 115;
+    --accent: 34 211 238;
+    --accent-hover: 103 232 249;
+    --accent-soft: 12 42 51;
     --ok: 63 208 122;
     --warn: 227 166 53;
     --err: 255 92 92;
@@ -32,18 +32,18 @@
   /* Light palette: off-white ground (never pure white for surfaces sitting on it), near-black
      text, accent + semantics darkened for AA contrast on light. */
   :root[data-theme="light"] {
-    --ink: 236 239 244;
+    --ink: 238 241 245;
     --surface: 255 255 255;
     --surface-2: 246 248 251;
-    --surface-3: 237 241 246;
-    --line: 214 220 229;
+    --surface-3: 236 240 245;
+    --line: 216 222 230;
     --line2: 196 204 216;
-    --fg: 26 32 41;
-    --muted: 90 100 114;
-    --faint: 138 147 161;
-    --accent: 47 107 240;
-    --accent-hover: 30 91 224;
-    --accent-soft: 230 238 254;
+    --fg: 22 28 37;
+    --muted: 88 99 114;
+    --faint: 136 146 160;
+    --accent: 8 145 178;
+    --accent-hover: 14 116 144;
+    --accent-soft: 224 247 250;
     --ok: 25 154 84;
     --warn: 176 119 20;
     --err: 220 59 59;
@@ -54,18 +54,18 @@
 
   @media (prefers-color-scheme: light) {
     :root:not([data-theme="dark"]) {
-      --ink: 236 239 244;
+      --ink: 238 241 245;
       --surface: 255 255 255;
       --surface-2: 246 248 251;
-      --surface-3: 237 241 246;
-      --line: 214 220 229;
+      --surface-3: 236 240 245;
+      --line: 216 222 230;
       --line2: 196 204 216;
-      --fg: 26 32 41;
-      --muted: 90 100 114;
-      --faint: 138 147 161;
-      --accent: 47 107 240;
-      --accent-hover: 30 91 224;
-      --accent-soft: 230 238 254;
+      --fg: 22 28 37;
+      --muted: 88 99 114;
+      --faint: 136 146 160;
+      --accent: 8 145 178;
+      --accent-hover: 14 116 144;
+      --accent-soft: 224 247 250;
       --ok: 25 154 84;
       --warn: 176 119 20;
       --err: 220 59 59;
@@ -101,7 +101,7 @@
 
 @layer components {
   .panel {
-    @apply bg-surface border border-line rounded-2xl shadow-card;
+    @apply bg-surface border border-line rounded-xl shadow-panel;
   }
   .card {
     @apply bg-surface-2 border border-line rounded-xl;
@@ -110,7 +110,7 @@
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-colors;
   }
   .btn-accent {
-    @apply btn bg-accent hover:bg-accent-hover text-white shadow-glow;
+    @apply btn bg-accent hover:bg-accent-hover text-ink shadow-glow;
   }
   .btn-ghost {
     @apply btn bg-surface-2 border border-line text-fg hover:border-line2;

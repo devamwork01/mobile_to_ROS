@@ -33,16 +33,16 @@ function makeScreenTexture() {
   const g = c.getContext("2d");
   g.clearRect(0, 0, 256, 512);
   const rg = g.createRadialGradient(128, 160, 8, 128, 160, 280);
-  rg.addColorStop(0, "rgba(61,123,253,0.55)");
-  rg.addColorStop(0.6, "rgba(61,123,253,0.10)");
-  rg.addColorStop(1, "rgba(61,123,253,0)");
+  rg.addColorStop(0, "rgba(34,211,238,0.55)");
+  rg.addColorStop(0.6, "rgba(34,211,238,0.10)");
+  rg.addColorStop(1, "rgba(34,211,238,0)");
   g.fillStyle = rg;
   g.fillRect(0, 0, 256, 512);
   g.textAlign = "center";
   g.fillStyle = "rgba(232,237,244,0.92)";
   g.font = "bold 25px Inter, system-ui, sans-serif";
   g.fillText("SENSORSTREAM", 128, 300);
-  g.fillStyle = "rgba(61,123,253,0.95)";
+  g.fillStyle = "rgba(34,211,238,0.95)";
   g.font = "bold 15px Inter, system-ui, sans-serif";
   g.fillText("P R O", 128, 324);
   g.strokeStyle = "rgba(63,208,122,0.55)";
@@ -375,7 +375,7 @@ export default function Phone3D() {
   const resetView = () => { cmdRef.current = "reset"; setRecentered(false); };
   return (
     <div className="flex flex-col h-full">
-      <div ref={mount} className="relative flex-1 min-h-[300px] rounded-xl overflow-hidden bg-[radial-gradient(120%_120%_at_50%_0%,rgba(61,123,253,0.08),rgba(0,0,0,0)_60%)]" />
+      <div ref={mount} className="relative flex-1 min-h-[300px] rounded-xl overflow-hidden bg-[radial-gradient(120%_120%_at_50%_0%,rgba(34,211,238,0.08),rgba(0,0,0,0)_60%)]" />
       <div className="flex items-center gap-2 pt-3">
         <button onClick={recenter} className="btn-ghost text-xs" title="Zero the view to the phone's current pose">
           Recenter

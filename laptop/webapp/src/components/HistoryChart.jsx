@@ -12,7 +12,7 @@ function seriesStyle(type) {
   const meta = signalMeta(type);
   if (meta.kind === "orientation") return { labels: ["qx", "qy", "qz", "qw"], colors: [AXIS.X, AXIS.Y, AXIS.Z, "#b57edc"] };
   if (meta.kind === "vector") return { labels: ["X", "Y", "Z"], colors: [AXIS.X, AXIS.Y, AXIS.Z] };
-  return { labels: [meta.name], colors: ["#3d7bfd"] };
+  return { labels: [meta.name], colors: ["#22d3ee"] };
 }
 
 // q: server LOD result { ncomp, t:[sec from q.start], avg/min/max:[[per comp]], type, start(ns) }
