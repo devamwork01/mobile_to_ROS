@@ -109,6 +109,7 @@ def _describe(ssbin: str) -> Optional[dict]:
         "model": (meta or {}).get("model"),
         "android": (meta or {}).get("android"),
         "sensors": _peek_sensors(ssbin, meta),
+        "hasReport": os.path.isfile(base + ".report.json"),
     }
 
 
