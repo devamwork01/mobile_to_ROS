@@ -93,7 +93,7 @@ export default function Panel({
           {onClose && <IconBtn title="Unpin" icon="X" onClick={onClose} />}
         </div>
       </header>
-      {!collapsed && <div className={`relative flex-1 min-h-0 ${bodyClassName}`}>{children}</div>}
+      {!collapsed && <div className={`relative flex-auto min-h-0 ${bodyClassName}`}>{children}</div>}
     </section>
   );
 }
