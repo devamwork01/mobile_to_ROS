@@ -32,8 +32,16 @@ const latestByType = new Map(); // sensor type -> latest record
 const typeListeners = new Map(); // type -> Set<cb(record)>
 const lastCardNotify = new Map(); // handle -> ms of last card re-render
 const CARD_REFRESH_MS = 100; // cap live-card React re-renders to ~10 Hz (human-readable; the raw stream is faster)
+const allListeners = new Set(); // every record, full presentation rate (history buffer)
+
+/** Every data record as it arrives (used by the rolling history). Returns an unsubscribe fn. */
+export function subscribeAll(cb) {
+  allListeners.add(cb);
+  return () => allListeners.delete(cb);
+}
 
 function onRecord(r) {
+  allListeners.forEach((cb) => cb(r));
   // Store latest + feed graphs/3D at full rate (they consume imperatively, no React re-render).
   signals.set(r.handle, r);
   latestByType.set(r.type, r);

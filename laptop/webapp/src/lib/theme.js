@@ -3,6 +3,8 @@
 // "system" stamps nothing and lets prefers-color-scheme decide. All localStorage access is
 // wrapped so a private window / blocked storage can't break rendering.
 
+import { useEffect, useState } from "react";
+
 const KEY = "ss-theme";
 const VALID = new Set(["system", "light", "dark"]);
 
@@ -40,4 +42,22 @@ export function initTheme() {
   const p = getStoredTheme();
   applyTheme(p);
   return p;
+}
+
+// Bumps whenever the effective theme may have changed (explicit toggle or OS switch), so
+// canvas-drawn charts can re-read the CSS color tokens.
+export function useThemeStamp() {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    const bump = () => setN((x) => x + 1);
+    const mo = new MutationObserver(bump);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    const mq = matchMedia("(prefers-color-scheme: light)");
+    mq.addEventListener("change", bump);
+    return () => {
+      mo.disconnect();
+      mq.removeEventListener("change", bump);
+    };
+  }, []);
+  return n;
 }
