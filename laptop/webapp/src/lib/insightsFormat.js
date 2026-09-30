@@ -32,3 +32,8 @@ export function reportToCsv(report) {
   }
   return rows.join("\n") + "\n";
 }
+
+// Axis tick labels for log-scale uPlot charts. uPlot passes null for log ticks it leaves
+// unlabeled, so both return "" for them.
+export const logTick = (x, unit = "") => (x == null ? "" : `${+x.toPrecision(2)}${unit}`);
+export const expTick = (x) => (x == null ? "" : x.toExponential(0));

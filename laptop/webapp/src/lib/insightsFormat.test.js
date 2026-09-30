@@ -27,3 +27,19 @@ describe("reportToCsv", () => {
     expect(lines[1]).toBe('"Gyro, main",4,x,rad/s,0.001,0.001,0.01,0.05,0.001,0,100,0.4,0,1,0.001,0.0002,20');
   });
 });
+
+import { logTick, expTick } from "./insightsFormat.js";
+
+describe("log-axis tick labels", () => {
+  it("leave uPlot's unlabeled (null) log ticks blank instead of throwing", () => {
+    expect(logTick(null, "Hz")).toBe("");
+    expect(expTick(null)).toBe("");
+  });
+  it("format labeled ticks", () => {
+    expect(logTick(0.5, "Hz")).toBe("0.5Hz");
+    expect(logTick(20, "Hz")).toBe("20Hz");
+    expect(logTick(0.01, "")).toBe("0.01");
+    expect(expTick(0.0001)).toBe("1e-4");
+    expect(expTick(3)).toBe("3e+0");
+  });
+});

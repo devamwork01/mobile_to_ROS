@@ -73,7 +73,7 @@ export function NotStreaming() {
 
 export default function Panel({
   title, unit, live, badge, tools, collapsed = false, maximized = false,
-  onCollapse, onMaximize, onClose, className = "", bodyClassName = "", children,
+  onCollapse, onMaximize, onClose, className = "", bodyClassName = "", footer = null, children,
 }) {
   return (
     <section className={`panel flex flex-col min-w-0 overflow-hidden ${className}`}>
@@ -94,6 +94,7 @@ export default function Panel({
         </div>
       </header>
       {!collapsed && <div className={`relative flex-auto min-h-0 ${bodyClassName}`}>{children}</div>}
+      {!collapsed && footer}
     </section>
   );
 }
