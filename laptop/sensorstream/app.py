@@ -21,15 +21,18 @@ from typing import Optional
 
 from . import protocol as p
 from . import recordings
+from . import reports
 from .backfill import GapTracker
 from .control import ControlServer
 from .reconcile import Reconciler
 from .dashboard import DashboardServer
+from .insights import InsightsSink
 from .discovery import Advertiser, BEACON_PORT
 from .logging_sink import Recorder
 from .receiver import start_receiver
 from .sinks import DashboardSink
 from .sync import SyncTracker
+from .testrun import TestRunManager
 
 _HERE = os.path.dirname(__file__)
 _REACT_DIST = os.path.abspath(os.path.join(_HERE, "..", "webapp", "dist"))
@@ -90,6 +93,40 @@ async def _selftest_generator(udp_port: int, hz: float) -> None:
         sock.close()
 
 
+def make_api_get(log_dir: str):
+    """Read-only HTTP API: recordings (ADR-001) and Insights reports. Filesystem-backed."""
+
+    def api_get(path: str, query: dict):
+        """Read-only recordings API (ADR-001). Filesystem-backed; safe off the event loop."""
+        parts = [x for x in path.split("/") if x]  # e.g. ['api','recordings', <id>, 'signals', <handle>]
+        if parts == ["api", "recordings"]:
+            # Paged (newest first): ?limit=50&cursor=<next_cursor from the previous page>
+            try:
+                limit = int(query.get("limit", 50))
+            except (TypeError, ValueError):
+                limit = 50
+            return 200, recordings.list_recordings_page(log_dir, limit, query.get("cursor"))
+        if len(parts) == 5 and parts[:2] == ["api", "recordings"] and parts[3] == "signals":
+            rec_id, handle = parts[2], parts[4]
+            start = query.get("start")
+            end = query.get("end")
+            res = recordings.query_signal(
+                log_dir, rec_id, int(handle),
+                int(start) if start else None,
+                int(end) if end else None,
+                int(query.get("buckets", 1000)),
+            )
+            return (200, res) if res is not None else (404, {"error": "recording or signal not found"})
+        if parts == ["api", "reports"]:
+            return 200, {"items": reports.list_reports(log_dir)}
+        if len(parts) == 3 and parts[:2] == ["api", "reports"]:
+            rep = reports.load_report(log_dir, parts[2])
+            return (200, rep) if rep is not None else (404, {"error": "report not found"})
+        return 404, {"error": "unknown endpoint"}
+
+    return api_get
+
+
 async def run(args: argparse.Namespace) -> None:
     dash = DashboardServer(WEB_DIR, args.ws_host, args.ws_port, args.http_host, args.http_port)
     await dash.start()
@@ -105,6 +142,8 @@ async def run(args: argparse.Namespace) -> None:
 
     recorder = Recorder()
     sync = SyncTracker()
+    insights = InsightsSink()
+    testruns: Optional[TestRunManager] = None  # created once the control channel exists (below)
 
     # Backfill (Phase 2B): detect per-(client,handle) seq gaps on the live stream and, after a grace
     # window, request the missing datagrams from the phone over the reliable control channel. Merged
@@ -127,6 +166,9 @@ async def run(args: argparse.Namespace) -> None:
         if ros_sink is not None:
             ros_sink.on_datagram(dg, addr, t_recv_ns)
         sync.observe(dg, t_recv_ns)
+        insights.on_datagram(dg, addr, t_recv_ns)
+        if testruns is not None:  # UDP can arrive before the run manager is wired
+            testruns.on_datagram(dg)
         reconciler.on_live(dg.device_id, dg, t_recv_ns)
         if recorder.is_recording:
             recorder.on_datagram(dg, t_recv_ns)
@@ -158,42 +200,54 @@ async def run(args: argparse.Namespace) -> None:
                     "device_id": s.device_id, "sensors": s.catalog}
         return None
 
+    def streaming() -> bool:
+        return any(s.active for s in control.sessions.values())
+
+    testruns = TestRunManager(recorder, args.log_dir, record_meta, streaming, dash.broadcast)
+
     rec_base = recorder.start(args.log_dir, record_meta()) if args.record else None
 
     def ui_command(msg: dict) -> None:
         cmd = msg.get("cmd")
-        if cmd == "record_start" and not recorder.is_recording:
+        if cmd == "record_start" and not recorder.is_recording and not testruns.active:
             print("[rec] start:", recorder.start(args.log_dir, record_meta()) + ".ssbin")
-        elif cmd == "record_stop" and recorder.is_recording:
+        elif cmd == "record_stop" and recorder.is_recording and not testruns.active:
             print("[rec] stop:", recorder.stop())
+        elif cmd == "testrun_start":
+            try:
+                seconds = float(msg.get("seconds") or 0)
+                handles = [int(h) for h in (msg.get("handles") or [])]
+            except (TypeError, ValueError):
+                seconds, handles = 0.0, []
+            ok, why = testruns.start(str(msg.get("preset", "still")), seconds, handles)
+            if not ok:
+                dash.broadcast({"kind": "testrun", "phase": "refused", "message": why})
+        elif cmd == "testrun_stop":
+            testruns.stop_early()
+        elif cmd == "psd_subscribe":
+            try:
+                insights.subscribe_psd([int(h) for h in (msg.get("handles") or [])])
+            except (TypeError, ValueError):
+                pass
+            return
+        elif cmd == "analyse":
+            rid = str(msg.get("id", ""))
+            if reports.valid_id(rid):
+                asyncio.get_running_loop().create_task(_analyse(rid))
+            return
         dash.broadcast({"kind": "recording", "active": recorder.is_recording, "rows": recorder.rows})
+
+    async def _analyse(rid: str) -> None:
+        path = os.path.join(args.log_dir, rid + ".ssbin")
+        try:
+            await asyncio.to_thread(reports.analyse_recording, path, "capture")
+            dash.broadcast({"kind": "report_ready", "id": rid})
+        except Exception as exc:  # unreadable/missing recording: tell the browser, keep serving
+            dash.broadcast({"kind": "report_error", "id": rid, "message": str(exc)})
 
     dash.on_ui_command = ui_command
 
-    def api_get(path: str, query: dict):
-        """Read-only recordings API (ADR-001). Filesystem-backed; safe off the event loop."""
-        parts = [x for x in path.split("/") if x]  # e.g. ['api','recordings', <id>, 'signals', <handle>]
-        if parts == ["api", "recordings"]:
-            # Paged (newest first): ?limit=50&cursor=<next_cursor from the previous page>
-            try:
-                limit = int(query.get("limit", 50))
-            except (TypeError, ValueError):
-                limit = 50
-            return 200, recordings.list_recordings_page(args.log_dir, limit, query.get("cursor"))
-        if len(parts) == 5 and parts[:2] == ["api", "recordings"] and parts[3] == "signals":
-            rec_id, handle = parts[2], parts[4]
-            start = query.get("start")
-            end = query.get("end")
-            res = recordings.query_signal(
-                args.log_dir, rec_id, int(handle),
-                int(start) if start else None,
-                int(end) if end else None,
-                int(query.get("buckets", 1000)),
-            )
-            return (200, res) if res is not None else (404, {"error": "recording or signal not found"})
-        return 404, {"error": "unknown endpoint"}
-
-    dash.on_api_get = api_get
+    dash.on_api_get = make_api_get(args.log_dir)
 
     def ui_snapshot() -> list:
         """Current state replayed to a browser that connects after the phone did."""
@@ -211,6 +265,9 @@ async def run(args: argparse.Namespace) -> None:
             if s.active:
                 msgs.append({"kind": "active_set", "device_id": s.device_id, "handles": s.active})
         msgs.append({"kind": "recording", "active": recorder.is_recording, "rows": recorder.rows})
+        run_status = testruns.status()
+        if run_status is not None:
+            msgs.append(run_status)
         return msgs
 
     dash.on_ui_connect = ui_snapshot
@@ -293,7 +350,15 @@ async def run(args: argparse.Namespace) -> None:
                 for dev, upto in reconciler.acks():
                     await control.send_backfill_ack(dev, upto)
 
-    tasks = [asyncio.create_task(stats_task()), asyncio.create_task(reconcile_task())]
+    async def insights_task() -> None:
+        while True:
+            await asyncio.sleep(1.0)
+            for m in insights.tick():
+                dash.broadcast(m)
+            await testruns.tick()
+
+    tasks = [asyncio.create_task(stats_task()), asyncio.create_task(reconcile_task()),
+             asyncio.create_task(insights_task())]
     if advertiser is not None:
         tasks.append(asyncio.create_task(beacon_task()))
     if args.selftest:
