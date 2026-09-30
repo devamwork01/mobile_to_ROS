@@ -14,8 +14,12 @@ export default function SnapshotMenu({ meta, rows }) {
   const box = useRef(null);
   const lastDevice = useRef(null);
   const names = useRef(new Map()); // handle -> label, kept after a disconnect clears the catalog
+  const counts = useRef(new Map()); // handle -> values per sample in the CSV (vector 3, quaternion 4, scalar 1)
   if (meta.device) lastDevice.current = meta.device;
-  rows.forEach((r) => names.current.set(r.handle, r.label));
+  rows.forEach((r) => {
+    names.current.set(r.handle, r.label);
+    counts.current.set(r.handle, r.kind === "orientation" ? 4 : r.kind === "vector" ? 3 : 1);
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -38,7 +42,7 @@ export default function SnapshotMenu({ meta, rows }) {
         : meta.active.length
         ? meta.active.map((a) => a.handle)
         : history.handles();
-    const csv = history.snapshotCsv({ handles, seconds: range, names: names.current, device: lastDevice.current });
+    const csv = history.snapshotCsv({ handles, seconds: range, names: names.current, valueCounts: counts.current, device: lastDevice.current });
     downloadText(snapshotFilename(lastDevice.current?.model, new Date()), csv);
     setOpen(false);
   }

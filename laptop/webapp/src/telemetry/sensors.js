@@ -40,10 +40,21 @@ export function listSensors(catalog = [], active = []) {
   return rows.sort((a, b) => a.label.localeCompare(b.label) || a.handle - b.handle);
 }
 
+// A pin made before the phone's catalog arrived is keyed by the generic signal name
+// ("<type>:<label>"); it still matches the row once the vendor name is known.
+const aliasKey = (r) => sensorKey(r.type, r.label);
+const matches = (key, r) => r.key === key || aliasKey(r) === key;
+
+/** The pin key (from `pinKeys`) that shows this row, or null when it is not pinned. */
+export function pinKeyFor(row, pinKeys) {
+  for (const k of pinKeys) if (matches(k, row)) return k;
+  return null;
+}
+
 export function resolveKey(key, rows) {
   let best = null;
   for (const r of rows) {
-    if (r.key !== key) continue;
+    if (!matches(key, r)) continue;
     if (!best || (r.active && !best.active) || (r.active === best.active && r.handle < best.handle)) best = r;
   }
   return best;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { listSensors, resolveKey, defaultPinKeys, sensorKey, keyLabel, PIN_3D } from "./sensors.js";
+import { listSensors, resolveKey, defaultPinKeys, sensorKey, keyLabel, pinKeyFor, PIN_3D } from "./sensors.js";
 
 const catalog = [
   { handle: 3, type: 4, name: "LSM6DSO Gyroscope", stringType: "android.sensor.gyroscope" },
@@ -53,5 +53,16 @@ describe("defaults and helpers", () => {
     expect(sensorKey(4, "Gyro: A")).toBe("4:Gyro: A");
     expect(keyLabel("4:Gyro: A")).toBe("Gyro: A");
     expect(keyLabel(PIN_3D)).toBe("3D Orientation");
+  });
+});
+
+describe("review fixes: pins made before the catalog arrived", () => {
+  it("a generic key (type:signal name) still resolves once the vendor catalog lands", () => {
+    const early = listSensors([], [{ handle: 1, type: 1 }]);
+    const key = early[0].key; // "1:Acceleration"
+    const late = listSensors([{ handle: 1, type: 1, name: "LSM6DSO Accelerometer" }], [{ handle: 1, type: 1 }]);
+    expect(resolveKey(key, late).handle).toBe(1);
+    expect(pinKeyFor(late[0], [key, "3d"])).toBe(key);
+    expect(pinKeyFor(late[0], ["3d"])).toBeNull();
   });
 });

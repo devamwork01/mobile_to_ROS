@@ -98,15 +98,13 @@ export default function App() {
     setViewState(v);
   };
   const showPerf = typeof location !== "undefined" && new URLSearchParams(location.search).has("perf");
-  // The server clears the catalog when the phone disconnects; keep the last rows (as inactive)
-  // so pinned panels show "stale" with their history instead of "not streaming".
-  const lastRows = useRef([]);
-  const rows = useMemo(() => {
-    const live = listSensors(meta.catalog, meta.active);
-    if (live.length === 0 && !meta.device) return lastRows.current.map((r) => ({ ...r, active: false }));
-    lastRows.current = live;
-    return live;
-  }, [meta.catalog, meta.active, meta.device]);
+  // The server clears the catalog when the phone disconnects (and a socket blip can briefly lose
+  // it while data still flows). Keep the last catalog so pins keep their names and resolve:
+  // inactive rows show "stale" with their history instead of "not streaming".
+  const lastCatalog = useRef([]);
+  if (meta.catalog.length) lastCatalog.current = meta.catalog;
+  const catalog = meta.catalog.length ? meta.catalog : lastCatalog.current;
+  const rows = useMemo(() => listSensors(catalog, meta.active), [catalog, meta.active]);
 
   return (
     <div className="flex h-full bg-ink">

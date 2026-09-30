@@ -93,22 +93,29 @@ export function createHistory() {
     if (ls) ls.forEach((cb) => cb());
   }
 
-  function read(handle, seconds) {
+  // opts.until: absolute end time in s (a paused graph keeps its frozen window).
+  // opts.into: scratch() buffers to fill instead of allocating (graphs redraw at ~60 Hz).
+  function read(handle, seconds, { until, into } = {}) {
     const r = rings.get(handle);
     if (!r || r.n === 0) return { t: new Float64Array(0), v: [] };
-    const newest = newestT(r);
-    let k = r.n;
-    while (k > 0 && r.t[at(r, k - 1)] >= newest - seconds - 1e-9) k--;
-    const m = r.n - k;
-    const t = new Float64Array(m);
-    const v = Array.from({ length: r.nv }, () => new Float64Array(m));
+    let hi = r.n; // exclusive: samples newer than `until` are left out
+    if (until != null) while (hi > 0 && r.t[at(r, hi - 1)] > until + 1e-9) hi--;
+    if (hi === 0) return { t: new Float64Array(0), v: [] };
+    const end = r.t[at(r, hi - 1)];
+    let k = hi;
+    while (k > 0 && r.t[at(r, k - 1)] >= end - seconds - 1e-9) k--;
+    const m = hi - k;
+    const t = into ? into.t.subarray(0, m) : new Float64Array(m);
+    const v = Array.from({ length: r.nv }, (_, a) => (into ? into.v[a].subarray(0, m) : new Float64Array(m)));
     for (let j = 0; j < m; j++) {
       const p = at(r, k + j);
-      t[j] = r.t[p] - newest;
+      t[j] = r.t[p] - end;
       for (let a = 0; a < r.nv; a++) v[a][j] = r.v[a][p];
     }
     return { t, v };
   }
+
+  const scratch = () => ({ t: new Float64Array(CAP), v: Array.from({ length: MAX_VALUES }, () => new Float64Array(CAP)) });
 
   function latest(handle) {
     const r = rings.get(handle);
@@ -140,7 +147,9 @@ export function createHistory() {
 
   const handles = () => [...rings.keys()].filter((h) => rings.get(h).n > 0);
 
-  function snapshotCsv({ handles: hs, seconds, names = new Map(), device = null, exportedIso = new Date().toISOString() }) {
+  // valueCounts: handle -> values that belong in x..w (3 for vectors, so an uncalibrated sensor's
+  // bias values are not written under w). Defaults to everything stored.
+  function snapshotCsv({ handles: hs, seconds, names = new Map(), valueCounts = new Map(), device = null, exportedIso = new Date().toISOString() }) {
     const lines = [
       "# SensorStream snapshot - display-rate data (<=UI cap per sensor), not the lossless recording",
       `# device=${device?.model ?? "unknown"}, android=${device?.android ?? "unknown"}, exported=${exportedIso}, range_s=${seconds}`,
@@ -159,12 +168,13 @@ export function createHistory() {
       rows.sort((a, b) => a.t - b.t || a.h - b.h);
       const t0 = rows.length ? rows[0].t : 0;
       for (const { t, h, r, p } of rows) {
-        const vals = [0, 1, 2, 3].map((a) => (a < r.nv ? csvNum(r.v[a][p]) : ""));
+        const nv = Math.min(r.nv, valueCounts.get(h) ?? r.nv);
+        const vals = [0, 1, 2, 3].map((a) => (a < nv ? csvNum(r.v[a][p]) : ""));
         lines.push(`${(t - t0).toFixed(6)},${csvField(names.get(h) ?? `handle ${h}`)},${h},${vals.join(",")}`);
       }
     }
     return lines.join("\n") + "\n";
   }
 
-  return { push, read, latest, liveHz, health, subscribe, handles, snapshotCsv };
+  return { push, read, scratch, latest, liveHz, health, subscribe, handles, snapshotCsv };
 }

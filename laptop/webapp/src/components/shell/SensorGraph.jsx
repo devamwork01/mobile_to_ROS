@@ -9,6 +9,9 @@ import { useThemeStamp } from "../../lib/theme.js";
 import { seriesSpec, withGaps } from "./seriesSpec.js";
 
 const COLORS = [AXIS.X, AXIS.Y, AXIS.Z, "#b57edc"];
+// Frozen end time per handle while paused. Module-level so it survives the remount that
+// maximise/restore causes: the paused window stays the one the user was inspecting.
+const pausedAt = new Map();
 
 // Break threshold: well above this sensor's normal spacing (median of recent intervals).
 function gapThreshold(t) {
@@ -27,9 +30,10 @@ const token = (css, name) => `rgb(${css.getPropertyValue(name).trim().split(/\s+
 export default function SensorGraph({ handle, kind, window: win, paused, show }) {
   const host = useRef(null);
   const uRef = useRef(null);
-  const st = useRef({ dirty: true, win, paused });
+  const st = useRef({ dirty: true, force: true, win, paused, show });
   st.current.win = win;
   st.current.paused = paused;
+  st.current.show = show;
   const themeStamp = useThemeStamp();
 
   useEffect(() => {
@@ -62,6 +66,9 @@ export default function SensorGraph({ handle, kind, window: win, paused, show })
     );
     uRef.current = u;
     st.current.dirty = true;
+    st.current.force = true; // draw once even if paused
+    const into = history.scratch();
+    const mag = new Float64Array(into.t.length);
     let visible = true;
     let raf = 0;
     let last = 0;
@@ -73,6 +80,7 @@ export default function SensorGraph({ handle, kind, window: win, paused, show })
         if (e.isIntersecting && !visible) {
           u.setSize(size());
           st.current.dirty = true;
+          st.current.force = true;
         }
         visible = e.isIntersecting;
       },
@@ -82,22 +90,32 @@ export default function SensorGraph({ handle, kind, window: win, paused, show })
     const ro = new ResizeObserver(() => {
       u.setSize(size());
       st.current.dirty = true;
+      st.current.force = true;
     });
     ro.observe(el);
     const tick = (now) => {
       raf = requestAnimationFrame(tick);
       const s = st.current;
-      if (!s.dirty || !visible || s.paused) return;
+      if (!s.dirty || !visible || (s.paused && !s.force)) return;
       if (now - last < frameIntervalMs("plot")) return; // coalesce; stays dirty for the next slot
       last = now;
       s.dirty = false;
-      const { t, v } = history.read(handle, s.win);
+      s.force = false;
+      let until;
+      if (s.paused) {
+        if (!pausedAt.has(handle)) {
+          const last = history.latest(handle);
+          if (last) pausedAt.set(handle, last.t);
+        }
+        until = pausedAt.get(handle);
+      } else pausedAt.delete(handle);
+      const { t, v } = history.read(handle, s.win, { until, into });
       const data = [t];
       for (let i = 0; i < spec.n; i++) data.push(v[i] || new Array(t.length).fill(null));
       if (spec.mag) {
-        const m = new Float64Array(t.length);
-        for (let j = 0; j < t.length; j++) m[j] = Math.hypot(data[1][j] ?? NaN, data[2][j] ?? NaN, data[3][j] ?? NaN);
-        data.push(m);
+        const m = mag.subarray(0, t.length);
+        if (s.show?.[spec.n]) for (let j = 0; j < t.length; j++) m[j] = Math.hypot(data[1][j] ?? NaN, data[2][j] ?? NaN, data[3][j] ?? NaN);
+        data.push(m); // hidden series: contents unused, no per-frame math
       }
       u.setData(withGaps(data, gapThreshold(t)));
       report("plot");
@@ -116,7 +134,9 @@ export default function SensorGraph({ handle, kind, window: win, paused, show })
   // Window / pause changes: redraw at the next frame slot.
   useEffect(() => {
     st.current.dirty = true;
-  }, [win, paused]);
+    st.current.force = true;
+    if (!paused) pausedAt.delete(handle);
+  }, [win, paused, handle]);
 
   // Axis visibility (maximised view toggles).
   useEffect(() => {
@@ -126,6 +146,8 @@ export default function SensorGraph({ handle, kind, window: win, paused, show })
       const s = u.series[i + 1];
       if (s && s.show !== on) u.setSeries(i + 1, { show: on });
     });
+    st.current.dirty = true;
+    st.current.force = true; // e.g. |v| just turned on: compute it now
   }, [show, handle, kind, themeStamp]);
 
   return <div ref={host} className="absolute inset-0 pt-1" />;

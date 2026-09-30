@@ -3,7 +3,7 @@ import { Icons } from "../../icons.js";
 import { IconBtn } from "./Panel.jsx";
 import { layout, useLayout } from "../../lib/layout.js";
 import { history } from "../../telemetry/liveHistory.js";
-import { PIN_3D } from "../../telemetry/sensors.js";
+import { PIN_3D, pinKeyFor } from "../../telemetry/sensors.js";
 
 const DOT = { ok: "bg-ok", warn: "bg-warn", off: "bg-faint" };
 
@@ -15,7 +15,8 @@ function useTick(ms) {
   }, [ms]);
 }
 
-function Row({ r, pinned, health, hz, onInfo }) {
+function Row({ r, pinKey, health, hz, onInfo }) {
+  const pinned = pinKey != null;
   const canPin = pinned || r.active || r.key === PIN_3D;
   const PinIcon = pinned ? Icons.Pin : Icons.PinOff;
   return (
@@ -35,7 +36,7 @@ function Row({ r, pinned, health, hz, onInfo }) {
       <button
         disabled={!canPin}
         title={pinned ? "Unpin" : "Pin"}
-        onClick={() => (pinned ? layout.unpin(r.key) : layout.pin(r.key))}
+        onClick={() => (pinned ? layout.unpin(pinKey) : layout.pin(r.key))}
         className={`grid place-items-center w-6 h-6 rounded-md ${pinned ? "text-accent" : "text-faint hover:text-fg"} disabled:opacity-30 disabled:hover:text-faint`}
       >
         <PinIcon size={13} />
@@ -56,16 +57,17 @@ export default function SensorPicker({ rows, onInfo }) {
     );
   }
   const now = Date.now();
-  const pinned = new Set(L.pins.map((p) => p.key));
+  const pinKeys = L.pins.map((p) => p.key);
+  const keyOf = (r) => (r.key === PIN_3D ? (pinKeys.includes(PIN_3D) ? PIN_3D : null) : pinKeyFor(r, pinKeys));
   const anyOrientation = rows.some((r) => r.active && r.kind === "orientation");
   const threeD = { key: PIN_3D, label: "3D Orientation", detail: "Rotation vector", active: anyOrientation, handle: null, kind: "3d" };
   const f = q.trim().toLowerCase();
   const match = (r) => !f || r.label.toLowerCase().includes(f) || String(r.detail || "").toLowerCase().includes(f);
   const all = [threeD, ...rows].filter(match);
   const groups = [
-    ["Pinned", all.filter((r) => pinned.has(r.key))],
-    ["Streaming", all.filter((r) => !pinned.has(r.key) && r.active)],
-    ["Not streaming", all.filter((r) => !pinned.has(r.key) && !r.active)],
+    ["Pinned", all.filter((r) => keyOf(r) != null)],
+    ["Streaming", all.filter((r) => keyOf(r) == null && r.active)],
+    ["Not streaming", all.filter((r) => keyOf(r) == null && !r.active)],
   ];
   const healthOf = (r) => (r.key === PIN_3D ? (anyOrientation ? "ok" : "off") : r.active ? history.health(r.handle, now) : "off");
   const hzOf = (r) => (r.handle != null && r.active ? Math.round(history.liveHz(r.handle)) : "–");
@@ -96,7 +98,7 @@ export default function SensorPicker({ rows, onInfo }) {
                 <span>Hz</span>
               </div>
               {items.map((r) => (
-                <Row key={`${r.key}#${r.handle}`} r={r} pinned={pinned.has(r.key)} health={healthOf(r)} hz={hzOf(r)} onInfo={onInfo} />
+                <Row key={`${r.key}#${r.handle}`} r={r} pinKey={keyOf(r)} health={healthOf(r)} hz={hzOf(r)} onInfo={onInfo} />
               ))}
             </div>
           ) : null

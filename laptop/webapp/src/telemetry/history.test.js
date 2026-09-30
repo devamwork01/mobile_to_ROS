@@ -155,3 +155,30 @@ describe("snapshotCsv", () => {
     expect(h.snapshotCsv({ handles: [4], seconds: 10 }).trim().split("\n").length).toBe(3);
   });
 });
+
+describe("review fixes", () => {
+  it("read(..., {until}) returns the window ending at a frozen time (paused graph)", () => {
+    const h = createHistory();
+    for (let i = 0; i <= 20; i++) h.push(rec(1, i, [i]), 0);
+    const { t, v } = h.read(1, 5, { until: 10 });
+    expect(Array.from(v[0])).toEqual([5, 6, 7, 8, 9, 10]);
+    expect(t[t.length - 1]).toBe(0);
+  });
+
+  it("read(..., {into}) fills reusable scratch buffers instead of allocating", () => {
+    const h = createHistory();
+    for (let i = 0; i < 10; i++) h.push(rec(1, i, [i, 2 * i, 3 * i]), 0);
+    const into = h.scratch();
+    const a = h.read(1, 60, { into });
+    expect(a.t.buffer).toBe(into.t.buffer);
+    expect(a.v[1].buffer).toBe(into.v[1].buffer);
+    expect(Array.from(a.v[2])).toEqual([0, 3, 6, 9, 12, 15, 18, 21, 24, 27]);
+  });
+
+  it("snapshotCsv writes only each sensor's own value count (no bias values under w)", () => {
+    const h = createHistory();
+    h.push(rec(1, 1, [1, 2, 3, 0.1, 0.2, 0.3]), 0); // uncalibrated: xyz + bias
+    const csv = h.snapshotCsv({ handles: [1], seconds: 60, valueCounts: new Map([[1, 3]]) });
+    expect(csv.trim().split("\n")[3]).toBe("0.000000,handle 1,1,1,2,3,");
+  });
+});
