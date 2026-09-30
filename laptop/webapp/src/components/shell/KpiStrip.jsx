@@ -70,7 +70,9 @@ export default function KpiStrip({ meta, snapshot }) {
   const loss = netLoss(d, s);
 
   return (
-    <header className="h-14 shrink-0 flex items-center gap-1 px-3 border-b border-line bg-surface/80 backdrop-blur overflow-x-auto">
+    <header className="h-14 shrink-0 flex items-center gap-1 px-3 border-b border-line bg-surface/80 backdrop-blur">
+      {/* Metrics scroll on narrow windows; Snapshot/Record stay pinned on the right. */}
+      <div className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto">
       <div className="flex items-center gap-2 pl-2 pr-3 py-1.5 mr-1 rounded-xl bg-surface-2 shrink-0">
         <span className={`w-2 h-2 rounded-full ${connected ? "bg-ok animate-pulsedot" : meta.status === "connected" ? "bg-warn" : "bg-err"}`} />
         {connected ? (
@@ -94,7 +96,8 @@ export default function KpiStrip({ meta, snapshot }) {
       </Metric>
       <Metric label="Throughput">{connected && rps != null ? `${Math.round(rps)} rec/s · ${fmtBytes(s.bps)}` : DASH}</Metric>
       <Metric label="Session">{since ? fmtDuration(now - since) : DASH}</Metric>
-      <div className="ml-auto flex items-center gap-2 pl-3 shrink-0">
+      </div>
+      <div className="flex items-center gap-2 pl-3 shrink-0">
         {snapshot}
         <button
           onClick={() => sendCommand({ cmd: rec ? "record_stop" : "record_start" })}
