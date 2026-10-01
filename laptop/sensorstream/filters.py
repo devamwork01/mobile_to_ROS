@@ -164,3 +164,183 @@ def suggest(f, psd, fs: float) -> dict:
         if len(notches) == MAX_NOTCHES:
             break
     return {"lowpass": {"hz": round(cutoff, 2), "order": 4}, "notches": sorted(notches, key=lambda n: n["hz"])}
+
+
+RATE_READY_S = 1.0
+RATE_DRIFT = 0.05
+
+
+def _shape_ok(config) -> bool:
+    """Structural check without a sample rate (used when loading and before the rate is known)."""
+    ok, _ = validate(config, 1e9)
+    return ok
+
+
+class _Rate:
+    """Sample rate from sensor timestamps (EWMA of intervals). An isolated long interval is a pause
+    in the stream, not a rate change, and is ignored; 3 long intervals in a row are a real change
+    (e.g. the sampling period was changed on the phone) and reset the estimate."""
+
+    __slots__ = ("first", "last", "ewma", "n", "long_run")
+
+    def __init__(self):
+        self.first = self.last = None
+        self.ewma = None
+        self.n = 0
+        self.long_run = 0
+
+    def observe(self, t_ns: int) -> None:
+        if self.last is not None and t_ns > self.last:
+            dt = (t_ns - self.last) / 1e9
+            if self.ewma is not None and dt > 5.0 * self.ewma:
+                self.long_run += 1
+                if self.long_run < 3:
+                    self.last = t_ns
+                    self.n += 1
+                    return
+                self.ewma = dt  # sustained: adopt the new interval
+            else:
+                self.long_run = 0
+            self.ewma = dt if self.ewma is None else 0.98 * self.ewma + 0.02 * dt
+        if self.first is None:
+            self.first = t_ns
+        self.last = max(t_ns, self.last or t_ns)
+        self.n += 1
+
+    def fs(self) -> Optional[float]:
+        if self.ewma is None or self.n < 10 or (self.last - self.first) / 1e9 < RATE_READY_S:
+            return None
+        return 1.0 / self.ewma
+
+
+class FilterBank:
+    """Per-sensor filters on the live stream. Configs are keyed by sensor identity
+    ("<type>:<catalogName>", like dashboard pins) so they survive reconnects; chains are per handle."""
+
+    def __init__(self, path: Optional[str] = None):
+        self._path = path
+        self.configs: Dict[str, dict] = self._load()
+        self._key_of: Dict[int, str] = {}
+        self._type_of: Dict[int, int] = {}
+        self._rates: Dict[int, _Rate] = {}
+        self._chains: Dict[int, FilterChain] = {}
+        self._pending_errors: List[Tuple[str, str]] = []
+        self._bad: Dict[int, Tuple[str, float]] = {}   # handle -> (key, fs) already reported invalid
+
+    # --- configuration -------------------------------------------------------------------------
+    def _load(self) -> Dict[str, dict]:
+        if not self._path or not os.path.isfile(self._path):
+            return {}
+        try:
+            with open(self._path, encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        return {k: v for k, v in raw.items() if isinstance(k, str) and _shape_ok(v)}
+
+    def _save(self) -> None:
+        if not self._path:
+            return
+        tmp = self._path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(self.configs, fh, indent=2)
+        os.replace(tmp, self._path)
+
+    def set_catalog(self, sensors) -> None:
+        for s in sensors or []:
+            h, ty, name = s.get("handle"), s.get("type"), s.get("name")
+            if h is None or ty is None or not name:
+                continue
+            self._key_of[int(h)] = f"{ty}:{name}"
+            self._type_of[int(h)] = int(ty)
+            self._chains.pop(int(h), None)
+
+    def bind(self, handle: int, key: str) -> None:
+        if self._key_of.get(int(handle)) != key:
+            self._key_of[int(handle)] = key
+            self._chains.pop(int(handle), None)
+
+    def _type_from_key(self, key: str) -> Optional[int]:
+        try:
+            return int(key.split(":", 1)[0])
+        except ValueError:
+            return None
+
+    def set(self, key: str, config: dict, handle: Optional[int] = None) -> Tuple[bool, str]:
+        ty = self._type_from_key(key)
+        if ty is None or ty in EXCLUDED_TYPES:
+            return False, "This sensor can't be filtered (orientation and on-change sensors are excluded)."
+        if handle is not None:
+            self.bind(handle, key)
+        fs = None
+        for h, k in self._key_of.items():
+            if k == key and self.fs(h):
+                fs = self.fs(h)
+        ok, msg = validate(config, fs) if fs else (_shape_ok(config), "Invalid filter configuration.")
+        if not ok:
+            return False, msg
+        self.configs[key] = {"lowpass": config.get("lowpass") or None, "notches": list(config.get("notches") or [])}
+        for h, k in list(self._key_of.items()):
+            if k == key:
+                self._chains.pop(h, None)
+                self._bad.pop(h, None)
+        self._save()
+        return True, "ok"
+
+    def clear(self, key: str) -> None:
+        if self.configs.pop(key, None) is not None:
+            self._save()
+        for h, k in list(self._key_of.items()):
+            if k == key:
+                self._chains.pop(h, None)
+                self._bad.pop(h, None)
+
+    def fs(self, handle: int) -> Optional[float]:
+        r = self._rates.get(int(handle))
+        return r.fs() if r else None
+
+    def errors(self) -> List[Tuple[str, str]]:
+        out, self._pending_errors = self._pending_errors, []
+        return out
+
+    def snapshot(self) -> dict:
+        return {"kind": "filters", "configs": dict(self.configs)}
+
+    # --- processing ----------------------------------------------------------------------------
+    def _chain_for(self, handle: int, n_axes: int) -> Optional[FilterChain]:
+        key = self._key_of.get(handle)
+        cfg = self.configs.get(key) if key else None
+        fs = self.fs(handle)
+        if cfg is None or fs is None or self._type_of.get(handle, self._type_from_key(key)) in EXCLUDED_TYPES:
+            return None
+        ch = self._chains.get(handle)
+        if ch is not None and ch.n_axes == n_axes and abs(fs - ch.fs) / ch.fs <= RATE_DRIFT:
+            return ch
+        ok, msg = validate(cfg, fs)
+        if not ok:
+            if self._bad.get(handle) != (key, round(fs)):
+                self._bad[handle] = (key, round(fs))
+                self._pending_errors.append((key, msg))
+            self._chains.pop(handle, None)
+            return None
+        ch = self._chains[handle] = FilterChain(cfg, fs, n_axes)
+        return ch
+
+    def process(self, dg) -> Dict[Tuple[int, int], List[float]]:
+        out: Dict[Tuple[int, int], List[float]] = {}
+        for r in dg.records:
+            h = r.sensor_handle
+            self._type_of.setdefault(h, r.sensor_type)
+            rate = self._rates.get(h)
+            if rate is None:
+                rate = self._rates[h] = _Rate()
+            rate.observe(r.t_sensor_ns)
+            if not self.configs:
+                continue
+            n_axes = min(len(r.values), 3)
+            ch = self._chain_for(h, n_axes)
+            if ch is not None:
+                out[(h, r.seq)] = ch.process(list(r.values[:n_axes]))
+        return out
