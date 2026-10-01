@@ -65,6 +65,16 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
     val previews by vm.preview.collectAsState()
     val sel by vm.sel.collectAsState()
     val appSettings by vm.settings.collectAsState()
+    val filteredSensors by vm.filteredSensors.collectAsState()
+    val traces by vm.filterTraces.collectAsState()
+    val isFiltered = appSettings.showFiltered && filteredSensors.any { it.handle == handle && it.enabled }
+    if (isFiltered) {
+        DisposableEffect(handle) {
+            vm.startFilterTap()
+            onDispose { vm.stopFilterTap() }
+        }
+    }
+    val filteredPts = if (isFiltered) traces[handle]?.points else null
 
     DisposableEffect(handle) {
         vm.startPreview(handle)
@@ -218,6 +228,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
                     unit = sig.unit,
                     windowMs = windowSec * 1000L,
                     modifier = Modifier.fillMaxWidth().height(190.dp),
+                    filtered = filteredPts,
                 )
             }
         }

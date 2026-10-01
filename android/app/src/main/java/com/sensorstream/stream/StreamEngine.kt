@@ -1,5 +1,6 @@
 package com.sensorstream.stream
 
+import com.sensorstream.core.filter.FilterSettings
 import android.content.Context
 import android.hardware.SensorManager
 import android.os.Build
@@ -182,6 +183,15 @@ class StreamEngine(context: Context) {
         }
     }
 
+    /**
+     * The laptop's filter settings, persisted here (not in the UI) so a push that arrives while no
+     * screen is open - the service keeps streaming - is still remembered.
+     */
+    private val filterPrefs = context.applicationContext.getSharedPreferences("sensorstream", Context.MODE_PRIVATE)
+    val filterSettings = FilterSettings(filterPrefs.getString(KEY_FILTERS, null)) {
+        filterPrefs.edit().putString(KEY_FILTERS, it).apply()
+    }
+
     private fun connectControl() {
         val gen = ++connGen
         _state.value = _state.value.copy(connecting = true, error = null)
@@ -195,6 +205,7 @@ class StreamEngine(context: Context) {
                 startTelemetry(udpPort)
             }
             override fun onConfigure(msg: JSONObject) { /* laptop-driven config: reserved */ }
+            override fun onFilters(msg: JSONObject) { filterSettings.apply(msg) }
             override fun onResend(msg: JSONObject) {
                 if (gen != connGen) return
                 val rec = recorder ?: return
@@ -344,3 +355,6 @@ class StreamEngine(context: Context) {
         _state.value = _state.value.copy(connecting = false, connected = false, streaming = false, rttMs = 0f)
     }
 }
+
+/** SharedPreferences key of the persisted laptop filter settings. */
+const val KEY_FILTERS = "filters_v1"

@@ -147,6 +147,7 @@ Once the laptop server is running and the phone is streaming, here's what you're
 </p>
 
 - **Home** shows a live 3D view of the phone's orientation (device axes vs. the world frame), plus connection status, latency, and the active-sensor rate. Tap the **recenter** button (target icon) on the 3D view to zero it on the current pose; double-tap the 3D to return to the default view. If the Wi-Fi link drops, the status shows **Reconnecting** and the app reconnects on its own (the phone keeps recording meanwhile, so the gap is backfilled).
+- **Filtered Signals** (Home, when a filter is set on the laptop): per filtered sensor a live 10 s graph (raw faint, filtered bold; tap to switch axis), the filter (e.g. `LP 5 Hz · 4th + notch 8 Hz`) and **σ raw → filtered**. The phone runs the same filters itself and remembers the settings, so this keeps working offline. The sensor's detail graph also overlays the filtered trace. Hide it under **Settings → Filtering**.
 - **Sensors** lists every sensor grouped by category (Motion / Orientation / Magnetic / …) with a per-sensor toggle and sampling-rate control — pick what you want to stream.
 - **Connection** links to the laptop (Find Laptop Automatically, or enter the LAN IP + control port `8081`). The address is remembered, and Home offers one-tap reconnect.
 - While streaming, sensor cards show the requested rate **and** the rate the sensor actually delivers (e.g. `100 Hz · 116 live`) — Android treats the requested rate as a hint.
@@ -196,6 +197,35 @@ ever receives a decimated display copy, which would give wrong noise figures and
 
 <img src="docs/images/dashboard-insights.jpg" alt="Insights — per-axis noise table, spectrum and Allan deviation of a test run" width="820">
 
+### Filtering — let the spectrum choose the filter
+
+Each graph panel has a **Filter** button (funnel). **Suggest from spectrum** proposes a filter from the
+live spectrum: a 4th-order Butterworth low-pass at the frequency where the signal sinks into the
+noise floor, plus notches for strong narrow peaks (e.g. a motor vibration) inside the band you keep.
+Tweak the cutoff (slider), order (2/4) and notches, then **Apply**.
+
+- Filtering runs on the laptop server on **every full-rate sample**, before the display stream is
+  down-sampled, using causal real-time filters (the kind a robot stack runs), so what you see is
+  exactly what a downstream consumer would get.
+- The panel then shows raw (faint) and filtered (bold) traces, the footer shows **σ raw → filtered**,
+  and the **Spectrum** view shows the raw spectrum, the filtered "after" spectrum and the filter's
+  response (dashed).
+- Settings are per sensor, shared by every open dashboard and saved in `filters.json`
+  (`--filters-file` to move it). **The `.ssbin` recording stays raw** (filtered values only appear as extra CSV columns), so you can always re-filter differently.
+- Orientation quaternions and on-change sensors (light, proximity, steps) aren't filtered.
+
+<img src="docs/images/dashboard-filter.jpg" alt="Spectrum of a Galaxy S25 Ultra accelerometer with a 5 Hz low-pass: raw (faint), filtered (bold) and the filter response (dashed)" width="600">
+
+**Where the filtered signal goes** (only for sensors with a filter; raw outputs never change):
+- **ROS 2**: `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered`
+  (same message types as the raw topics, full rate).
+- **Recording CSV**: extra columns `f0,f1,f2` next to `v0..v5` (empty when no filter; the `.ssbin`
+  stays raw, and samples recovered by backfill are never filtered).
+- **Snapshot CSV**: extra columns `fx,fy,fz`.
+- **Phone**: the laptop sends its filter settings to the phone on connect and on every change; the
+  phone saves them and filters its own samples (designed for the phone's measured rate), shown on
+  Home and the sensor detail graph, even when disconnected. Streaming to the laptop stays raw.
+
 ## ROS 2 bridge (optional)
 
 With a ROS 2 environment sourced, `--ros` publishes decoded sensors as standard messages:
@@ -206,6 +236,7 @@ With a ROS 2 environment sourced, `--ros` publishes decoded sensors as standard 
 | `/phone/gyroscope` | `sensor_msgs/Imu` | gyroscope |
 | `/phone/magnetic_field` | `sensor_msgs/MagneticField` | magnetometer |
 | `/phone/orientation` | `geometry_msgs/QuaternionStamped` | rotation vector |
+| `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered` | same as the raw topic | the filtered signal, only while that sensor has a filter (see Filtering) |
 
 ```bash
 # with ROS 2 sourced:
@@ -247,6 +278,9 @@ drift >10%, RSS growth like a leak, or a crash.
 - [x] Dashboard (cards, graphs, 3D, recordings browser, light/dark)
 - [x] Dashboard redesign: KPI strip, sensor picker, pinnable/maximisable panels, Snapshot CSV
 - [x] Dashboard insights: per-axis stats, noise density, spectrum, drift, rate stability, Allan deviation, test runs
+- [x] Spectrum-guided filtering on the dashboard (suggest, tweak, before/after)
+- [x] Filtered signal on ROS 2 (`*_filtered` topics) and in CSV exports
+- [x] Filtered signal on the phone (on-phone filter, settings synced from the laptop, Home screen)
 - [ ] Recording tools: naming/tags, playback scrubber, CSV export of recordings
 - [x] Phone app redesign (Compose) with on-device 3D orientation
 - [x] ROS 2 output sink (`--ros`)

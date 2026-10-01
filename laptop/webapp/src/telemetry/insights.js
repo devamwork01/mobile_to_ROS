@@ -10,6 +10,10 @@ let lastReportEvent = null; // {id, ok, message, n}: which recording a report fi
 let eventSeq = 0;
 const reportEvent = (id, ok, message) => { lastReportEvent = { id, ok, message, n: ++eventSeq }; };
 let openReport = null;
+let filterConfigs = {}; // key -> config (server truth, broadcast to every dashboard)
+const filterSuggestions = new Map(); // key -> suggested config
+const filterErrors = new Map(); // key -> message
+const filterErrorRunning = new Map(); // key -> the previous filter is still running despite the error
 const listeners = new Set();
 const emit = () => listeners.forEach((l) => l());
 const subscribe = (cb) => {
@@ -23,7 +27,7 @@ export function onInsightsMessage(m) {
       stats = new Map((m.stats || []).map((s) => [s.handle, s]));
       break;
     case "insights_psd":
-      psd.set(m.handle, { f: m.f, psd: m.psd });
+      psd.set(m.handle, { f: m.f, psd: m.psd, psd_f: m.psd_f }); // psd_f: "after" curves while a filter is active
       break;
     case "testrun":
       testRun = m;
@@ -39,6 +43,17 @@ export function onInsightsMessage(m) {
     case "report_error":
       reportEvent(m.id, false, m.message);
       break;
+    case "filters":
+      filterConfigs = m.configs || {};
+      break;
+    case "filter_suggestion":
+      filterSuggestions.set(m.key, m.config);
+      filterErrors.delete(m.key);
+      break;
+    case "filter_error":
+      filterErrors.set(m.key, m.message);
+      filterErrorRunning.set(m.key, !!m.running);
+      break;
     default:
       return false;
   }
@@ -52,6 +67,23 @@ export const getTestRun = () => testRun;
 export const getReportsVersion = () => reportsVersion;
 export const getOpenReport = () => openReport;
 export const getLastReportEvent = () => lastReportEvent;
+export const getFilterConfig = (key) => filterConfigs[key];
+export const getFilterSuggestion = (key) => filterSuggestions.get(key);
+export const getFilterError = (key) => filterErrors.get(key);
+export const getFilterErrorRunning = (key) => filterErrorRunning.get(key) === true;
+export function clearFilterSuggestion(key) {
+  filterSuggestions.delete(key);
+  emit();
+}
+export function clearFilterError(key) {
+  filterErrors.delete(key);
+  emit();
+}
+export function clearFilterFeedback(key) {
+  filterSuggestions.delete(key);
+  filterErrors.delete(key);
+  emit();
+}
 export function requestOpenReport(id) {
   openReport = id;
   emit();
@@ -69,5 +101,9 @@ export const useInsightStats = (h) => useSyncExternalStore(subscribe, () => stat
 export const usePsd = (h) => useSyncExternalStore(subscribe, () => psd.get(h), () => psd.get(h));
 export const useTestRun = () => useSyncExternalStore(subscribe, getTestRun, getTestRun);
 export const useReportsVersion = () => useSyncExternalStore(subscribe, getReportsVersion, getReportsVersion);
+export const useFilterConfig = (key) => useSyncExternalStore(subscribe, () => filterConfigs[key], () => filterConfigs[key]);
+export const useFilterSuggestion = (key) => useSyncExternalStore(subscribe, () => filterSuggestions.get(key), () => filterSuggestions.get(key));
+export const useFilterErrorRunning = (key) => useSyncExternalStore(subscribe, () => filterErrorRunning.get(key) === true, () => filterErrorRunning.get(key) === true);
+export const useFilterError = (key) => useSyncExternalStore(subscribe, () => filterErrors.get(key), () => filterErrors.get(key));
 export const useLastReportEvent = () => useSyncExternalStore(subscribe, getLastReportEvent, getLastReportEvent);
 export const useOpenReportRequest = () => useSyncExternalStore(subscribe, getOpenReport, getOpenReport);

@@ -1,5 +1,8 @@
 package com.sensorstream.vm
 
+import com.sensorstream.core.filter.Biquad
+import com.sensorstream.core.filter.FilterConfig
+import com.sensorstream.core.filter.PhoneFilterBank
 import android.app.Application
 import android.content.Context
 import android.hardware.Sensor
@@ -108,6 +111,7 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     fun setThemeMode(mode: ThemeMode) = updateSettings { it.copy(themeMode = mode) }
     fun setDefault3dWorldFrame(on: Boolean) = updateSettings { it.copy(default3dWorldFrame = on) }
     fun setDefault3dLabels(on: Boolean) = updateSettings { it.copy(default3dLabels = on) }
+    fun setShowFiltered(on: Boolean) = updateSettings { it.copy(showFiltered = on) }
     fun setBatchMode(mode: com.sensorstream.ui.settings.BatchMode) {
         updateSettings { it.copy(batchMode = mode) }
         engine.batchWindowMs = mode.windowMs
@@ -142,6 +146,7 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     private fun makeListener(handle: Int) = object : SensorEventListener {
         override fun onSensorChanged(e: SensorEvent) {
             val v = e.values.copyOf()
+            keyByHandle[handle]?.let { key -> filterTap.onSample(handle, key, catalogTypes[handle] ?: 0, e.timestamp, v) }
             _preview.update { it + (handle to v) }
         }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
@@ -197,6 +202,49 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // --- On-phone filtering (settings come from the laptop) --------------------------------------
+    // The laptop pushes its filter settings over the control channel; they are persisted so the
+    // phone keeps filtering its own preview samples offline. Filtered sensors are tapped (via the
+    // preview listeners above, at their configured period) while a screen that shows them is up.
+    private val filterBank = PhoneFilterBank()
+    private val filterTap = FilterTap(filterBank)
+    val filterTraces: StateFlow<Map<Int, FilterTrace>> = filterTap.traces
+    private val keyByHandle: Map<Int, String> = catalog.associate { it.handle to "${it.type}:${it.name}" }
+    val filterConfigs: StateFlow<Map<String, FilterConfig>> = engine.filterSettings.configs
+
+    data class FilteredSensor(val handle: Int, val key: String, val info: SensorInfo, val config: FilterConfig, val enabled: Boolean)
+
+    private val _filteredSensors = MutableStateFlow<List<FilteredSensor>>(emptyList())
+    /** Sensors on this phone that have a laptop filter (filterable types only). */
+    val filteredSensors: StateFlow<List<FilteredSensor>> = _filteredSensors.asStateFlow()
+
+    private fun recomputeFiltered() {
+        val cfgs = filterConfigs.value
+        val enabled = _sel.value.enabled
+        _filteredSensors.value = catalog.mapNotNull { info ->
+            val key = keyByHandle[info.handle] ?: return@mapNotNull null
+            val cfg = cfgs[key] ?: return@mapNotNull null
+            if (info.type in Biquad.EXCLUDED_TYPES) return@mapNotNull null
+            FilteredSensor(info.handle, key, info, cfg, info.handle in enabled)
+        }
+        if (tapRefs > 0) applyTap()
+    }
+
+    private var tapRefs = 0
+    private var tapped: Set<Int> = emptySet()
+
+    private fun applyTap() {
+        val want = if (tapRefs > 0) _filteredSensors.value.filter { it.enabled }.map { it.handle }.toSet() else emptySet()
+        (tapped - want).takeIf { it.isNotEmpty() }?.let { stopPreview(*it.toIntArray()) }
+        (want - tapped).takeIf { it.isNotEmpty() }?.let { startPreview(*it.toIntArray()) }
+        tapped = want
+        filterTap.handles = want
+    }
+
+    /** Ref-counted: screens showing filtered signals call this while visible. */
+    fun startFilterTap() { tapRefs++; if (tapRefs == 1) applyTap() }
+    fun stopFilterTap() { tapRefs = maxOf(0, tapRefs - 1); if (tapRefs == 0) applyTap() }
+
     /** Convenience for the hero orientation (rotation vector handle). */
     fun startOrientationPreview() { orientationHandle?.let { startPreview(it) } }
     fun stopOrientationPreview() { orientationHandle?.let { stopPreview(it) } }
@@ -218,6 +266,13 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
             enabled = saved?.enabled ?: defaultEnabled,
             periodByHandle = defaultPeriods + (saved?.periods ?: emptyMap()),
         )
+
+        // Settings arrive on the network thread (the engine persists them); apply them here on the
+        // main thread, where preview registration lives. The first value is applied immediately.
+        viewModelScope.launch {
+            filterConfigs.collect { filterBank.setConfigs(it); recomputeFiltered() }
+        }
+        viewModelScope.launch { _sel.collect { recomputeFiltered() } }
 
         viewModelScope.launch {
             while (true) {

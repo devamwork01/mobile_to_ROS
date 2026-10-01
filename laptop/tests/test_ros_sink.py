@@ -138,3 +138,19 @@ def test_unmapped_sensor_type_is_dropped(ros_env):
     received = _collect(node, "/phone/accelerometer", Imu, trigger)
 
     assert len(received) == 1  # only the accelerometer record produced a message
+
+
+def test_filtered_accelerometer_goes_to_the_filtered_topic(ros_env):
+    sink, node = ros_env
+    dg = p.Datagram(device_id=1, records=[p.Record(1, 0, 7, 123, 3, [0.1, 9.8, 0.2])])
+    received = _collect(node, "/phone/accelerometer_filtered", Imu,
+                        lambda: sink.on_datagram(dg, ("x", 0), 0, filtered={(0, 7): [0.05, 9.81, 0.1]}))
+    assert len(received) == 1
+    assert received[0].linear_acceleration.y == pytest.approx(9.81)
+
+
+def test_no_filter_means_no_filtered_topic_traffic(ros_env):
+    sink, node = ros_env
+    dg = p.Datagram(device_id=1, records=[p.Record(1, 0, 8, 123, 3, [0.1, 9.8, 0.2])])
+    received = _collect(node, "/phone/accelerometer_filtered", Imu, lambda: sink.on_datagram(dg, ("x", 0), 0), timeout=0.5)
+    assert received == []

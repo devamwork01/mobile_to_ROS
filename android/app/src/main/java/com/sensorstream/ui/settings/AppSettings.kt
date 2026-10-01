@@ -22,6 +22,8 @@ data class AppSettings(
     val default3dLabels: Boolean = true,
     /** Packet batching for the telemetry stream. */
     val batchMode: BatchMode = BatchMode.LOW_LATENCY,
+    /** Show the laptop-configured filters' output on Home and the sensor graphs. */
+    val showFiltered: Boolean = true,
 )
 
 /** Thin SharedPreferences wrapper. Reads are cheap; writes are fire-and-forget (apply). */
@@ -35,6 +37,7 @@ class SettingsStore(context: Context) {
         default3dLabels = prefs.getBoolean(KEY_LABELS, true),
         batchMode = runCatching { BatchMode.valueOf(prefs.getString(KEY_BATCH, null) ?: "LOW_LATENCY") }
             .getOrDefault(BatchMode.LOW_LATENCY),
+        showFiltered = prefs.getBoolean(KEY_SHOW_FILTERED, true),
     )
 
     fun save(s: AppSettings) {
@@ -43,6 +46,7 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_WORLD, s.default3dWorldFrame)
             .putBoolean(KEY_LABELS, s.default3dLabels)
             .putString(KEY_BATCH, s.batchMode.name)
+            .putBoolean(KEY_SHOW_FILTERED, s.showFiltered)
             .apply()
     }
 
@@ -51,5 +55,6 @@ class SettingsStore(context: Context) {
         const val KEY_WORLD = "default_3d_world_frame"
         const val KEY_LABELS = "default_3d_labels"
         const val KEY_BATCH = "batch_mode"
+        const val KEY_SHOW_FILTERED = "show_filtered"
     }
 }

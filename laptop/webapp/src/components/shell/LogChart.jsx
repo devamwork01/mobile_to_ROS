@@ -3,6 +3,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { useThemeStamp } from "../../lib/theme.js";
 import { logTick, expTick } from "../../lib/insightsFormat.js";
+import { clampDecades } from "../../lib/logPlot.js";
 
 const token = (css, n) => `rgb(${css.getPropertyValue(n).trim().split(/\s+/).join(",")})`;
 
@@ -14,7 +15,7 @@ export default function LogChart({ series, xLabel, height = 240, marks = [], leg
     const el = host.current;
     if (!el || !series.length) return;
     const xs = [...new Set(series.flatMap((s) => s.x))].sort((a, b) => a - b);
-    const ys = series.map((s) => { const m = new Map(s.x.map((x, i) => [x, s.y[i]])); return xs.map((x) => (m.has(x) && m.get(x) > 0 ? m.get(x) : null)); });
+    const ys = clampDecades(series.map((s) => { const m = new Map(s.x.map((x, i) => [x, s.y[i]])); return xs.map((x) => (m.has(x) && m.get(x) > 0 ? m.get(x) : null)); }), 8).series;
     const css = getComputedStyle(document.documentElement);
     const axis = { stroke: token(css, "--muted"), grid: { stroke: token(css, "--line"), width: 1 }, ticks: { stroke: token(css, "--line") }, font: "10px ui-monospace, Consolas, monospace" };
     const u = new uPlot({

@@ -18,6 +18,8 @@ function makeRing(type) {
     type,
     t: new Float64Array(CAP),
     v: Array.from({ length: MAX_VALUES }, () => new Float64Array(CAP)),
+    f: Array.from({ length: MAX_VALUES }, () => new Float64Array(CAP)), // filtered twin (NaN = not filtered)
+    hasF: false,
     head: 0, // next write position
     n: 0,
     nv: 0,
@@ -35,6 +37,7 @@ function reset(r, type) {
   r.nv = 0;
   r.hzLog = [];
   r.hzLogMs = -Infinity;
+  r.hasF = false;
 }
 
 const at = (r, i) => (r.head - r.n + i + CAP) % CAP; // storage index of the i-th oldest sample
@@ -80,6 +83,9 @@ export function createHistory() {
     const nv = Math.min(rec.v.length, MAX_VALUES);
     r.t[r.head] = t;
     for (let i = 0; i < MAX_VALUES; i++) r.v[i][r.head] = i < nv && rec.v[i] != null ? rec.v[i] : NaN;
+    const vf = rec.vf;
+    for (let i = 0; i < MAX_VALUES; i++) r.f[i][r.head] = vf && i < vf.length && vf[i] != null ? vf[i] : NaN;
+    if (vf) r.hasF = true;
     r.nv = Math.max(r.nv, nv);
     r.head = (r.head + 1) % CAP;
     if (r.n < CAP) r.n++;
@@ -97,25 +103,36 @@ export function createHistory() {
   // opts.into: scratch() buffers to fill instead of allocating (graphs redraw at ~60 Hz).
   function read(handle, seconds, { until, into } = {}) {
     const r = rings.get(handle);
-    if (!r || r.n === 0) return { t: new Float64Array(0), v: [] };
+    if (!r || r.n === 0) return { t: new Float64Array(0), v: [], vf: [] };
     let hi = r.n; // exclusive: samples newer than `until` are left out
     if (until != null) while (hi > 0 && r.t[at(r, hi - 1)] > until + 1e-9) hi--;
-    if (hi === 0) return { t: new Float64Array(0), v: [] };
+    if (hi === 0) return { t: new Float64Array(0), v: [], vf: [] };
     const end = r.t[at(r, hi - 1)];
     let k = hi;
     while (k > 0 && r.t[at(r, k - 1)] >= end - seconds - 1e-9) k--;
     const m = hi - k;
     const t = into ? into.t.subarray(0, m) : new Float64Array(m);
     const v = Array.from({ length: r.nv }, (_, a) => (into ? into.v[a].subarray(0, m) : new Float64Array(m)));
+    let vf = r.hasF ? Array.from({ length: r.nv }, (_, a) => (into ? into.vf[a].subarray(0, m) : new Float64Array(m))) : [];
+    let anyF = false;
     for (let j = 0; j < m; j++) {
       const p = at(r, k + j);
       t[j] = r.t[p] - end;
       for (let a = 0; a < r.nv; a++) v[a][j] = r.v[a][p];
+      for (let a = 0; a < vf.length; a++) {
+        vf[a][j] = r.f[a][p];
+        if (!anyF && !Number.isNaN(vf[a][j])) anyF = true;
+      }
     }
-    return { t, v };
+    if (!anyF) vf = [];
+    return { t, v, vf };
   }
 
-  const scratch = () => ({ t: new Float64Array(CAP), v: Array.from({ length: MAX_VALUES }, () => new Float64Array(CAP)) });
+  const scratch = () => ({
+    t: new Float64Array(CAP),
+    v: Array.from({ length: MAX_VALUES }, () => new Float64Array(CAP)),
+    vf: Array.from({ length: MAX_VALUES }, () => new Float64Array(CAP)),
+  });
 
   function latest(handle) {
     const r = rings.get(handle);
@@ -153,7 +170,7 @@ export function createHistory() {
     const lines = [
       "# SensorStream snapshot - display-rate data (<=UI cap per sensor), not the lossless recording",
       `# device=${device?.model ?? "unknown"}, android=${device?.android ?? "unknown"}, exported=${exportedIso}, range_s=${seconds}`,
-      "t_s,sensor,handle,x,y,z,w",
+      "t_s,sensor,handle,x,y,z,w,fx,fy,fz", // fx..fz: laptop filter output (empty if unfiltered)
     ];
     const used = hs.map((h) => [h, rings.get(h)]).filter(([, r]) => r && r.n > 0);
     if (used.length) {
@@ -170,7 +187,8 @@ export function createHistory() {
       for (const { t, h, r, p } of rows) {
         const nv = Math.min(r.nv, valueCounts.get(h) ?? r.nv);
         const vals = [0, 1, 2, 3].map((a) => (a < nv ? csvNum(r.v[a][p]) : ""));
-        lines.push(`${(t - t0).toFixed(6)},${csvField(names.get(h) ?? `handle ${h}`)},${h},${vals.join(",")}`);
+        const fvals = [0, 1, 2].map((ax) => csvNum(r.f[ax][p]));
+        lines.push(`${(t - t0).toFixed(6)},${csvField(names.get(h) ?? `handle ${h}`)},${h},${vals.join(",")},${fvals.join(",")}`);
       }
     }
     return lines.join("\n") + "\n";

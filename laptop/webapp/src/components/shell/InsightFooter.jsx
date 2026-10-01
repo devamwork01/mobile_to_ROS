@@ -12,7 +12,9 @@ export default function InsightFooter({ handle, n }) {
       {s ? (
         <>
           {s.axes.slice(0, n).map((a, i) => (
-            <span key={i} style={{ color: COLORS[i] }} title="σ over the last 10 s (full rate)">σ {fmtSig(a.std)}</span>
+            <span key={i} style={{ color: COLORS[i] }} title={a.fstd != null ? "σ raw → filtered, last 10 s (full rate)" : "σ over the last 10 s (full rate)"}>
+              σ {fmtSig(a.std)}{a.fstd != null ? ` → ${fmtSig(a.fstd)}` : ""}
+            </span>
           ))}
           <span className="ml-auto text-muted whitespace-nowrap">
             {s.rate_hz ? `${s.rate_hz.toFixed(1)} Hz` : "—"} · jitter {s.jitter_ms != null ? `${s.jitter_ms.toFixed(2)} ms` : "—"}

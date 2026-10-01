@@ -45,3 +45,28 @@ describe("report events carry their recording id", () => {
     expect(getLastReportEvent()).toMatchObject({ id: "recC", ok: true });
   });
 });
+
+import { getFilterConfig, getFilterSuggestion, getFilterError, clearFilterFeedback } from "./insights.js";
+
+describe("filter state", () => {
+  it("tracks configs, suggestions and errors per key", () => {
+    onInsightsMessage({ kind: "filters", configs: { "1:Acc": { lowpass: { hz: 5, order: 4 }, notches: [] } } });
+    expect(getFilterConfig("1:Acc").lowpass.hz).toBe(5);
+    onInsightsMessage({ kind: "filter_suggestion", key: "1:Acc", config: { lowpass: { hz: 9, order: 4 }, notches: [] } });
+    expect(getFilterSuggestion("1:Acc").lowpass.hz).toBe(9);
+    onInsightsMessage({ kind: "filter_error", key: "1:Acc", message: "nope" });
+    expect(getFilterError("1:Acc")).toBe("nope");
+    clearFilterFeedback("1:Acc");
+    expect(getFilterError("1:Acc")).toBeUndefined();
+    expect(getFilterSuggestion("1:Acc")).toBeUndefined();
+    onInsightsMessage({ kind: "filters", configs: {} });
+    expect(getFilterConfig("1:Acc")).toBeUndefined();
+  });
+});
+
+describe("spectrum messages keep the filtered curves", () => {
+  it("stores psd_f alongside psd", () => {
+    onInsightsMessage({ kind: "insights_psd", handle: 9, f: [1, 2], psd: [[1, 2]], psd_f: [[0.5, 0.1]] });
+    expect(getPsd(9).psd_f).toEqual([[0.5, 0.1]]);
+  });
+});

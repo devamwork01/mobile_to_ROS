@@ -78,3 +78,22 @@ def test_replay_over_udp(tmp_path):
         s.close()
     assert got[0].device_id == 7
     assert got[2].records[0].sensor_type == 6
+
+
+def test_record_csv_has_filtered_columns(tmp_path):
+    import math
+    rec = Recorder()
+    base = rec.start(str(tmp_path))
+    dg0 = p.Datagram(device_id=1, records=[p.Record(1, 3, 0, 1000, 3, [1.0, 2.0, 3.0])])
+    dg1 = p.Datagram(device_id=1, records=[p.Record(1, 3, 1, 2000, 3, [1.5, 2.5, 3.5])])
+    dg2 = p.Datagram(device_id=1, records=[p.Record(1, 3, 2, 3000, 3, [1.6, 2.6, 3.6])])
+    rec.on_datagram(dg0, 1)
+    rec.on_datagram(dg1, 2, filtered={(3, 1): [1.25, 2.25, 3.25]})
+    rec.on_datagram(dg2, 3, filtered={(3, 2): [1.0, math.nan, 3.0]})
+    rec.stop()
+    lines = open(base + ".csv", encoding="utf-8").read().splitlines()
+    assert lines[0] == "t_sensor_ns,sensor_type,handle,seq,accuracy,v0,v1,v2,v3,v4,v5,f0,f1,f2"
+    r0, r1, r2 = (l.split(",") for l in lines[1:4])
+    assert r0[5:8] == ["1.0", "2.0", "3.0"] and r0[11:] == ["", "", ""]
+    assert r1[11:] == ["1.25", "2.25", "3.25"]
+    assert r2[11:] == ["1.0", "", "3.0"]          # nan filtered value is an empty cell

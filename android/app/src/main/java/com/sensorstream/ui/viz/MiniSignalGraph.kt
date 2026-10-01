@@ -33,6 +33,7 @@ import androidx.compose.material3.Text
 import com.sensorstream.ui.signal.Fmt
 import com.sensorstream.ui.theme.Ss
 import com.sensorstream.ui.theme.SsType
+import com.sensorstream.vm.TracePoint
 
 /**
  * Compact rolling line graph with an interactive legend. Caller passes the latest sample each
@@ -49,6 +50,11 @@ fun MiniSignalGraph(
     labels: List<String> = emptyList(),
     unit: String = "",
     windowMs: Long = 10_000L,
+    /**
+     * Phone-side filter output at full rate (same uptime clock as the raw buffer); drawn bold over
+     * the raw trace, which fades. Axis i of a point is drawn as component i.
+     */
+    filtered: List<TracePoint>? = null,
 ) {
     val c = Ss.colors
     val n = colors.size
@@ -60,6 +66,7 @@ fun MiniSignalGraph(
         buffer.add(SystemClock.uptimeMillis(), values.copyOf(minOf(n, values.size)))
     }
     val pts = buffer.visible(windowMs)
+    val fPts = filtered ?: emptyList()
 
     // -1 = show all; otherwise the isolated component index.
     var selected by remember(n) { mutableIntStateOf(-1) }
@@ -124,7 +131,22 @@ fun MiniSignalGraph(
                             val y = h - ((p.v[ci] - lo) / span) * h
                             if (!started) { path.moveTo(x, y); started = true } else path.lineTo(x, y)
                         }
-                        drawPath(path, colors.getOrElse(ci) { Color.Gray }, style = Stroke(width = 2.dp.toPx()))
+                        val col = colors.getOrElse(ci) { Color.Gray }
+                        if (fPts.size >= 2) {
+                            drawPath(path, col.copy(alpha = 0.35f), style = Stroke(width = 1.5.dp.toPx()))
+                            val fPath = Path()
+                            var fStarted = false
+                            for (p in fPts) {
+                                val v = p.filtered?.getOrNull(ci)
+                                if (v == null || !v.isFinite() || p.tMs < tStart) continue
+                                val x = w * (p.tMs - tStart) / windowMs.toFloat()
+                                val y = h - ((v - lo) / span) * h
+                                if (!fStarted) { fPath.moveTo(x, y); fStarted = true } else fPath.lineTo(x, y)
+                            }
+                            drawPath(fPath, col, style = Stroke(width = 2.5.dp.toPx()))
+                        } else {
+                            drawPath(path, col, style = Stroke(width = 2.dp.toPx()))
+                        }
                     }
                 }
             }

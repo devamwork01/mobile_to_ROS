@@ -49,7 +49,7 @@ class DashboardSink(OutputSink):
         self.records_in = 0
         self.records_out = 0
 
-    def on_datagram(self, dg: Datagram, addr: Tuple[str, int], t_recv_ns: int) -> None:
+    def on_datagram(self, dg: Datagram, addr: Tuple[str, int], t_recv_ns: int, filtered=None) -> None:
         now = time.monotonic()
         out = []
         self.records_in += len(dg.records)
@@ -87,5 +87,10 @@ class DashboardSink(OutputSink):
                         "lost": loss.lost,
                     }
                 )
+                # Filtered value of this exact sample (FilterBank runs on every raw sample, before
+                # this decimation), present only while the sensor has an active filter.
+                fv = filtered.get((r.sensor_handle, r.seq)) if filtered else None
+                if fv is not None:
+                    out[-1]["vf"] = [None if x != x else round(x, 6) for x in fv]
         if out:
             self._broadcast({"kind": "data", "device_id": dg.device_id, "t_recv_ns": t_recv_ns, "records": out})

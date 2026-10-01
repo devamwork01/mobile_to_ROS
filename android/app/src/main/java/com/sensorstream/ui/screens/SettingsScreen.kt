@@ -123,6 +123,17 @@ fun SettingsScreen(vm: StreamViewModel) {
             }
         }
 
+        // --- Filtering ----------------------------------------------------------------------------
+        SectionHeader("Filtering")
+        SsCard(Modifier.fillMaxWidth()) {
+            ToggleRow(
+                title = "Show filtered signals",
+                subtitle = "Filters are set on the laptop dashboard; the phone remembers them and filters its own samples, even offline.",
+                checked = settings.showFiltered,
+                onToggle = { vm.setShowFiltered(it) },
+            )
+        }
+
         // --- Streaming --------------------------------------------------------------------------
         SectionHeader("Streaming")
         SsCard(Modifier.fillMaxWidth()) {

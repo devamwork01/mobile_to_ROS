@@ -27,13 +27,17 @@ const token = (css, name) => `rgb(${css.getPropertyValue(name).trim().split(/\s+
 
 // Live plot of one handle from the shared history. Keeps the old GraphPanel safeguards:
 // shared render budget, no drawing while off-screen, re-measure + redraw on becoming visible.
-export default function SensorGraph({ handle, kind, window: win, paused, show }) {
+// fade(): the raw trace sits behind the filtered one when a filter is active.
+const fade = (hex) => `${hex}59`;
+
+export default function SensorGraph({ handle, kind, window: win, paused, show, filtered = false, trace = "both" }) {
   const host = useRef(null);
   const uRef = useRef(null);
-  const st = useRef({ dirty: true, force: true, win, paused, show });
+  const st = useRef({ dirty: true, force: true, win, paused, show, filtered });
   st.current.win = win;
   st.current.paused = paused;
   st.current.show = show;
+  st.current.filtered = filtered;
   const themeStamp = useThemeStamp();
 
   useEffect(() => {
@@ -48,8 +52,9 @@ export default function SensorGraph({ handle, kind, window: win, paused, show })
       font: "10px ui-monospace, Consolas, monospace",
     };
     const series = [{}];
-    spec.labels.forEach((l, i) => series.push({ label: l, stroke: COLORS[i], width: 1.4, points: { show: false } }));
+    spec.labels.forEach((l, i) => series.push({ label: l, stroke: filtered ? fade(COLORS[i]) : COLORS[i], width: filtered ? 1.1 : 1.4, points: { show: false } }));
     if (spec.mag) series.push({ label: "|v|", stroke: token(css, "--fg"), width: 1.2, dash: [4, 3], points: { show: false }, show: false });
+    if (filtered) spec.labels.forEach((l, i) => series.push({ label: `f${l}`, stroke: COLORS[i], width: 1.8, points: { show: false } }));
     const size = () => ({ width: Math.max(el.clientWidth, 100), height: Math.max(el.clientHeight, 80) });
     const u = new uPlot(
       {
@@ -109,7 +114,7 @@ export default function SensorGraph({ handle, kind, window: win, paused, show })
         }
         until = pausedAt.get(handle);
       } else pausedAt.delete(handle);
-      const { t, v } = history.read(handle, s.win, { until, into });
+      const { t, v, vf } = history.read(handle, s.win, { until, into });
       const data = [t];
       for (let i = 0; i < spec.n; i++) data.push(v[i] || new Array(t.length).fill(null));
       if (spec.mag) {
@@ -117,6 +122,7 @@ export default function SensorGraph({ handle, kind, window: win, paused, show })
         if (s.show?.[spec.n]) for (let j = 0; j < t.length; j++) m[j] = Math.hypot(data[1][j] ?? NaN, data[2][j] ?? NaN, data[3][j] ?? NaN);
         data.push(m); // hidden series: contents unused, no per-frame math
       }
+      if (filtered) for (let i = 0; i < spec.n; i++) data.push(vf[i] || new Array(t.length).fill(null));
       u.setData(withGaps(data, gapThreshold(t)));
       report("plot");
     };
@@ -129,7 +135,7 @@ export default function SensorGraph({ handle, kind, window: win, paused, show })
       u.destroy();
       uRef.current = null;
     };
-  }, [handle, kind, themeStamp]);
+  }, [handle, kind, themeStamp, filtered]);
 
   // Window / pause changes: redraw at the next frame slot.
   useEffect(() => {
@@ -138,17 +144,26 @@ export default function SensorGraph({ handle, kind, window: win, paused, show })
     if (!paused) pausedAt.delete(handle);
   }, [win, paused, handle]);
 
-  // Axis visibility (maximised view toggles).
+  // Visibility: per-axis toggles (maximised view) x Raw / Filtered / Both.
   useEffect(() => {
     const u = uRef.current;
     if (!u || !show) return;
-    show.forEach((on, i) => {
-      const s = u.series[i + 1];
-      if (s && s.show !== on) u.setSeries(i + 1, { show: on });
-    });
+    const spec = seriesSpec(kind);
+    const n = spec.n;
+    const setVis = (idx, on) => {
+      const s = u.series[idx];
+      if (s && s.show !== on) u.setSeries(idx, { show: on });
+    };
+    const rawOn = !filtered || trace !== "filtered";
+    for (let i = 0; i < n; i++) setVis(1 + i, show[i] && rawOn);
+    if (spec.mag) setVis(1 + n, show[n] && rawOn);
+    if (filtered) {
+      const base = 1 + n + (spec.mag ? 1 : 0);
+      for (let i = 0; i < n; i++) setVis(base + i, show[i] && trace !== "raw");
+    }
     st.current.dirty = true;
     st.current.force = true; // e.g. |v| just turned on: compute it now
-  }, [show, handle, kind, themeStamp]);
+  }, [show, handle, kind, themeStamp, filtered, trace]);
 
   return <div ref={host} className="absolute inset-0 pt-1" />;
 }
