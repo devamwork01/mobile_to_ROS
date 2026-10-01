@@ -151,16 +151,20 @@ def allan_deviation(v, fs: float, n_taus: int = 40) -> List[List[float]]:
 
 
 def adev_points(adev) -> Dict[str, Optional[float]]:
-    """Random walk = sigma at tau = 1 s (log-log interpolation); bias instability = curve minimum."""
+    """Random walk = sigma at tau = 1 s (log-log interpolation); bias instability = curve minimum.
+
+    If the minimum is the last tau the curve was still falling when the run ended, so the value
+    is only an upper bound (`bi_at_edge`); a longer run would reveal the true floor."""
     if not adev:
-        return {"random_walk": None, "bias_instability": None, "bi_tau": None}
+        return {"random_walk": None, "bias_instability": None, "bi_tau": None, "bi_at_edge": None}
     taus = np.array([p[0] for p in adev])
     sig = np.array([p[1] for p in adev])
     rw = None
     if taus[0] <= 1.0 <= taus[-1]:
         rw = float(10 ** np.interp(0.0, np.log10(taus), np.log10(sig)))
     i = int(np.argmin(sig))
-    return {"random_walk": _num(rw), "bias_instability": _num(sig[i]), "bi_tau": _num(taus[i])}
+    return {"random_walk": _num(rw), "bias_instability": _num(sig[i]), "bi_tau": _num(taus[i]),
+            "bi_at_edge": bool(i == len(sig) - 1)}
 
 
 def _axes_count(type_: int, k: int) -> int:

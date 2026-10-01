@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Icons } from "../icons.js";
 import { listReports, getReport } from "../lib/reportsApi.js";
 import { useReportsVersion, useOpenReportRequest, clearOpenReport } from "../telemetry/insights.js";
-import { fmtSig, reportToCsv, PRESET_LABEL } from "../lib/insightsFormat.js";
+import { fmtSig, reportToCsv, PRESET_LABEL, fmtDuration } from "../lib/insightsFormat.js";
 import { downloadText } from "../lib/snapshot.js";
 import { signalMeta, AXIS } from "../telemetry/signals.js";
 import LogChart from "./shell/LogChart.jsx";
 
 const AX_COLOR = { x: AXIS.X, y: AXIS.Y, z: AXIS.Z, w: "#b57edc", "|v|": "#e6edf5" };
-const fmtDur = (s) => (s == null ? "—" : s < 60 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
+const fmtDur = fmtDuration;
 const fmtWhen = (iso) => (iso ? new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 
 function SensorCard({ s }) {
@@ -61,7 +61,7 @@ function SensorCard({ s }) {
                   <LogChart series={adevSeries} xLabel="τ (s)" height={220} marks={marks} />
                   <div className="text-[11px] num text-muted mt-1 flex flex-wrap gap-x-4">
                     {Object.entries(s.adev_points || {}).map(([k, p]) => (
-                      <span key={k}><span style={{ color: AX_COLOR[k] }}>{k}</span> random walk {fmtSig(p.random_walk)} · bias instability {fmtSig(p.bias_instability)} @ {fmtSig(p.bi_tau)} s</span>
+                      <span key={k} title={p.bi_at_edge ? "The curve was still falling when the run ended: this is an upper bound. Run longer to find the floor." : undefined}><span style={{ color: AX_COLOR[k] }}>{k}</span> random walk {fmtSig(p.random_walk)} · bias instability {p.bi_at_edge ? "≤ " : ""}{fmtSig(p.bias_instability)} @ {fmtSig(p.bi_tau)} s</span>
                     ))}
                   </div>
                 </>

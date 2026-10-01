@@ -17,7 +17,7 @@ const COLS = ["mean", "bias", "std", "p2p", "noise_density", "drift_per_min"];
 const csvCell = (v) => (v == null ? "" : typeof v === "string" && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : String(v));
 
 export function reportToCsv(report) {
-  const head = "sensor,handle,axis,unit," + COLS.join(",") + ",rate_hz,jitter_ms,gaps,lost,random_walk,bias_instability,bi_tau_s";
+  const head = "sensor,handle,axis,unit," + COLS.join(",") + ",rate_hz,jitter_ms,gaps,lost,random_walk,bias_instability,bi_tau_s,bi_is_upper_bound";
   const rows = [head];
   for (const s of report.sensors || []) {
     const name = s.name || `Type ${s.type}`;
@@ -27,7 +27,7 @@ export function reportToCsv(report) {
     for (const [ax, st] of axes) {
       const ap = (s.adev_points || {})[ax] || {};
       rows.push([name, s.handle, ax, s.unit || "", ...COLS.map((c) => st[c]), r.rate_hz, r.jitter_ms, r.gaps, r.lost,
-        ap.random_walk, ap.bias_instability, ap.bi_tau].map(csvCell).join(","));
+        ap.random_walk, ap.bias_instability, ap.bi_tau, ap.bi_at_edge].map(csvCell).join(","));
     }
   }
   return rows.join("\n") + "\n";
@@ -37,3 +37,12 @@ export function reportToCsv(report) {
 // unlabeled, so both return "" for them.
 export const logTick = (x, unit = "") => (x == null ? "" : `${+x.toPrecision(2)}${unit}`);
 export const expTick = (x) => (x == null ? "" : x.toExponential(0));
+
+// "30.0 s" under a minute, else "2 min 5 s" (rounded first, so 299.99 s reads "5 min 0 s").
+export function fmtDuration(s) {
+  if (s == null || !Number.isFinite(s)) return "—";
+  if (s < 59.95) return `${s.toFixed(1)} s`;
+  if (s < 60) return "60.0 s";
+  const whole = Math.round(s);
+  return `${Math.floor(whole / 60)} min ${whole % 60} s`;
+}

@@ -138,3 +138,13 @@ def test_large_input_is_fast():
     t0 = time.perf_counter()
     a.analyse_sensor(_sensor(4, v, fs=200.0), "still", 1800.0)
     assert time.perf_counter() - t0 < 10.0
+
+
+def test_bias_instability_flags_a_minimum_at_the_last_tau():
+    # Pure white noise: the ADEV keeps falling to the end, so the "minimum" is only an upper bound.
+    pts = a.adev_points(a.allan_deviation(RNG.normal(0, 0.01, 30000), 100.0))
+    assert pts["bi_at_edge"] is True
+    # With a random-walk bias the curve turns up: a true interior minimum.
+    n = 60000
+    v = RNG.normal(0, 0.01, n) + np.cumsum(RNG.normal(0, 0.0002, n))
+    assert a.adev_points(a.allan_deviation(v, 100.0))["bi_at_edge"] is False
