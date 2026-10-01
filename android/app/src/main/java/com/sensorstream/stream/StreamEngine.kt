@@ -1,5 +1,6 @@
 package com.sensorstream.stream
 
+import com.sensorstream.core.RttMedian
 import com.sensorstream.core.filter.FilterSettings
 import android.content.Context
 import android.hardware.SensorManager
@@ -192,6 +193,9 @@ class StreamEngine(context: Context) {
         filterPrefs.edit().putString(KEY_FILTERS, it).apply()
     }
 
+    /** Shown latency: median of recent heartbeat round trips (single RTTs are mostly Wi-Fi jitter). */
+    private val rtt = RttMedian()
+
     private fun connectControl() {
         val gen = ++connGen
         _state.value = _state.value.copy(connecting = true, error = null)
@@ -227,7 +231,11 @@ class StreamEngine(context: Context) {
                     }
                 }
             }
-            override fun onRtt(ms: Float) { if (gen == connGen) _state.value = _state.value.copy(rttMs = ms) }
+            override fun onRtt(ms: Float) {
+                if (gen != connGen) return
+                rtt.add(ms)
+                _state.value = _state.value.copy(rttMs = rtt.value)
+            }
             override fun onClosed(reason: String?) { if (gen == connGen) onDropped() }
             override fun onFailure(t: Throwable) {
                 if (gen != connGen) return
@@ -243,7 +251,7 @@ class StreamEngine(context: Context) {
         controller.disconnectSender()
         // streaming stays true — the recorder is still capturing; only network delivery paused.
         // Latency is meaningless without a link, so clear it rather than show a stale value.
-        _state.value = _state.value.copy(connected = false, rttMs = 0f)
+        _state.value = _state.value.copy(connected = false, rttMs = 0f).also { rtt.reset() }
         if (!desired) {
             _state.value = _state.value.copy(connecting = false, streaming = false)
             controller.stopSession()
@@ -352,7 +360,7 @@ class StreamEngine(context: Context) {
         recorder?.close()          // now safe: StreamEngine owns the recorder's lifecycle
         recorder = null
         sessionStarted = false
-        _state.value = _state.value.copy(connecting = false, connected = false, streaming = false, rttMs = 0f)
+        _state.value = _state.value.copy(connecting = false, connected = false, streaming = false, rttMs = 0f).also { rtt.reset() }
     }
 }
 
