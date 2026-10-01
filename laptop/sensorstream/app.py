@@ -28,7 +28,7 @@ from .reconcile import Reconciler
 from .dashboard import DashboardServer
 from .filters import FilterBank, suggest as suggest_filter
 from .insights import InsightsSink
-from .discovery import Advertiser, BEACON_PORT
+from .discovery import Advertiser, BEACON_PORT, ServerIdentity, start_probe_responder
 from .logging_sink import Recorder
 from .receiver import start_receiver
 from .sinks import DashboardSink
@@ -355,26 +355,33 @@ async def run(args: argparse.Namespace) -> None:
     dash.on_ui_connect = ui_snapshot
 
     advertiser = None
+    probe = None
+    ident = ServerIdentity.create(args.name)
     if not args.no_discovery:
         adv_ips = _local_ips()
         advertiser = Advertiser(
             adv_ips[0] if adv_ips else "", dash.ws_port, udp_port,
-            beacon_port=args.beacon_port, broadcast_addr=args.beacon_addr,
+            instance=f"{ident.name}-{ident.session[:4]}",
+            beacon_port=args.beacon_port, broadcast_addr=args.beacon_addr, ident=ident,
         )
+        try:  # lets each phone measure its link to this server (Servers list signal bars)
+            probe = await start_probe_responder(args.ws_host, dash.ws_port, ident.session)
+        except OSError as exc:
+            print(f"   (link ping unavailable: {exc})")
         try:
-            advertiser.start_mdns()
+            await advertiser.start_mdns_async()
         except Exception as exc:  # mDNS may be blocked; the UDP beacon still runs
             print(f"   (mDNS advertise unavailable, beacon still on: {exc})")
 
     ips = _local_ips()
     bar = "=" * 64
     print(bar)
-    print(" Sensor Stream - laptop receiver")
+    print(f" Sensor Stream server - {ident.name} ({ident.kind.replace('_', ' ')}, {ident.os})")
     print(f"   dashboard : http://localhost:{dash.http_port}     (open in a browser)")
     print(f"   control   : ws  :{dash.ws_port}      telemetry : UDP :{udp_port} (auto)")
-    print("   -- On the phone, enter Laptop IP + Ctrl port --")
+    print("   -- On the phone, pick this server under Servers (or enter Server IP + Ctrl port) --")
     for ip in ips or ["<this PC's Wi-Fi IP>"]:
-        print(f"        Laptop IP  {ip}      Ctrl port  {dash.ws_port}")
+        print(f"        Server IP  {ip}      Ctrl port  {dash.ws_port}")
     print("   (the phone learns the UDP port from the control channel - don't type it)")
     if advertiser is not None:
         print(f"   discovery : mDNS + UDP beacon :{args.beacon_port}   (phone can auto-find this PC)")
@@ -453,7 +460,9 @@ async def run(args: argparse.Namespace) -> None:
             t.cancel()
         recorder.stop()
         if advertiser is not None:
-            advertiser.stop()
+            await advertiser.stop_async()
+        if probe is not None:
+            probe.close()
         if ros_sink is not None:
             ros_sink.close()
         transport.close()
@@ -474,6 +483,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--log-dir", default="./recordings", help="directory for recordings")
     ap.add_argument("--filters-file", default="./filters.json", help="where per-sensor filter settings are saved")
     ap.add_argument("--record", action="store_true", help="record the session from start")
+    ap.add_argument("--name", default=None, help="name shown in the phone's Servers list (default: this computer's name)")
     ap.add_argument("--no-discovery", action="store_true", help="disable mDNS + UDP beacon advertising")
     ap.add_argument("--ros", action="store_true", help="publish decoded sensor data to ROS 2 topics (requires a sourced ROS environment)")
     ap.add_argument("--beacon-port", type=int, default=BEACON_PORT, help="UDP discovery beacon port")

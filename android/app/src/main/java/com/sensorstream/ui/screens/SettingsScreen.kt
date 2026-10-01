@@ -128,7 +128,7 @@ fun SettingsScreen(vm: StreamViewModel) {
         SsCard(Modifier.fillMaxWidth()) {
             ToggleRow(
                 title = "Show filtered signals",
-                subtitle = "Filters are set on the laptop dashboard; the phone remembers them and filters its own samples, even offline.",
+                subtitle = "Filters are set on the server's dashboard; the phone remembers them and filters its own samples, even offline.",
                 checked = settings.showFiltered,
                 onToggle = { vm.setShowFiltered(it) },
             )
@@ -203,7 +203,7 @@ fun SettingsScreen(vm: StreamViewModel) {
                     when {
                         exportMsg != null -> exportMsg!!
                         streamingLike -> "Stop streaming to export."
-                        else -> "Shares a .ssbin + .meta.json. Put both in the laptop's recordings/ folder to open them in the dashboard's Recordings view."
+                        else -> "Shares a .ssbin + .meta.json. Put both in the server's recordings/ folder to open them in the dashboard's Recordings view."
                     },
                     color = c.faint, fontSize = 11.sp,
                 )
@@ -222,7 +222,7 @@ fun SettingsScreen(vm: StreamViewModel) {
         }
 
         Text(
-            "SensorStream streams multi-sensor telemetry over UDP to your laptop. " +
+            "SensorStream streams multi-sensor telemetry over UDP to a SensorStream server on your network. " +
                 "Appearance and 3D preferences affect display only; packet batching changes how samples " +
                 "are grouped into packets, never the values sent.",
             color = c.faint, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),

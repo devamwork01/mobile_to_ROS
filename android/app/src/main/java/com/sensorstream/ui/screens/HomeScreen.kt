@@ -53,6 +53,7 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
     val orientation = vm.orientationPreview.collectAsState()
     val hasSavedTarget by vm.hasSavedTarget.collectAsState()
     val live by vm.live.collectAsState()
+    val serverName by vm.serverName.collectAsState()
     val connectNotice by vm.connectNotice.collectAsState()
     val filteredSensors by vm.filteredSensors.collectAsState()
     val appSettings by vm.settings.collectAsState()
@@ -104,9 +105,9 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
                 }
                 Text(
                     when {
-                        state.connected || state.streaming -> "Laptop · ${sel.host}"
-                        hasSavedTarget -> "Last laptop · ${sel.host}:${sel.port}"
-                        else -> "No laptop set up yet"
+                        state.connected || state.streaming -> "Server · ${serverName ?: sel.host}"
+                        hasSavedTarget -> "Last server · ${serverName?.let { "$it · " } ?: ""}${sel.host}:${sel.port}"
+                        else -> "No server set up yet"
                     },
                     color = c.muted, fontSize = 13.sp,
                 )
@@ -187,7 +188,7 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
             text = when {
                 streamingLike -> "Stop Streaming"
                 hasSavedTarget -> "Start Streaming"
-                else -> "Connect to a Laptop"
+                else -> "Connect to a Server"
             },
             onClick = { if (streamingLike || hasSavedTarget) vm.toggleStreaming() else nav.go(Screen.Connection) },
             enabled = sel.enabled.isNotEmpty() || streamingLike,

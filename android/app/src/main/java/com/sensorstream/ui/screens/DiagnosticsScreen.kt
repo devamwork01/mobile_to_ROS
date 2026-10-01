@@ -151,7 +151,7 @@ fun DiagnosticsScreen(vm: com.sensorstream.vm.StreamViewModel, nav: AppNav) {
         }
 
         Text(
-            "\"Dropped (recoverable)\" are network-channel samples the laptop re-requests via backfill. " +
+            "\"Dropped (recoverable)\" are network-channel samples the server re-requests via backfill. " +
                 "Fan-out drops and write errors should stay at zero.",
             color = c.faint, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
         )

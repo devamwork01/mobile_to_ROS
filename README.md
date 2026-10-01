@@ -37,7 +37,7 @@ optional ROS 2 bridge.
 | Reliability | On-phone bounded recording + laptop **backfill** (gap detect → resend → dedup) for lossless capture across Wi-Fi drops / screen-off |
 | Dashboard | Mission-control layout: always-on link KPIs (latency, jitter, loss, throughput), a sensor picker with live Hz + health dots, and **pinnable panels** you can collapse or maximise — several live graphs at once (uPlot), 3D orientation (Three.js) with recenter/reset, **Snapshot → CSV** of the last 10–60 s, paged recordings browser with server-side LOD, light/dark themes |
 | Phone app | Categorized sensors, per-sensor detail + sampling-rate config with **live actual Hz**, on-device pseudo-3D orientation with **recenter**, diagnostics, background streaming with a **Stop** action in the notification, **one-tap reconnect** to the last laptop, optional **packet batching**, and **export/share** of the on-phone recording |
-| Discovery | mDNS + UDP beacon so the phone can auto-find the laptop |
+| Discovery | mDNS + UDP beacon: the phone lists every server on the network with its name, type and link quality |
 | ROS 2 | Optional `--ros` sink publishing `sensor_msgs/Imu`, `MagneticField`, `QuaternionStamped` |
 
 ## Try it without a phone (30 seconds)
@@ -111,6 +111,7 @@ npm test           # unit tests (Vitest): history buffer, layout store, pin reso
 | `--ws-port` | `8081` | Control WebSocket port |
 | `--udp-port` | `5005` | Telemetry UDP port |
 | `--ui-hz` | `60` | Max per-sensor update rate pushed to the browser (raw logging stays full-rate) |
+| `--name` | computer name | Name shown in the phone's **Servers** list |
 | `--no-discovery` | off | Disable mDNS + UDP beacon advertising |
 
 ## Run — Android app
@@ -126,9 +127,9 @@ an older one keeps your settings.
 1. Open the `android/` folder in Android Studio and let Gradle sync (uses JBR 21).
 2. Run on a physical device with USB debugging enabled — see [`docs/run.md`](docs/run.md)
    for the ADB build/install commands.
-3. In the app: open **Connection**, tap **Find Laptop Automatically** (or enter the
-   laptop's LAN IP + control port `8081`), pick sensors on the **Sensors** tab, and
-   **Connect & Stream**.
+3. In the app: open **Connection**, tap your server in the **Servers** list (or enter its
+   LAN IP + control port `8081` under *Enter address manually*), pick sensors on the
+   **Sensors** tab, and **Connect & Stream**.
 
 The phone and laptop must be on the **same Wi-Fi/LAN**. The app remembers the last laptop,
 so next time **Start Streaming** on Home reconnects in one tap. Streaming continues in the
@@ -149,7 +150,7 @@ Once the laptop server is running and the phone is streaming, here's what you're
 - **Home** shows a live 3D view of the phone's orientation (device axes vs. the world frame), plus connection status, latency (median of the last 10 heartbeat round trips, so one Wi-Fi hiccup doesn't jump the number), and the total sample rate (sensors set to **Max** count at their measured rate while streaming). Tap the **recenter** button (target icon) on the 3D view to zero it on the current pose; tap it again to return to absolute orientation. If the Wi-Fi link drops, the status shows **Reconnecting** and the app reconnects on its own (the phone keeps recording meanwhile, so the gap is backfilled).
 - **Filtered Signals** (Home, when a filter is set on the laptop): per filtered sensor a live 10 s graph (raw faint, filtered bold; tap to switch axis), the filter (e.g. `LP 5 Hz · 4th + notch 8 Hz`) and **σ raw → filtered**. The phone runs the same filters itself and remembers the settings, so this keeps working offline. The sensor's detail graph also overlays the filtered trace. Hide it under **Settings → Filtering**.
 - **Sensors** lists every sensor grouped by category (Motion / Orientation / Magnetic / …) with a per-sensor toggle and sampling-rate control — pick what you want to stream.
-- **Connection** links to the laptop (Find Laptop Automatically, or enter the LAN IP + control port `8081`). The address is remembered, and Home offers one-tap reconnect.
+- **Connection** lists every SensorStream server on the network (scrollable): its name, type (laptop / desktop / Raspberry Pi), OS and address, with signal bars and the round trip measured from the phone. Tap one to choose where the phone streams; the last one used is marked and kept on top. A server that stops answering greys out and then drops off. *Enter address manually* covers networks that block discovery. The choice is remembered, and Home offers one-tap reconnect. Run several servers? Give each a `--name`.
 - While streaming, sensor cards show the requested rate **and** the rate the sensor actually delivers (e.g. `100 Hz · 116 live`) — Android treats the requested rate as a hint.
 - **Settings** adds:
   - **Packet batching** — *Low latency* (default, no added delay), *Balanced* (+~2 ms) or *Battery* (+~5 ms). Measured at 4 sensors × 100 Hz (≈430 samples/s): ~335, ~222 and ~132 packets/s respectively. Same data either way; only how samples are grouped into packets changes.
