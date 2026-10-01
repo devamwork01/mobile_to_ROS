@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, lazy, Suspense } from "react";
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import "./telemetry/liveHistory.js"; // start filling history before any panel mounts
 import IconRail from "./components/shell/IconRail.jsx";
 import KpiStrip from "./components/shell/KpiStrip.jsx";
@@ -12,8 +12,10 @@ import { netLoss } from "./lib/metrics.js";
 import { layout } from "./lib/layout.js";
 import { useTelemetry } from "./telemetry/store.js";
 import { listSensors } from "./telemetry/sensors.js";
+import { useOpenReportRequest } from "./telemetry/insights.js";
 
 const RecordingsView = lazy(() => import("./components/RecordingsView.jsx"));
+const InsightsView = lazy(() => import("./components/InsightsView.jsx"));
 
 function Loading({ label = "Loading…" }) {
   return <div className="min-h-[200px] grid place-items-center text-sm text-faint">{label}</div>;
@@ -97,6 +99,11 @@ export default function App() {
     layout.maximize(null); // changing page restores a maximised panel
     setViewState(v);
   };
+  // "Open report" (test-run panel / Recordings) jumps to Insights, which consumes the request.
+  const openReq = useOpenReportRequest();
+  useEffect(() => {
+    if (openReq) setView("Insights");
+  }, [openReq]); // eslint-disable-line react-hooks/exhaustive-deps
   const showPerf = typeof location !== "undefined" && new URLSearchParams(location.search).has("perf");
   // The server clears the catalog when the phone disconnects (and a socket blip can briefly lose
   // it while data still flows). Keep the last catalog so pins keep their names and resolve:
@@ -110,7 +117,7 @@ export default function App() {
     <div className="flex h-full bg-ink">
       <IconRail view={view} onView={setView} theme={theme} onTheme={changeTheme} />
       <main className="flex-1 min-w-0 flex flex-col">
-        <KpiStrip meta={meta} snapshot={<SnapshotMenu meta={meta} rows={rows} />} />
+        <KpiStrip meta={meta} rows={rows} snapshot={<SnapshotMenu meta={meta} rows={rows} />} />
         <div className="flex-1 min-h-0 bg-hero-grad">
           {view === "Dashboard" ? (
             <Dashboard meta={meta} rows={rows} onInfo={(r) => setSelected({ handle: r.handle, type: r.type })} />
@@ -118,6 +125,11 @@ export default function App() {
             <div className="h-full overflow-auto p-4">
               <h1 className="text-sm font-semibold mb-4">{view}</h1>
               {view === "Diagnostics" && <Diagnostics meta={meta} />}
+              {view === "Insights" && (
+                <Suspense fallback={<Loading label="Loading insights…" />}>
+                  <InsightsView />
+                </Suspense>
+              )}
               {view === "Recordings" && (
                 <Suspense fallback={<Loading label="Loading recordings…" />}>
                   <RecordingsView />

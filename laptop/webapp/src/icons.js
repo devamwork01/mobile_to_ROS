@@ -35,6 +35,11 @@ import {
   Pause,
   Play,
   Monitor,
+  Sigma,
+  Timer,
+  Square,
+  FileText,
+  FlaskConical,
 } from "lucide-react";
 
 export const Icons = {
@@ -73,4 +78,9 @@ export const Icons = {
   Pause,
   Play,
   Monitor,
+  Sigma,
+  Timer,
+  Square,
+  FileText,
+  FlaskConical,
 };

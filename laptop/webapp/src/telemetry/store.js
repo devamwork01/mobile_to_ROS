@@ -4,6 +4,7 @@
 //  - useSignal(handle): the latest record for one sensor (high-frequency; only that leaf re-renders)
 // Nothing here touches the backend/protocol — it only consumes what the server already broadcasts.
 import { useSyncExternalStore } from "react";
+import { onInsightsMessage } from "./insights.js";
 
 const params = new URLSearchParams(location.search);
 const WS_PORT = params.get("ws") || "8081";
@@ -168,6 +169,13 @@ function connect() {
         break;
       case "active_set":
         applyActiveSet(m.handles || []);
+        break;
+      case "insights":
+      case "insights_psd":
+      case "testrun":
+      case "report_ready":
+      case "report_error":
+        onInsightsMessage(m);
         break;
       case "phone_disconnected":
         setMeta({ catalog: [], device: null });

@@ -176,6 +176,26 @@ Two more views are worth knowing:
 
   <img src="docs/images/dashboard-recordings.jpg" alt="Recordings browser" width="600">
 
+### Insights — noise, drift, spectra and test runs
+
+Everything here is computed **on the laptop server from the full-rate stream** (the browser only
+ever receives a decimated display copy, which would give wrong noise figures and an aliased spectrum).
+
+- **On every graph panel** — a footer with σ per axis (last 10 s), the true sample rate and interval
+  jitter, and a **Signal / Spectrum** switch that shows the sensor's power spectral density.
+- **Test run** (top bar) — pick a preset and a duration, keep still, and get a report:
+  - **Still** — lay the phone (and your robot) flat and motionless. Reports bias against gravity
+    (accelerometer magnitude vs 9.80665 m/s²) and zero rate (gyroscope), σ, peak-to-peak, **noise
+    density** (units/√Hz), drift per minute, rate/jitter/gaps/lost samples, and for runs of 2 min or
+    longer the **Allan deviation** with random walk (σ at τ = 1 s) and bias instability — the numbers
+    IMU datasheets quote, so you can hold your own sensors to the same yardstick.
+  - **Capture** — the same statistics without reference values (e.g. while moving).
+- **Insights page** — every report with its tables, spectrum and Allan plot, exportable as JSON or CSV.
+  A run is an ordinary lossless recording, so **Recordings → Analyse** can produce a report for any
+  earlier recording too.
+
+<img src="docs/images/dashboard-insights.jpg" alt="Insights — per-axis noise table, spectrum and Allan deviation of a test run" width="820">
+
 ## ROS 2 bridge (optional)
 
 With a ROS 2 environment sourced, `--ros` publishes decoded sensors as standard messages:
@@ -226,7 +246,7 @@ drift >10%, RSS growth like a leak, or a crash.
 - [x] On-phone recording + laptop backfill (lossless across drops)
 - [x] Dashboard (cards, graphs, 3D, recordings browser, light/dark)
 - [x] Dashboard redesign: KPI strip, sensor picker, pinnable/maximisable panels, Snapshot CSV
-- [ ] Dashboard insights: per-axis stats, noise, spectrum (FFT), drift, rate stability
+- [x] Dashboard insights: per-axis stats, noise density, spectrum, drift, rate stability, Allan deviation, test runs
 - [ ] Recording tools: naming/tags, playback scrubber, CSV export of recordings
 - [x] Phone app redesign (Compose) with on-device 3D orientation
 - [x] ROS 2 output sink (`--ros`)

@@ -3,6 +3,8 @@ import { Icons } from "../icons.js";
 import { listRecordings, querySignal } from "../lib/recordingsApi.js";
 import { signalMeta } from "../telemetry/signals.js";
 import HistoryChart from "./HistoryChart.jsx";
+import { sendCommand } from "../telemetry/store.js";
+import { useLastReportEvent, requestOpenReport } from "../telemetry/insights.js";
 
 const fmtBytes = (b) => (b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`);
 const fmtDur = (ms) => {
@@ -26,6 +28,21 @@ export default function RecordingsView() {
   const [range, setRange] = useState(null); // current zoom window {start,end} ns; null = full
   const [loadingSig, setLoadingSig] = useState(false);
   const chartWrap = useRef(null);
+  const [analysing, setAnalysing] = useState(null); // recording id being analysed
+  const [analyseErr, setAnalyseErr] = useState(null);
+  const reportEvent = useLastReportEvent();
+  // React only to the outcome for *this* recording (other browsers' runs also emit events).
+  useEffect(() => {
+    if (!reportEvent) return;
+    if (reportEvent.ok) {
+      setRecs((prev) => prev && prev.map((r) => (r.id === reportEvent.id ? { ...r, hasReport: true } : r)));
+      setSel((s) => (s && s.id === reportEvent.id ? { ...s, hasReport: true } : s));
+    }
+    if (reportEvent.id === analysing) {
+      setAnalysing(null);
+      setAnalyseErr(reportEvent.ok ? null : reportEvent.message || "Analysis failed");
+    }
+  }, [reportEvent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     listRecordings()
@@ -110,6 +127,20 @@ export default function RecordingsView() {
             <div className="flex items-baseline justify-between flex-wrap gap-2 mb-3">
               <h2 className="text-sm font-semibold">{sel.model || sel.id}</h2>
               <span className="text-[11px] text-faint num">{fmtTime(sel.modified)} · {fmtDur(sel.durationMs)} · {sel.frames.toLocaleString()} frames{sel.android ? ` · Android ${sel.android}` : ""}</span>
+              {sel.hasReport ? (
+                <button className="btn-ghost text-xs py-1" onClick={() => requestOpenReport(sel.id)}>
+                  <Icons.FileText size={13} /> Open report
+                </button>
+              ) : (
+                <button
+                  className="btn-ghost text-xs py-1 disabled:opacity-50"
+                  disabled={analysing === sel.id}
+                  onClick={() => { setAnalysing(sel.id); setAnalyseErr(null); sendCommand({ cmd: "analyse", id: sel.id }); }}
+                  title="Compute noise, drift, rate and spectra for this recording (full rate, on the server)"
+                >
+                  <Icons.Sigma size={13} /> {analysing === sel.id ? "Analysing…" : "Analyse"}
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-1.5 flex-wrap mb-4">
               {sel.sensors.map((s) => (
@@ -132,6 +163,7 @@ export default function RecordingsView() {
               )}
             </div>
             {err && <div className="text-xs text-err mt-2">{err}</div>}
+            {analyseErr && <div className="text-xs text-err mt-2">Analysis failed: {analyseErr}</div>}
           </>
         )}
       </section>

@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { sendCommand } from "../../telemetry/store.js";
 import { netLoss } from "../../lib/metrics.js";
 import Sparkline from "./Sparkline.jsx";
+import TestRunDialog from "./TestRunDialog.jsx";
+import { Icons } from "../../icons.js";
+import { useTestRun } from "../../telemetry/insights.js";
+import { useLayout } from "../../lib/layout.js";
+import { PIN_3D, resolveKey } from "../../telemetry/sensors.js";
 
 const DASH = "—";
 const fmtBytes = (bps) => (!bps ? DASH : bps < 1048576 ? `${(bps / 1024).toFixed(0)} KB/s` : `${(bps / 1048576).toFixed(2)} MB/s`);
@@ -57,7 +62,7 @@ function Metric({ label, tone = "text-fg", children }) {
   );
 }
 
-export default function KpiStrip({ meta, snapshot }) {
+export default function KpiStrip({ meta, snapshot, rows = [] }) {
   const now = useNow();
   const d = meta.debug || {};
   const s = meta.stats || {};
@@ -68,6 +73,14 @@ export default function KpiStrip({ meta, snapshot }) {
   const rec = !!meta.recording?.active;
   const recSince = useSince(rec);
   const loss = netLoss(d, s);
+  const run = useTestRun();
+  const busy = !!run && ["running", "settling", "analysing"].includes(run.phase);
+  const [runOpen, setRunOpen] = useState(false);
+  const L = useLayout();
+  // Dialog default: pinned vector sensors that are streaming, else every streaming vector sensor.
+  const pinnedVec = [...new Set(L.pins.filter((p) => p.key !== PIN_3D).map((p) => resolveKey(p.key, rows))
+    .filter((r) => r && r.active && r.kind === "vector").map((r) => r.handle))];
+  const runDefaults = pinnedVec.length ? pinnedVec : rows.filter((r) => r.active && r.kind === "vector").map((r) => r.handle);
 
   return (
     <header className="h-14 shrink-0 flex items-center gap-1 px-3 border-b border-line bg-surface/80 backdrop-blur">
@@ -100,12 +113,23 @@ export default function KpiStrip({ meta, snapshot }) {
       <div className="flex items-center gap-2 pl-3 shrink-0">
         {snapshot}
         <button
+          disabled={!connected || rec || busy}
+          onClick={() => setRunOpen(true)}
+          title={!connected ? "Needs a streaming phone" : busy ? "A test run is in progress" : rec ? "Stop the recording first" : "Start a test run"}
+          className="btn-ghost text-xs py-1.5 disabled:opacity-40"
+        >
+          <Icons.FlaskConical size={14} /> Test run
+        </button>
+        <button
+          disabled={busy}
           onClick={() => sendCommand({ cmd: rec ? "record_stop" : "record_start" })}
-          className={`btn text-xs py-1.5 ${rec ? "bg-err/15 text-err border border-err/40" : "btn-ghost"}`}
+          title={busy ? "Recording is controlled by the test run" : undefined}
+          className={`btn text-xs py-1.5 disabled:opacity-60 ${rec ? "bg-err/15 text-err border border-err/40" : "btn-ghost"}`}
         >
           <span className={`w-2 h-2 rounded-full bg-err ${rec ? "animate-pulsedot" : ""}`} />
-          {rec ? `Stop · ${recSince ? fmtDuration(now - recSince) : "00:00:00"} · ${(meta.recording.rows || 0).toLocaleString()} rows` : "Record"}
+          {busy ? "Recording test run" : rec ? `Stop · ${recSince ? fmtDuration(now - recSince) : "00:00:00"} · ${(meta.recording.rows || 0).toLocaleString()} rows` : "Record"}
         </button>
+        {runOpen && <TestRunDialog rows={rows} defaultHandles={runDefaults} onClose={() => setRunOpen(false)} />}
       </div>
     </header>
   );

@@ -2,8 +2,11 @@ import { lazy, Suspense, useState } from "react";
 import Panel, { IconBtn, LiveValues, StatusBadge, Segmented, NotStreaming } from "./Panel.jsx";
 import { layout, WINDOWS } from "../../lib/layout.js";
 import { seriesSpec } from "./seriesSpec.js";
+import InsightFooter from "./InsightFooter.jsx";
 
 const SensorGraph = lazy(() => import("./SensorGraph.jsx"));
+// Server-computed (full-rate) spectrum; shares the uPlot chunk with SensorGraph.
+const SpectrumGraph = lazy(() => import("./SpectrumGraph.jsx"));
 
 function nextWindow(w) {
   const i = WINDOWS.indexOf(w);
@@ -15,9 +18,15 @@ export default function SensorGraphPanel({ pin, row, state, maximized }) {
   const labels = [...spec.labels, ...(spec.mag ? ["|v|"] : [])];
   const [show, setShow] = useState(() => labels.map((l) => l !== "|v|"));
   const toggle = (i) => setShow((s) => s.map((on, j) => (j === i ? !on : on)));
+  const [view, setView] = useState("signal"); // "signal" | "spectrum"
+  const spectrum = view === "spectrum";
 
-  const tools = (
+  const viewSwitch = (
+    <Segmented options={[["signal", "Signal"], ["spectrum", "Spectrum"]]} value={view} onChange={setView} />
+  );
+  const tools = spectrum ? viewSwitch : (
     <>
+      {viewSwitch}
       {maximized ? (
         <>
           <Segmented options={WINDOWS.map((w) => [w, `${w}s`])} value={pin.window} onChange={(w) => layout.setWindow(pin.key, w)} />
@@ -65,12 +74,17 @@ export default function SensorGraphPanel({ pin, row, state, maximized }) {
       onClose={() => layout.unpin(pin.key)}
       className="flex-1"
       bodyClassName={maximized ? "" : "h-52"}
+      footer={state === "off" ? null : <InsightFooter handle={row.handle} n={spec.n} />}
     >
       {state === "off" ? (
         <NotStreaming />
       ) : (
         <Suspense fallback={<div className="h-full grid place-items-center text-xs text-faint">Loading graph…</div>}>
-          <SensorGraph handle={row.handle} kind={row.kind} window={pin.window} paused={pin.paused} show={show} />
+          {spectrum ? (
+            <SpectrumGraph handle={row.handle} labels={spec.labels} />
+          ) : (
+            <SensorGraph handle={row.handle} kind={row.kind} window={pin.window} paused={pin.paused} show={show} />
+          )}
         </Suspense>
       )}
     </Panel>
