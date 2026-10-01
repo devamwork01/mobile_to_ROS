@@ -45,3 +45,12 @@ export function configToDraft(cfg) {
     notches: (cfg.notches || []).map((n) => ({ hz: n.hz, q: n.q })),
   };
 }
+
+// What the panel header says about its filter. The server can refuse a config, or be unable to
+// run it at the current sample rate - the panel must not claim "filtered" then.
+export function filterBadge(config, error, running = false) {
+  if (error && running) return { label: "filtered", tone: "warn", title: `Last change refused: ${error}` };
+  if (error) return { label: config ? "filter inactive" : "filter refused", tone: "warn", title: error };
+  if (config) return { label: "filtered", tone: "accent", title: "A filter is running on this sensor (server-side, full rate)" };
+  return null;
+}

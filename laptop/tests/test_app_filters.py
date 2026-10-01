@@ -40,3 +40,12 @@ def test_suggest_uses_live_spectrum():
 
 def test_non_filter_commands_are_ignored():
     assert handle_filter_command({"cmd": "record_start"}, FilterBank(), FakeInsights(None), [].append) is False
+
+
+def test_errors_say_whether_a_filter_is_still_running():
+    sent, bank = [], FilterBank()
+    handle_filter_command({"cmd": "filter_set", "key": "1:Acc", "handle": 3, "config": LP}, bank, FakeInsights(None), sent.append)
+    handle_filter_command({"cmd": "filter_set", "key": "1:Acc", "handle": 3, "config": {"lowpass": 5}}, bank, FakeInsights(None), sent.append)
+    assert sent[-1]["kind"] == "filter_error" and sent[-1]["running"] is True    # the previous filter stays
+    handle_filter_command({"cmd": "filter_set", "key": "4:G", "handle": 4, "config": {"lowpass": 5}}, bank, FakeInsights(None), sent.append)
+    assert sent[-1]["running"] is False

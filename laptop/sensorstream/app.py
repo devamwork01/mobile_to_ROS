@@ -105,7 +105,9 @@ def handle_filter_command(msg: dict, bank, insights, broadcast) -> bool:
         handle = None
     if cmd == "filter_set":
         ok, why = bank.set(key, msg.get("config"), handle=handle)
-        broadcast(bank.snapshot() if ok else {"kind": "filter_error", "key": key, "message": why})
+        # running: a refused change leaves the previous filter (if any) in place
+        broadcast(bank.snapshot() if ok else {"kind": "filter_error", "key": key, "message": why,
+                                               "running": key in bank.configs})
         return True
     if cmd == "filter_clear":
         bank.clear(key)
@@ -114,7 +116,8 @@ def handle_filter_command(msg: dict, bank, insights, broadcast) -> bool:
     if cmd == "filter_suggest":
         src = insights.suggest(handle) if handle is not None else None
         if src is None:
-            broadcast({"kind": "filter_error", "key": key, "message": "Not enough live data yet to suggest a filter."})
+            broadcast({"kind": "filter_error", "key": key, "message": "Not enough live data yet to suggest a filter.",
+                       "running": key in bank.configs})
         else:
             f, psd, fs = src
             broadcast({"kind": "filter_suggestion", "key": key, "config": suggest_filter(f, psd, fs)})
@@ -426,7 +429,7 @@ async def run(args: argparse.Namespace) -> None:
             await asyncio.sleep(1.0)
             await insights_step(insights, testruns, dash.broadcast)
             for key, message in filterbank.errors():
-                dash.broadcast({"kind": "filter_error", "key": key, "message": message})
+                dash.broadcast({"kind": "filter_error", "key": key, "message": message, "running": False})
 
     tasks = [asyncio.create_task(stats_task()), asyncio.create_task(reconcile_task()),
              asyncio.create_task(insights_task())]

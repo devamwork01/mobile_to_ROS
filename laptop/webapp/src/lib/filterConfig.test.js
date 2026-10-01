@@ -22,3 +22,17 @@ describe("filter config", () => {
     expect(FILTERABLE(5, "scalar")).toBe(false);
   });
 });
+
+import { filterBadge } from "./filterConfig.js";
+
+describe("filter badge on the panel", () => {
+  it("only says 'filtered' when there is a config and no error", () => {
+    expect(filterBadge(null, undefined)).toBeNull();
+    expect(filterBadge({ lowpass: { hz: 5, order: 4 }, notches: [] }, undefined)).toMatchObject({ label: "filtered", tone: "accent" });
+    const b = filterBadge({ lowpass: { hz: 40, order: 4 }, notches: [] }, "Cutoff must be between 0.1 and 22.5 Hz.");
+    expect(b).toMatchObject({ label: "filter inactive", tone: "warn", title: "Cutoff must be between 0.1 and 22.5 Hz." });
+    expect(filterBadge(null, "This sensor can't be filtered.")).toMatchObject({ label: "filter refused", tone: "warn" });
+    // a refused *change* leaves the previous filter running
+    expect(filterBadge({ lowpass: { hz: 5, order: 4 }, notches: [] }, "Invalid low-pass settings.", true)).toMatchObject({ label: "filtered", tone: "warn" });
+  });
+});

@@ -13,6 +13,7 @@ let openReport = null;
 let filterConfigs = {}; // key -> config (server truth, broadcast to every dashboard)
 const filterSuggestions = new Map(); // key -> suggested config
 const filterErrors = new Map(); // key -> message
+const filterErrorRunning = new Map(); // key -> the previous filter is still running despite the error
 const listeners = new Set();
 const emit = () => listeners.forEach((l) => l());
 const subscribe = (cb) => {
@@ -51,6 +52,7 @@ export function onInsightsMessage(m) {
       break;
     case "filter_error":
       filterErrors.set(m.key, m.message);
+      filterErrorRunning.set(m.key, !!m.running);
       break;
     default:
       return false;
@@ -68,6 +70,15 @@ export const getLastReportEvent = () => lastReportEvent;
 export const getFilterConfig = (key) => filterConfigs[key];
 export const getFilterSuggestion = (key) => filterSuggestions.get(key);
 export const getFilterError = (key) => filterErrors.get(key);
+export const getFilterErrorRunning = (key) => filterErrorRunning.get(key) === true;
+export function clearFilterSuggestion(key) {
+  filterSuggestions.delete(key);
+  emit();
+}
+export function clearFilterError(key) {
+  filterErrors.delete(key);
+  emit();
+}
 export function clearFilterFeedback(key) {
   filterSuggestions.delete(key);
   filterErrors.delete(key);
@@ -92,6 +103,7 @@ export const useTestRun = () => useSyncExternalStore(subscribe, getTestRun, getT
 export const useReportsVersion = () => useSyncExternalStore(subscribe, getReportsVersion, getReportsVersion);
 export const useFilterConfig = (key) => useSyncExternalStore(subscribe, () => filterConfigs[key], () => filterConfigs[key]);
 export const useFilterSuggestion = (key) => useSyncExternalStore(subscribe, () => filterSuggestions.get(key), () => filterSuggestions.get(key));
+export const useFilterErrorRunning = (key) => useSyncExternalStore(subscribe, () => filterErrorRunning.get(key) === true, () => filterErrorRunning.get(key) === true);
 export const useFilterError = (key) => useSyncExternalStore(subscribe, () => filterErrors.get(key), () => filterErrors.get(key));
 export const useLastReportEvent = () => useSyncExternalStore(subscribe, getLastReportEvent, getLastReportEvent);
 export const useOpenReportRequest = () => useSyncExternalStore(subscribe, getOpenReport, getOpenReport);

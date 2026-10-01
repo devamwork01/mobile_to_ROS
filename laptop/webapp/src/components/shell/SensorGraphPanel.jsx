@@ -4,8 +4,8 @@ import { layout, WINDOWS } from "../../lib/layout.js";
 import { seriesSpec } from "./seriesSpec.js";
 import InsightFooter from "./InsightFooter.jsx";
 import FilterEditor from "./FilterEditor.jsx";
-import { useFilterConfig, useFilterSuggestion, useInsightStats } from "../../telemetry/insights.js";
-import { FILTERABLE } from "../../lib/filterConfig.js";
+import { useFilterConfig, useFilterSuggestion, useFilterError, useFilterErrorRunning, useInsightStats } from "../../telemetry/insights.js";
+import { FILTERABLE, filterBadge } from "../../lib/filterConfig.js";
 
 const SensorGraph = lazy(() => import("./SensorGraph.jsx"));
 // Server-computed (full-rate) spectrum; shares the uPlot chunk with SensorGraph.
@@ -24,7 +24,11 @@ export default function SensorGraphPanel({ pin, row, state, maximized }) {
   const [view, setView] = useState("signal"); // "signal" | "spectrum"
   const spectrum = view === "spectrum";
   const filterable = FILTERABLE(row.type, row.kind);
-  const fcfg = useFilterConfig(row.key);
+  const fcfgSet = useFilterConfig(row.key);
+  const ferror = useFilterError(row.key);
+  const frunning = useFilterErrorRunning(row.key);
+  const badge = filterBadge(fcfgSet, ferror, frunning);
+  const fcfg = fcfgSet && (!ferror || frunning) ? fcfgSet : null; // only treat it as filtered while it actually runs
   const suggestion = useFilterSuggestion(row.key);
   const fs = useInsightStats(row.handle)?.rate_hz || null;
   const [editing, setEditing] = useState(false);
@@ -34,7 +38,7 @@ export default function SensorGraphPanel({ pin, row, state, maximized }) {
     <Segmented options={[["signal", "Signal"], ["spectrum", "Spectrum"]]} value={view} onChange={setView} />
   );
   const filterBtn = filterable ? (
-    <IconBtn title={fcfg ? "Filter (active) - edit" : "Filter"} icon="Filter" active={!!fcfg} onClick={() => setEditing(true)} />
+    <IconBtn title={fcfgSet ? "Filter - edit" : "Filter"} icon="Filter" active={!!fcfgSet} onClick={() => setEditing(true)} />
   ) : null;
   const tools = spectrum ? (
     <>
@@ -90,7 +94,11 @@ export default function SensorGraphPanel({ pin, row, state, maximized }) {
       badge={
         <>
           <StatusBadge state={state} />
-          {fcfg && <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-accent-soft text-accent whitespace-nowrap">filtered</span>}
+          {badge && (
+            <span title={badge.title} className={`text-[10px] px-1.5 py-0.5 rounded-md whitespace-nowrap ${badge.tone === "warn" ? "bg-warn/15 text-warn" : "bg-accent-soft text-accent"}`}>
+              {badge.label}
+            </span>
+          )}
         </>
       }
       tools={state === "off" ? null : tools}

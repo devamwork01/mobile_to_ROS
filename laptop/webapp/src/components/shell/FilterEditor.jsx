@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icons } from "../../icons.js";
 import { sendCommand } from "../../telemetry/store.js";
-import { useFilterConfig, useFilterSuggestion, useFilterError, clearFilterFeedback } from "../../telemetry/insights.js";
+import { useFilterConfig, useFilterSuggestion, useFilterError, clearFilterSuggestion, clearFilterError } from "../../telemetry/insights.js";
 import { validateConfig, configToDraft, draftToConfig, MAX_NOTCHES } from "../../lib/filterConfig.js";
 
 // Edit one sensor's filter. "Suggest" asks the server to propose a config from the live spectrum;
@@ -13,7 +13,8 @@ export default function FilterEditor({ row, fs, onClose }) {
   const error = useFilterError(row.key);
   const [draft, setDraft] = useState(() => configToDraft(active));
   useEffect(() => { if (suggestion) setDraft(configToDraft(suggestion)); }, [suggestion]);
-  useEffect(() => () => clearFilterFeedback(row.key), [row.key]);
+  // Closing drops a pending suggestion; errors stay so the panel can show why a filter isn't running.
+  useEffect(() => () => clearFilterSuggestion(row.key), [row.key]);
   useEffect(() => {
     const k = (e) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", k);
@@ -70,9 +71,9 @@ export default function FilterEditor({ row, fs, onClose }) {
         </div>
         {(!check.ok || error) && <div className="text-[11px] text-warn">{error || check.message}</div>}
         <div className="flex gap-2 justify-end">
-          {active && <button className="btn-ghost text-xs py-1.5" onClick={() => { sendCommand({ cmd: "filter_clear", key: row.key }); onClose(); }}>Clear filter</button>}
+          {active && <button className="btn-ghost text-xs py-1.5" onClick={() => { clearFilterError(row.key); sendCommand({ cmd: "filter_clear", key: row.key }); onClose(); }}>Clear filter</button>}
           <button className="btn-accent text-xs py-1.5 disabled:opacity-40" disabled={!check.ok}
-            onClick={() => { sendCommand({ cmd: "filter_set", key: row.key, handle: row.handle, config: cfg }); onClose(); }}>Apply</button>
+            onClick={() => { clearFilterError(row.key); sendCommand({ cmd: "filter_set", key: row.key, handle: row.handle, config: cfg }); onClose(); }}>Apply</button>
         </div>
       </div>
     </div>,
