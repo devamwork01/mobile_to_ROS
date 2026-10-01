@@ -1,5 +1,6 @@
 package com.sensorstream.ui.screens
 
+import com.sensorstream.core.requestedHz
 import android.content.res.Configuration
 import android.hardware.Sensor
 import androidx.compose.foundation.layout.Arrangement
@@ -67,11 +68,12 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
     val phase = state.phase()
     val streamingLike = phase == StreamPhase.STREAMING || state.connecting || state.connected
 
-    // Total requested rate = sum of per-sensor requested Hz (period 0 = "Max", excluded from the sum).
-    val totalHz = sel.enabled.sumOf {
-        val p = vm.periodOf(it)
-        if (p > 0) (1_000_000 / p).toLong() else 0L
-    }
+    // Total rate = sum of per-sensor requested Hz; "Max" counts the measured rate while streaming,
+    // else the sensor's advertised maximum.
+    val totalHz = sel.enabled.sumOf { h ->
+        val info = vm.catalog.firstOrNull { it.handle == h }
+        requestedHz(vm.periodOf(h), info?.maxFrequencyHz ?: 0f, if (state.streaming) live[h]?.hz else null).toDouble()
+    }.let { Math.round(it) }
 
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
