@@ -7,6 +7,7 @@ import { AXIS } from "../../telemetry/signals.js";
 import { useThemeStamp } from "../../lib/theme.js";
 import { logTick, expTick } from "../../lib/insightsFormat.js";
 import { responseCurve } from "../../lib/filterResponse.js";
+import { clampDecades } from "../../lib/logPlot.js";
 
 const COLORS = [AXIS.X, AXIS.Y, AXIS.Z, "#b57edc"];
 const token = (css, n) => `rgb(${css.getPropertyValue(n).trim().split(/\s+/).join(",")})`;
@@ -89,7 +90,8 @@ export default function SpectrumGraph({ handle, labels, filter = null, fs = null
       const rate = fs || 2 * data.f[data.f.length - 1];
       cols.push(responseCurve(filter, rate, data.f, top));
     }
-    u.setData(cols);
+    const { series } = clampDecades(cols.slice(1), 8);
+    u.setData([cols[0], ...series]);
   }, [data, labels.length, withFilter, filter, fs]);
 
   return (

@@ -63,3 +63,10 @@ describe("filter state", () => {
     expect(getFilterConfig("1:Acc")).toBeUndefined();
   });
 });
+
+describe("spectrum messages keep the filtered curves", () => {
+  it("stores psd_f alongside psd", () => {
+    onInsightsMessage({ kind: "insights_psd", handle: 9, f: [1, 2], psd: [[1, 2]], psd_f: [[0.5, 0.1]] });
+    expect(getPsd(9).psd_f).toEqual([[0.5, 0.1]]);
+  });
+});

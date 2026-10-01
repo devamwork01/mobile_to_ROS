@@ -26,7 +26,7 @@ export function onInsightsMessage(m) {
       stats = new Map((m.stats || []).map((s) => [s.handle, s]));
       break;
     case "insights_psd":
-      psd.set(m.handle, { f: m.f, psd: m.psd });
+      psd.set(m.handle, { f: m.f, psd: m.psd, psd_f: m.psd_f }); // psd_f: "after" curves while a filter is active
       break;
     case "testrun":
       testRun = m;
