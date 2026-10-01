@@ -126,10 +126,10 @@ describe("snapshotCsv", () => {
     expect(csv.split("\n")).toEqual([
       "# SensorStream snapshot - display-rate data (<=UI cap per sensor), not the lossless recording",
       "# device=Pixel 8, android=15, exported=2026-10-01T10:00:00.000Z, range_s=60",
-      "t_s,sensor,handle,x,y,z,w",
-      "0.000000,Acceleration,1,1,2,3,",
-      "0.050000,Ambient Light,2,7,,,",
-      "0.100000,Acceleration,1,4,5,6,",
+      "t_s,sensor,handle,x,y,z,w,fx,fy,fz",
+      "0.000000,Acceleration,1,1,2,3,,,,",
+      "0.050000,Ambient Light,2,7,,,,,,",
+      "0.100000,Acceleration,1,4,5,6,,,,",
       "",
     ]);
   });
@@ -139,7 +139,7 @@ describe("snapshotCsv", () => {
     for (let i = 0; i <= 20; i++) h.push(rec(1, i, [i]), 0);
     const rows = h.snapshotCsv({ handles: [1], seconds: 5 }).trim().split("\n").slice(3);
     expect(rows.length).toBe(6); // t = 15..20
-    expect(rows[0]).toBe("0.000000,handle 1,1,15,,,");
+    expect(rows[0]).toBe("0.000000,handle 1,1,15,,,,,,");
   });
 
   it("quotes names with commas and quotes; unknown device", () => {
@@ -147,7 +147,7 @@ describe("snapshotCsv", () => {
     h.push(rec(1, 1, [1]), 0);
     const csv = h.snapshotCsv({ handles: [1], seconds: 60, names: new Map([[1, 'BMI "260", Accel']]) });
     expect(csv).toContain("device=unknown, android=unknown");
-    expect(csv).toContain('0.000000,"BMI ""260"", Accel",1,1,,,');
+    expect(csv).toContain('0.000000,"BMI ""260"", Accel",1,1,,,,,,');
   });
 
   it("returns only headers when there is no data", () => {
@@ -179,7 +179,7 @@ describe("review fixes", () => {
     const h = createHistory();
     h.push(rec(1, 1, [1, 2, 3, 0.1, 0.2, 0.3]), 0); // uncalibrated: xyz + bias
     const csv = h.snapshotCsv({ handles: [1], seconds: 60, valueCounts: new Map([[1, 3]]) });
-    expect(csv.trim().split("\n")[3]).toBe("0.000000,handle 1,1,1,2,3,");
+    expect(csv.trim().split("\n")[3]).toBe("0.000000,handle 1,1,1,2,3,,,,");
   });
 });
 
@@ -198,5 +198,17 @@ describe("filtered values", () => {
     const h = createHistory();
     h.push(rec(2, 1.0, [1, 2, 3]), 0);
     expect(h.read(2, 60).vf).toEqual([]);
+  });
+});
+
+describe("snapshot filtered columns", () => {
+  it("adds fx,fy,fz for filtered samples, empty for unfiltered ones", () => {
+    const h = createHistory();
+    h.push(rec(1, 100.0, [1, 2, 3]), 0);
+    h.push(rec(1, 100.1, [4, 5, 6], { vf: [3.9, 5.1, 6.0] }), 0);
+    const rows = h.snapshotCsv({ handles: [1], seconds: 60, valueCounts: new Map([[1, 3]]) }).trim().split("\n");
+    expect(rows[2]).toBe("t_s,sensor,handle,x,y,z,w,fx,fy,fz");
+    expect(rows[3]).toBe("0.000000,handle 1,1,1,2,3,,,,");
+    expect(rows[4]).toBe("0.100000,handle 1,1,4,5,6,,3.9,5.1,6");
   });
 });

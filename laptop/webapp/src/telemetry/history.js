@@ -170,7 +170,7 @@ export function createHistory() {
     const lines = [
       "# SensorStream snapshot - display-rate data (<=UI cap per sensor), not the lossless recording",
       `# device=${device?.model ?? "unknown"}, android=${device?.android ?? "unknown"}, exported=${exportedIso}, range_s=${seconds}`,
-      "t_s,sensor,handle,x,y,z,w",
+      "t_s,sensor,handle,x,y,z,w,fx,fy,fz", // fx..fz: laptop filter output (empty if unfiltered)
     ];
     const used = hs.map((h) => [h, rings.get(h)]).filter(([, r]) => r && r.n > 0);
     if (used.length) {
@@ -187,7 +187,8 @@ export function createHistory() {
       for (const { t, h, r, p } of rows) {
         const nv = Math.min(r.nv, valueCounts.get(h) ?? r.nv);
         const vals = [0, 1, 2, 3].map((a) => (a < nv ? csvNum(r.v[a][p]) : ""));
-        lines.push(`${(t - t0).toFixed(6)},${csvField(names.get(h) ?? `handle ${h}`)},${h},${vals.join(",")}`);
+        const fvals = [0, 1, 2].map((ax) => csvNum(r.f[ax][p]));
+        lines.push(`${(t - t0).toFixed(6)},${csvField(names.get(h) ?? `handle ${h}`)},${h},${vals.join(",")},${fvals.join(",")}`);
       }
     }
     return lines.join("\n") + "\n";
