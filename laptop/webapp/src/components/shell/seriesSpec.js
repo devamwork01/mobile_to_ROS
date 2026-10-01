@@ -1,7 +1,25 @@
 export function seriesSpec(kind) {
-  return kind === "orientation"
-    ? { labels: ["qx", "qy", "qz", "qw"], n: 4, mag: false }
-    : { labels: ["X", "Y", "Z"], n: 3, mag: true };
+  if (kind === "orientation") return { labels: ["qx", "qy", "qz", "qw"], n: 4, mag: false };
+  if (kind === "scalar") return { labels: ["value"], n: 1, mag: false };
+  return { labels: ["X", "Y", "Z"], n: 3, mag: true };
+}
+
+// Smallest y span shown for single-value sensors, by unit. Without it a barometer's 0.01 hPa
+// quantization steps (or a light sensor's 1 lx flicker) are stretched to fill the whole plot.
+const MIN_SPAN = { hPa: 1, lx: 10, "°C": 1, "%": 2, cm: 1 };
+export const minSpanFor = (unit) => MIN_SPAN[unit] ?? 0;
+
+// y range for [min, max] of the visible data: at least `minSpan` wide (centred), else the data
+// plus a 5 % margin.
+export function yRange(min, max, minSpan) {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return [0, 1];
+  const span = max - min;
+  if (span < minSpan) {
+    const mid = (min + max) / 2;
+    return [mid - minSpan / 2, mid + minSpan / 2];
+  }
+  const pad = span > 0 ? span * 0.05 : 1;
+  return [min - pad, max + pad];
 }
 
 // Break the line wherever consecutive samples are more than `gapS` apart (a phone outage or a

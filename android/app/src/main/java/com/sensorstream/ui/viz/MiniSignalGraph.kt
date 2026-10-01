@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
+import com.sensorstream.core.GraphScale
 import com.sensorstream.ui.signal.Fmt
 import com.sensorstream.ui.theme.Ss
 import com.sensorstream.ui.theme.SsType
@@ -80,7 +81,7 @@ fun MiniSignalGraph(
     }
     val hasData = lo != Float.POSITIVE_INFINITY
     if (!hasData) { lo = 0f; hi = 1f }
-    if (hi - lo < 1e-3f) { hi += 1f; lo -= 1f }
+    GraphScale.range(lo, hi, unit).let { (l, h) -> lo = l; hi = h }
     val span = hi - lo
     val unitSuffix = if (unit.isNotBlank()) " $unit" else ""
 

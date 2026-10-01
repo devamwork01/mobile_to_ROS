@@ -3,8 +3,6 @@ package com.sensorstream.ui.viz
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -12,13 +10,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CenterFocusStrong
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -26,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -76,37 +71,18 @@ fun Phone3DView(
     showGrid: Boolean = true,
 ) {
     val colors = Ss.colors
-    // Orbitable camera: drag rotates the viewpoint ONLY when rotate-mode is on (the corner toggle),
-    // so the 3D never steals the page scroll — important in landscape where it can fill the width.
-    // Double-tap resets. The phone body still reflects device orientation; only the camera moves.
-    var camYaw by remember { mutableFloatStateOf(0f) }
-    var camPitch by remember { mutableFloatStateOf(Projection.DEFAULT_PITCH) }
-    var rotateEnabled by remember { mutableStateOf(false) }
+    // Fixed camera: the 3D takes no drag gestures, so it never steals the page scroll.
     // Recenter (display-only, mirrors the laptop): the reference pose captured on tap; the phone is
     // then drawn relative to it and the world frame/grid rotate the same way so they stay consistent.
     var refR by remember { mutableStateOf<FloatArray?>(null) }
     val lastR = remember { FloatArray(9).also { Projection.IDENTITY.copyInto(it) } }
     Box(modifier) {
-        val orbit = if (rotateEnabled) {
-            Modifier.pointerInput(Unit) {
-                detectDragGestures { change, drag ->
-                    change.consume()
-                    camYaw += drag.x * 0.01f
-                    camPitch = (camPitch + drag.y * 0.01f).coerceIn(-1.4f, 1.4f)
-                }
-            }
-        } else Modifier
-        // Double-tap always resets to the default view: camera angle AND recenter (taps don't
-        // conflict with page scrolling, so this works whether rotate-mode is on or off).
-        val resetGesture = Modifier.pointerInput(Unit) {
-            detectTapGestures(onDoubleTap = { camYaw = 0f; camPitch = Projection.DEFAULT_PITCH; refR = null })
-        }
-        Canvas(Modifier.fillMaxSize().then(orbit).then(resetGesture)) {
+        Canvas(Modifier.fillMaxSize()) {
         val cx = size.width / 2f
         val cy = size.height / 2f
         val unit = minOf(size.width, size.height) * 0.34f
-        val yaw = camYaw
-        val pitch = camPitch
+        val yaw = 0f
+        val pitch = Projection.DEFAULT_PITCH
         // Render in the SAME space the laptop uses (Rx(-90°) ENU->Y-up) so the on-device phone's
         // orientation matches the dashboard's 3D viz exactly.
         val rAbs = Projection.threeMatrix(rotationVector() ?: floatArrayOf(0f, 0f, 0f))
@@ -258,11 +234,11 @@ fun Phone3DView(
         drawAxisLabel("Z", gp(Vec3(0f, 0f, 1f), glen * 1.42f), colors.axisZ, size = 22f)
         }
 
-        // Recenter toggle (left of the rotate toggle): tap to zero the view on the current pose, tap
-        // again (or double-tap the 3D) to return to absolute orientation.
+        // Recenter toggle (top-end): tap to zero the view on the current pose, tap again to return to
+        // absolute orientation.
         val recentered = refR != null
         Box(
-            Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 52.dp).size(36.dp)
+            Modifier.align(Alignment.TopEnd).padding(8.dp).size(36.dp)
                 .clip(CircleShape).background(if (recentered) colors.accent else colors.surface2)
                 .clickable { refR = if (recentered) null else lastR.copyOf() },
             contentAlignment = Alignment.Center,
@@ -276,27 +252,9 @@ fun Phone3DView(
         }
         if (recentered) {
             Text(
-                "Relative to captured pose · double-tap to reset",
+                "Relative to captured pose · tap the button again to reset",
                 color = colors.faint, fontSize = 10.sp,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp),
-            )
-        }
-
-        // Rotate-mode toggle (top-end). OFF by default so a drag scrolls the page; ON = drag orbits.
-        // This is the fix for the 3D "eating" scroll, especially in landscape.
-        val toggleBg = if (rotateEnabled) colors.accent else colors.surface2
-        val toggleFg = if (rotateEnabled) Color.White else colors.muted
-        Box(
-            Modifier.align(Alignment.TopEnd).padding(8.dp).size(36.dp)
-                .clip(CircleShape).background(toggleBg)
-                .clickable { rotateEnabled = !rotateEnabled },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Filled.Refresh,
-                contentDescription = if (rotateEnabled) "Rotation on" else "Rotation off",
-                tint = toggleFg,
-                modifier = Modifier.size(20.dp),
             )
         }
     }
