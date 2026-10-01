@@ -46,10 +46,10 @@ object TargetValidator {
 
     fun validate(host: String, port: String): String? {
         val h = host.trim()
-        if (h.isEmpty()) return "Enter the laptop's IP address (or use Find Laptop)."
+        if (h.isEmpty()) return "Pick a server under Servers, or enter its IP address."
         val lower = h.lowercase()
         if (lower == "localhost" || h.startsWith("127.") || h == "0.0.0.0" || h == "::1") {
-            return "That address points at the phone itself — use the laptop's LAN IP."
+            return "That address points at the phone itself — use the server's LAN IP."
         }
         val m = IPV4.matchEntire(h)
         if (m != null) {

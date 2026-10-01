@@ -56,7 +56,7 @@ fun FilteredSignalsCard(vm: StreamViewModel, modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             SectionHeader("Filtered Signals")
-            Text("set on the laptop", color = c.faint, fontSize = 11.sp, modifier = Modifier.padding(start = 8.dp))
+            Text("set on the server", color = c.faint, fontSize = 11.sp, modifier = Modifier.padding(start = 8.dp))
         }
         SsCard(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {

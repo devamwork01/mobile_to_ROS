@@ -1,5 +1,6 @@
 package com.sensorstream.vm
 
+import com.sensorstream.core.ServerList
 import com.sensorstream.core.filter.Biquad
 import com.sensorstream.core.filter.FilterConfig
 import com.sensorstream.core.filter.PhoneFilterBank
@@ -63,13 +64,7 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     private val _live = MutableStateFlow<Map<Int, Live>>(emptyMap())
     val live: StateFlow<Map<Int, Live>> = _live.asStateFlow()
 
-    private val _discovering = MutableStateFlow(false)
-    val discovering: StateFlow<Boolean> = _discovering.asStateFlow()
-
-    /** Transient result of the last "Find Laptop" run, shown on the Connection screen. */
     data class Notice(val text: String, val isError: Boolean)
-    private val _discoveryNotice = MutableStateFlow<Notice?>(null)
-    val discoveryNotice: StateFlow<Notice?> = _discoveryNotice.asStateFlow()
 
     /** Why the last Connect/Start was refused (bad address), shown on Home + Connection. */
     private val _connectNotice = MutableStateFlow<Notice?>(null)
@@ -86,13 +81,56 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     val hasSavedTarget: StateFlow<Boolean> = _hasSavedTarget.asStateFlow()
 
     private fun saveTarget() {
-        prefs.edit().putString(KEY_HOST, _sel.value.host).putString(KEY_PORT, _sel.value.port).apply()
+        prefs.edit().putString(KEY_HOST, _sel.value.host).putString(KEY_PORT, _sel.value.port)
+            .putString(KEY_SERVER_NAME, _serverName.value).apply()
         _hasSavedTarget.value = true
     }
 
     private fun saveSelection() {
         val v = _sel.value
         prefs.edit().putString(KEY_SELECTION, SelectionCodec.encode(v.enabled, v.periodByHandle) { catalogTypes[it] }).apply()
+    }
+
+    // --- Servers on the network ----------------------------------------------------------------
+    // Scanned (beacons + mDNS + a ping per server) while a screen showing the list is up.
+    private val serverList = ServerList()
+    private val _servers = MutableStateFlow<List<ServerList.Row>>(emptyList())
+    val servers: StateFlow<List<ServerList.Row>> = _servers.asStateFlow()
+    private var scanRefs = 0
+    private var scanJob: kotlinx.coroutines.Job? = null
+
+    /** "host:port" of the server last connected to (marked and kept at the top of the list). */
+    private val _lastServer = MutableStateFlow(
+        prefs.getString(KEY_LAST_SERVER, null)
+            ?: prefs.getString(KEY_HOST, null)?.let { h -> prefs.getString(KEY_PORT, null)?.let { "$h:$it" } }
+    )
+    /** Name of the selected server, for Home ("Server · <name>"); null when typed by hand. */
+    private val _serverName = MutableStateFlow(prefs.getString(KEY_SERVER_NAME, null))
+    val serverName: StateFlow<String?> = _serverName.asStateFlow()
+
+    fun startServerScan() {
+        if (++scanRefs > 1) return
+        discovery.start(serverList)
+        scanJob = viewModelScope.launch {
+            while (true) {
+                _servers.value = serverList.rows(android.os.SystemClock.elapsedRealtime(), _lastServer.value)
+                delay(500)
+            }
+        }
+    }
+
+    fun stopServerScan() {
+        scanRefs = maxOf(0, scanRefs - 1)
+        if (scanRefs > 0) return
+        scanJob?.cancel(); scanJob = null
+        discovery.stop()
+    }
+
+    fun selectServer(row: ServerList.Row) {
+        _sel.value = _sel.value.copy(host = row.host, port = row.port.toString())
+        _serverName.value = row.name
+        _connectNotice.value = null
+        saveTarget()
     }
 
     // --- Display settings (UI only) ------------------------------------------------------------
@@ -290,10 +328,10 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setHost(h: String) {
-        _sel.value = _sel.value.copy(host = h); _discoveryNotice.value = null; _connectNotice.value = null; saveTarget()
+        _sel.value = _sel.value.copy(host = h); _serverName.value = null; _connectNotice.value = null; saveTarget()
     }
     fun setPort(p: String) {
-        _sel.value = _sel.value.copy(port = p); _discoveryNotice.value = null; _connectNotice.value = null; saveTarget()
+        _sel.value = _sel.value.copy(port = p); _serverName.value = null; _connectNotice.value = null; saveTarget()
     }
 
     fun toggle(handle: Int) {
@@ -341,33 +379,10 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         }
         _connectNotice.value = null
         saveTarget()
+        val k = ServerList.key(_sel.value.host.trim(), _sel.value.port.trim().toInt())
+        _lastServer.value = k
+        prefs.edit().putString(KEY_LAST_SERVER, k).apply()
         StreamingService.start(getApplication(), _sel.value.host.trim(), _sel.value.port.trim().toInt(), selections)
-    }
-
-    fun discover() {
-        if (_discovering.value) return
-        _discovering.value = true
-        _discoveryNotice.value = null
-        discovery.start(Discovery.Listener { host, controlPort ->
-            _sel.value = _sel.value.copy(host = host, port = controlPort.toString())
-            _connectNotice.value = null
-            saveTarget()
-            discovery.stop()
-            _discovering.value = false
-            _discoveryNotice.value = Notice("Found laptop at $host:$controlPort", isError = false)
-        })
-        viewModelScope.launch {
-            delay(8000)
-            if (_discovering.value) {
-                discovery.stop()
-                _discovering.value = false
-                _discoveryNotice.value = Notice(
-                    "No laptop found. Make sure the laptop app is running on the same Wi-Fi, " +
-                        "then try again — or enter the IP manually.",
-                    isError = true,
-                )
-            }
-        }
     }
 
     // --- On-phone recording export ---------------------------------------------------------------
@@ -414,6 +429,8 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         const val KEY_HOST = "target_host"
         const val KEY_PORT = "target_port"
+        const val KEY_SERVER_NAME = "target_name"
+        const val KEY_LAST_SERVER = "last_server"
         const val KEY_SELECTION = "selection_v1"
     }
 

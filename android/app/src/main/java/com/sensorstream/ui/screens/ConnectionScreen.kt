@@ -1,5 +1,12 @@
 package com.sensorstream.ui.screens
 
+import com.sensorstream.ui.components.ServersList
+import com.sensorstream.core.ServerList
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -46,8 +52,14 @@ import com.sensorstream.vm.StreamViewModel
 fun ConnectionScreen(vm: StreamViewModel, nav: AppNav) {
     val state by vm.engineState.collectAsState()
     val sel by vm.sel.collectAsState()
-    val discovering by vm.discovering.collectAsState()
-    val discoveryNotice by vm.discoveryNotice.collectAsState()
+    val servers by vm.servers.collectAsState()
+    val serverName by vm.serverName.collectAsState()
+    var manual by rememberSaveable { mutableStateOf(false) }
+    // Scan the network while this screen is shown.
+    DisposableEffect(Unit) {
+        vm.startServerScan()
+        onDispose { vm.stopServerScan() }
+    }
     val connectNotice by vm.connectNotice.collectAsState()
     val c = Ss.colors
 
@@ -83,8 +95,8 @@ fun ConnectionScreen(vm: StreamViewModel, nav: AppNav) {
                     Text(if (state.connected || state.streaming) "Wi-Fi" else "", color = c.faint, fontSize = 12.sp)
                 }
                 Text(
-                    if (state.connected || state.streaming) "Laptop · ${sel.host}:${sel.port}"
-                    else "Target · ${sel.host}:${sel.port}",
+                    (if (state.connected || state.streaming) "Server · " else "Selected · ") +
+                        (serverName?.let { "$it · " } ?: "") + "${sel.host}:${sel.port}",
                     color = c.muted, fontSize = 13.sp,
                 )
                 if (state.connected || state.streaming) {
@@ -100,54 +112,37 @@ fun ConnectionScreen(vm: StreamViewModel, nav: AppNav) {
             }
         }
 
-        // Target (editable)
-        SectionHeader("Laptop Address")
-        OutlinedTextField(
-            value = sel.host,
-            onValueChange = vm::setHost,
-            enabled = fieldsEnabled,
-            label = { Text("Laptop IP") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            colors = tfColors,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = sel.port,
-            onValueChange = vm::setPort,
-            enabled = fieldsEnabled,
-            label = { Text("Control Port") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            colors = tfColors,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        // Servers found on the network: tap one to choose where the phone connects.
+        SectionHeader("Servers")
+        val selectedKey = runCatching { ServerList.key(sel.host.trim(), sel.port.trim().toInt()) }.getOrNull()
+        ServersList(servers, selectedKey, enabled = fieldsEnabled, onSelect = vm::selectServer)
 
-        // Find laptop automatically
-        OutlinedButton(
-            onClick = { vm.discover() },
-            enabled = fieldsEnabled && !discovering,
-            modifier = Modifier.fillMaxWidth().height(50.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = c.accent),
-        ) {
-            if (discovering) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = c.accent)
-                Spacer(Modifier.size(10.dp))
-                Text("Searching for laptop…")
-            } else {
-                Icon(SsIcons.forKey("connection"), contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(10.dp))
-                Text("Find Laptop Automatically")
-            }
-        }
-
-        // Discovery outcome (success confirmation or "not found" guidance).
-        discoveryNotice?.let { notice ->
-            Text(
-                notice.text,
-                color = if (notice.isError) c.warn else c.ok,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(horizontal = 4.dp),
+        // Manual address, for networks that block discovery.
+        Text(
+            if (manual) "Hide manual address" else "Enter address manually",
+            color = c.accent, fontSize = 13.sp,
+            modifier = Modifier.clickable { manual = !manual }.padding(horizontal = 4.dp, vertical = 2.dp),
+        )
+        if (manual) {
+            OutlinedTextField(
+                value = sel.host,
+                onValueChange = vm::setHost,
+                enabled = fieldsEnabled,
+                label = { Text("Server IP") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                colors = tfColors,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = sel.port,
+                onValueChange = vm::setPort,
+                enabled = fieldsEnabled,
+                label = { Text("Control Port") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                colors = tfColors,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
 

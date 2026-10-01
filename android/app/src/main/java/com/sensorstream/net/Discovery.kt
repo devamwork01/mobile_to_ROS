@@ -4,27 +4,29 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
+import android.os.SystemClock
+import com.sensorstream.core.ServerList
 import org.json.JSONObject
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
- * Finds the laptop on the LAN and returns the first hit (host + control port),
- * via two independent paths so a filtered network still works:
+ * Scans the LAN for SensorStream servers while started and records them in a [ServerList]:
  *   - mDNS `_sensorstream._tcp` (NsdManager)
- *   - a UDP broadcast beacon on [beaconPort] (the laptop broadcasts every second)
+ *   - the UDP broadcast beacon on [beaconPort] (each server broadcasts every second, with its
+ *     name / kind / OS since beacon v2)
+ *   - a UDP ping to each server once a second (answered on its control port number), timing the
+ *     round trip so the list can show the link quality to every server.
  *
- * A Wi-Fi MulticastLock is held while listening (needed for multicast/broadcast
- * reception on many chipsets). Call [stop] when done.
+ * A Wi-Fi MulticastLock is held while scanning (needed for multicast/broadcast reception on many
+ * chipsets). Call [stop] when the list is no longer shown.
  */
 class Discovery(context: Context, private val beaconPort: Int = 5006) {
-
-    fun interface Listener {
-        fun onFound(host: String, controlPort: Int)
-    }
 
     private val appCtx = context.applicationContext
     private val nsd = appCtx.getSystemService(Context.NSD_SERVICE) as NsdManager
@@ -34,38 +36,30 @@ class Discovery(context: Context, private val beaconPort: Int = 5006) {
     private var multicastLock: WifiManager.MulticastLock? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
 
-    @Volatile private var listener: Listener? = null
+    @Volatile private var servers: ServerList? = null
 
-    fun start(listener: Listener) {
+    fun start(list: ServerList) {
         if (!active.compareAndSet(false, true)) return
-        this.listener = listener
+        servers = list
         multicastLock = wifi.createMulticastLock("sensorstream-disc").apply {
             setReferenceCounted(true)
             runCatching { acquire() }
         }
         startNsd()
         startBeaconListener()
+        startProber()
     }
 
     fun stop() {
         if (!active.compareAndSet(true, false)) return
-        listener = null
         discoveryListener?.let { runCatching { nsd.stopServiceDiscovery(it) } }
         discoveryListener = null
         multicastLock?.let { runCatching { it.release() } }
         multicastLock = null
-        // the beacon thread exits on its own via active flag + socket timeout
+        // the beacon and ping threads exit on their own via the active flag + socket timeouts
     }
 
-    private fun emit(host: String, port: Int) {
-        val l = listener
-        if (host.isBlank()) return
-        // Ignore loopback / non-routable results (e.g. a stale mDNS record resolving to 127.0.0.1):
-        // the phone can't reach the laptop over loopback. The UDP beacon supplies the real LAN IP.
-        val lower = host.lowercase()
-        if (lower == "localhost" || host.startsWith("127.") || host == "::1" || host == "0.0.0.0") return
-        if (port in 1..65535 && l != null && active.get()) l.onFound(host, port)
-    }
+    private fun now() = SystemClock.elapsedRealtime()
 
     private fun startNsd() {
         val dl = object : NsdManager.DiscoveryListener {
@@ -88,10 +82,11 @@ class Discovery(context: Context, private val beaconPort: Int = 5006) {
             nsd.resolveService(info, object : NsdManager.ResolveListener {
                 override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {}
                 override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                    if (!active.get()) return
                     val host = serviceInfo.host?.hostAddress ?: return
                     val txt = serviceInfo.attributes?.get("control_port")
                     val port = txt?.let { String(it).trim().toIntOrNull() } ?: serviceInfo.port
-                    emit(host, port)
+                    servers?.onMdns(host, port, serviceInfo.serviceName, now())
                 }
             })
         }
@@ -116,13 +111,56 @@ class Discovery(context: Context, private val beaconPort: Int = 5006) {
                         if (!active.get()) break else continue // socket timeout -> re-check active
                     }
                     val msg = runCatching { JSONObject(String(pkt.data, 0, pkt.length, Charsets.UTF_8)) }.getOrNull() ?: continue
-                    if (msg.optString("service") == "sensorstream") {
-                        val host = pkt.address?.hostAddress ?: continue
-                        emit(host, msg.optInt("control_port", 0))
-                    }
+                    val a = ServerList.announceOf(msg) ?: continue
+                    val host = pkt.address?.hostAddress ?: continue
+                    servers?.onBeacon(host, msg.optInt("control_port", 0), a, now())
                 }
             } catch (_: Exception) {
                 // port busy / no network — mDNS path still active
+            } finally {
+                runCatching { sock?.close() }
+            }
+        }
+    }
+
+    /** One socket: send a ping to every known server each second, match replies by sequence. */
+    private fun startProber() {
+        thread(isDaemon = true, name = "disc-ping") {
+            var sock: DatagramSocket? = null
+            val sent = ConcurrentHashMap<Int, Triple<String, Int, Long>>() // seq -> (host, port, t0)
+            try {
+                sock = DatagramSocket().apply { soTimeout = 250 }
+                val buf = ByteArray(512)
+                var seq = 0
+                var nextSend = 0L
+                while (active.get()) {
+                    val t = now()
+                    if (t >= nextSend) {
+                        nextSend = t + 1000
+                        sent.entries.removeAll { t - it.value.third > 3000 } // unanswered
+                        for (target in servers?.probeTargets(t).orEmpty()) {
+                            val s = ++seq
+                            val payload = JSONObject().put("service", "sensorstream").put("probe", s).toString().toByteArray()
+                            runCatching {
+                                val addr = InetAddress.getByName(target.host)
+                                sent[s] = Triple(target.host, target.port, now())
+                                sock.send(DatagramPacket(payload, payload.size, addr, target.probePort))
+                            }
+                        }
+                    }
+                    val pkt = DatagramPacket(buf, buf.size)
+                    try {
+                        sock.receive(pkt)
+                    } catch (_: Exception) {
+                        continue // timeout -> maybe time to send again
+                    }
+                    val m = runCatching { JSONObject(String(pkt.data, 0, pkt.length, Charsets.UTF_8)) }.getOrNull() ?: continue
+                    val s = m.optInt("probe", -1)
+                    val (host, port, t0) = sent.remove(s) ?: continue
+                    servers?.onProbeReply(host, port, (now() - t0).toFloat())
+                }
+            } catch (_: Exception) {
+                // no network: the list just shows bars from beacons
             } finally {
                 runCatching { sock?.close() }
             }
