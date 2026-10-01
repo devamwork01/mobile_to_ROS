@@ -34,6 +34,15 @@ def run(coro):
     return asyncio.run(coro)
 
 
+async def _tick_and_drain(m):
+    await m.tick()
+    await m.drain()
+
+
+def tick(m):
+    asyncio.run(_tick_and_drain(m))
+
+
 def test_refuses_without_stream_or_while_recording(tmp_path):
     m, rec, *_ = make(tmp_path, streaming=False)
     assert m.start("still", 30, [4])[0] is False
@@ -53,10 +62,10 @@ def test_full_lifecycle_complete(tmp_path):
         m.on_datagram(dg(i))
         rec.on_datagram(dg(i), i)
     clk.t = 30.0
-    run(m.tick())                     # -> settling (keeps recording for backfill)
+    tick(m)                     # -> settling (keeps recording for backfill)
     assert rec.is_recording and sent[-1]["phase"] == "settling"
     clk.t = 33.1
-    run(m.tick())                     # -> stop + analyse + done
+    tick(m)                     # -> stop + analyse + done
     assert not rec.is_recording and not m.active
     assert sent[-1]["phase"] == "done" and sent[-1]["complete"] is True
     ssbin, kw = calls[0]
@@ -69,12 +78,12 @@ def test_disconnect_marks_incomplete_and_stop_early(tmp_path):
     m.start("capture", 60, [4])
     m.on_datagram(dg(0))
     clk.t = 5.0
-    run(m.tick())                     # no data for 5 s -> incomplete
+    tick(m)                     # no data for 5 s -> incomplete
     clk.t = 6.0
     m.stop_early()
-    run(m.tick())
+    tick(m)
     clk.t = 9.5
-    run(m.tick())
+    tick(m)
     assert sent[-1]["phase"] == "done" and sent[-1]["complete"] is False
     assert calls[0][1]["complete"] is False and calls[0][1]["requested_s"] == 60
 
@@ -87,9 +96,9 @@ def test_analysis_failure_reports_error(tmp_path):
     m.start("still", 1, [4])
     m.on_datagram(dg(0))
     clk.t = 1.0
-    run(m.tick())
+    tick(m)
     clk.t = 4.5
-    run(m.tick())
+    tick(m)
     assert sent[-1]["phase"] == "error" and "bad file" in sent[-1]["message"] and not m.active
 
 
@@ -98,3 +107,48 @@ def test_status_for_reconnecting_browser(tmp_path):
     assert m.status() is None
     m.start("still", 30, [4])
     assert m.status()["phase"] == "running"
+
+
+def test_tick_does_not_wait_for_analysis(tmp_path):
+    import threading, time
+    gate = threading.Event()
+
+    def slow(ssbin, **kw):
+        gate.wait(5)
+        return {"id": "x"}
+
+    m, rec, clk, sent, _ = make(tmp_path, analyse=slow)
+    m.start("still", 1, [4])
+    m.on_datagram(dg(0))
+    clk.t = 1.0
+    tick(m)
+    clk.t = 4.5
+
+    async def go():
+        t0 = time.perf_counter()
+        await m.tick()                         # schedules the analysis, must not block on it
+        took = time.perf_counter() - t0
+        assert sent[-1]["phase"] == "analysing" and took < 0.5
+        await m.tick()                         # re-entrant while analysing: no second analysis
+        gate.set()
+        await m.drain()
+
+    asyncio.run(go())
+    assert sent[-1]["phase"] == "done" and not m.active
+
+
+def test_recorder_failure_clears_the_run(tmp_path):
+    m, rec, clk, sent, _ = make(tmp_path)
+    m.start("still", 1, [4])
+    m.on_datagram(dg(0))
+    clk.t = 1.0
+    tick(m)
+
+    def broken_stop():
+        raise OSError("disk full")
+
+    rec.stop = broken_stop
+    clk.t = 4.5
+    tick(m)
+    assert sent[-1]["phase"] == "error" and "disk full" in sent[-1]["message"]
+    assert not m.active

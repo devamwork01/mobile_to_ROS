@@ -35,6 +35,7 @@ class TestRunManager:
         self._clock = clock
         self._analyse = analyse
         self._run: Optional[dict] = None
+        self._finish_task: Optional[asyncio.Task] = None
 
     @property
     def active(self) -> bool:
@@ -100,16 +101,27 @@ class TestRunManager:
             self._emit()
             return
         if r["phase"] == "settling" and now >= r["settle_until"]:
-            self._rec.stop()
+            # Analysis can take seconds for long runs: run it as its own task so the caller's
+            # loop (live insights broadcasting) never waits on it. tick() is a no-op meanwhile.
             r["phase"] = "analysing"
             self._emit()
-            try:
-                await asyncio.to_thread(
-                    self._analyse, r["base"] + ".ssbin", preset=r["preset"], start_ns=r["start_ns"],
-                    seconds=r["seconds"], complete=r["complete"], requested_s=r["requested"])
-                r["phase"] = "done"
-                self._emit()
-            except Exception as exc:  # the recording is kept; the user can Analyse it later
-                r["phase"] = "error"
-                self._emit(message=str(exc))
-            self._run = None
+            self._finish_task = asyncio.create_task(self._finish(r))
+
+    async def _finish(self, r: dict) -> None:
+        try:
+            self._rec.stop()
+            await asyncio.to_thread(
+                self._analyse, r["base"] + ".ssbin", preset=r["preset"], start_ns=r["start_ns"],
+                seconds=r["seconds"], complete=r["complete"], requested_s=r["requested"])
+            r["phase"] = "done"
+            self._emit()
+        except Exception as exc:  # the recording (if any) is kept; the user can Analyse it later
+            r["phase"] = "error"
+            self._emit(message=str(exc))
+        finally:
+            self._run = None  # never leave Record / Test run locked
+
+    async def drain(self) -> None:
+        """Wait for a scheduled analysis to finish (tests, shutdown)."""
+        if self._finish_task is not None:
+            await self._finish_task

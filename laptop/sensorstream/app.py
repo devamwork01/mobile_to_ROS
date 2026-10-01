@@ -93,6 +93,38 @@ async def _selftest_generator(udp_port: int, hz: float) -> None:
         sock.close()
 
 
+async def insights_step(insights, testruns, broadcast) -> None:
+    """One pass of the 1 Hz insights loop. Each part is guarded on its own: an error in the live
+    statistics must not stop the test-run state machine (or vice versa) - a dead loop would leave
+    a run stuck and Record / Test run disabled until the server restarts."""
+    try:
+        for m in insights.tick():
+            broadcast(m)
+    except Exception as exc:  # logged; the loop continues
+        print(f"[insights] live stats failed: {exc!r}")
+    try:
+        await testruns.tick()
+    except Exception as exc:
+        print(f"[insights] test run tick failed: {exc!r}")
+
+
+class AnalyseQueue:
+    """Recording ids with an analysis in flight, so repeated clicks (or several browsers) on a
+    long recording don't start the same multi-second analysis more than once."""
+
+    def __init__(self) -> None:
+        self._busy: set = set()
+
+    def claim(self, rid: str) -> bool:
+        if rid in self._busy:
+            return False
+        self._busy.add(rid)
+        return True
+
+    def release(self, rid: str) -> None:
+        self._busy.discard(rid)
+
+
 def make_api_get(log_dir: str):
     """Read-only HTTP API: recordings (ADR-001) and Insights reports. Filesystem-backed."""
 
@@ -232,10 +264,12 @@ async def run(args: argparse.Namespace) -> None:
             return
         elif cmd == "analyse":
             rid = str(msg.get("id", ""))
-            if reports.valid_id(rid):
+            if reports.valid_id(rid) and analyses.claim(rid):
                 asyncio.get_running_loop().create_task(_analyse(rid))
             return
         dash.broadcast({"kind": "recording", "active": recorder.is_recording, "rows": recorder.rows})
+
+    analyses = AnalyseQueue()
 
     async def _analyse(rid: str) -> None:
         path = os.path.join(args.log_dir, rid + ".ssbin")
@@ -244,6 +278,8 @@ async def run(args: argparse.Namespace) -> None:
             dash.broadcast({"kind": "report_ready", "id": rid})
         except Exception as exc:  # unreadable/missing recording: tell the browser, keep serving
             dash.broadcast({"kind": "report_error", "id": rid, "message": str(exc)})
+        finally:
+            analyses.release(rid)
 
     dash.on_ui_command = ui_command
 
@@ -353,9 +389,7 @@ async def run(args: argparse.Namespace) -> None:
     async def insights_task() -> None:
         while True:
             await asyncio.sleep(1.0)
-            for m in insights.tick():
-                dash.broadcast(m)
-            await testruns.tick()
+            await insights_step(insights, testruns, dash.broadcast)
 
     tasks = [asyncio.create_task(stats_task()), asyncio.create_task(reconcile_task()),
              asyncio.create_task(insights_task())]
