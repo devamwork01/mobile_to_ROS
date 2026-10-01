@@ -74,7 +74,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             onDispose { vm.stopFilterTap() }
         }
     }
-    val filteredNow = if (isFiltered) traces[handle]?.points?.lastOrNull()?.filtered else null
+    val filteredPts = if (isFiltered) traces[handle]?.points else null
 
     DisposableEffect(handle) {
         vm.startPreview(handle)
@@ -220,7 +220,6 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             val gColors = if (graphComponents == 1) listOf(c.accent) else axisColors
             val gLabels = if (graphComponents == 1) listOf(sig.componentLabels.firstOrNull() ?: "value") else sig.componentLabels
             val gValues = if (graphComponents == 1 && values != null) floatArrayOf(values[0]) else values
-            val gFiltered = if (graphComponents == 1 && filteredNow != null) floatArrayOf(filteredNow[0]) else filteredNow
             SsCard(Modifier.fillMaxWidth()) {
                 MiniSignalGraph(
                     values = gValues,
@@ -229,7 +228,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
                     unit = sig.unit,
                     windowMs = windowSec * 1000L,
                     modifier = Modifier.fillMaxWidth().height(190.dp),
-                    filtered = gFiltered,
+                    filtered = filteredPts,
                 )
             }
         }

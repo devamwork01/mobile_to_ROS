@@ -24,6 +24,7 @@ class FilterTap(private val bank: PhoneFilterBank) {
     val traces: StateFlow<Map<Int, FilterTrace>> = _traces.asStateFlow()
     @Volatile var handles: Set<Int> = emptySet()
         set(value) {
+            (field - value).forEach { bank.reset(it) }  // re-prime when the sensor is tapped again
             field = value
             synchronized(buffers) { buffers.keys.retainAll(value) }
             publish()

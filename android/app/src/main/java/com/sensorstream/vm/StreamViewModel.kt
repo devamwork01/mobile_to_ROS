@@ -2,9 +2,7 @@ package com.sensorstream.vm
 
 import com.sensorstream.core.filter.Biquad
 import com.sensorstream.core.filter.FilterConfig
-import com.sensorstream.core.filter.FilterConfigCodec
 import com.sensorstream.core.filter.PhoneFilterBank
-import org.json.JSONObject
 import android.app.Application
 import android.content.Context
 import android.hardware.Sensor
@@ -212,8 +210,7 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     private val filterTap = FilterTap(filterBank)
     val filterTraces: StateFlow<Map<Int, FilterTrace>> = filterTap.traces
     private val keyByHandle: Map<Int, String> = catalog.associate { it.handle to "${it.type}:${it.name}" }
-    private val _filterConfigs = MutableStateFlow(FilterConfigCodec.decode(prefs.getString(KEY_FILTERS, null)))
-    val filterConfigs: StateFlow<Map<String, FilterConfig>> = _filterConfigs.asStateFlow()
+    val filterConfigs: StateFlow<Map<String, FilterConfig>> = engine.filterSettings.configs
 
     data class FilteredSensor(val handle: Int, val key: String, val info: SensorInfo, val config: FilterConfig, val enabled: Boolean)
 
@@ -222,7 +219,7 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     val filteredSensors: StateFlow<List<FilteredSensor>> = _filteredSensors.asStateFlow()
 
     private fun recomputeFiltered() {
-        val cfgs = _filterConfigs.value
+        val cfgs = filterConfigs.value
         val enabled = _sel.value.enabled
         _filteredSensors.value = catalog.mapNotNull { info ->
             val key = keyByHandle[info.handle] ?: return@mapNotNull null
@@ -231,15 +228,6 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
             FilteredSensor(info.handle, key, info, cfg, info.handle in enabled)
         }
         if (tapRefs > 0) applyTap()
-    }
-
-    private fun applyFilterMessage(msg: JSONObject) {
-        val configs = msg.optJSONObject("configs") ?: return
-        val m = FilterConfigCodec.parseConfigs(configs)
-        filterBank.setConfigs(m)
-        _filterConfigs.value = m
-        prefs.edit().putString(KEY_FILTERS, FilterConfigCodec.encode(m)).apply()
-        recomputeFiltered()
     }
 
     private var tapRefs = 0
@@ -279,11 +267,11 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
             periodByHandle = defaultPeriods + (saved?.periods ?: emptyMap()),
         )
 
-        filterBank.setConfigs(_filterConfigs.value)
-        recomputeFiltered()
-        // Settings arrive on the network thread; apply them on the main thread (preview
-        // registration is main-thread state).
-        engine.onFilters = { msg -> viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) { applyFilterMessage(msg) } }
+        // Settings arrive on the network thread (the engine persists them); apply them here on the
+        // main thread, where preview registration lives. The first value is applied immediately.
+        viewModelScope.launch {
+            filterConfigs.collect { filterBank.setConfigs(it); recomputeFiltered() }
+        }
         viewModelScope.launch { _sel.collect { recomputeFiltered() } }
 
         viewModelScope.launch {
@@ -427,12 +415,10 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         const val KEY_HOST = "target_host"
         const val KEY_PORT = "target_port"
         const val KEY_SELECTION = "selection_v1"
-        const val KEY_FILTERS = "filters_v1"
     }
 
     // Streaming is owned by StreamingService (survives recreation); only stop discovery here.
     override fun onCleared() {
-        engine.onFilters = null
         discovery.stop()
         previewListeners.values.forEach { sensorManager.unregisterListener(it) }
         previewListeners.clear()

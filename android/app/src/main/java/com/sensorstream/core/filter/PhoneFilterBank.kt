@@ -24,6 +24,11 @@ class PhoneFilterBank {
         chains.clear(); drift.clear(); statuses.clear()
     }
 
+    /** Drop [handle]'s filter state (kept: its rate) so it re-primes when samples resume. */
+    @Synchronized fun reset(handle: Int) {
+        chains.remove(handle); drift.remove(handle); statuses.remove(handle)
+    }
+
     @Synchronized fun configFor(key: String): FilterConfig? = configs[key]
     @Synchronized fun status(handle: Int): FilterStatus? = statuses[handle]
     @Synchronized fun fs(handle: Int): Double? = rates[handle]?.fs()

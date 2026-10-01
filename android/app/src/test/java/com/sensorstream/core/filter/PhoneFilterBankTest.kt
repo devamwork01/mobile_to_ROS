@@ -48,4 +48,18 @@ class PhoneFilterBankTest {
         assertNull(feed(b, 10, 100.0, t0 = 4_000_000_000L))
         assertNull(b.status(3))
     }
+
+    @Test fun resetRePrimesWhenTheTapResumes() {
+        // The card was left with gravity on one axis and reopened with it on another: the filter
+        // must restart from the new value, not ring from the old steady state.
+        val b = PhoneFilterBank()
+        b.setConfigs(mapOf("1:Acc" to lp))
+        var t = 1_000_000_000L
+        repeat(300) { b.process(3, "1:Acc", 1, t, floatArrayOf(0f, 0f, 9.8f)); t += 10_000_000L }
+        b.reset(3)
+        val out = b.process(3, "1:Acc", 1, t, floatArrayOf(9.8f, 0f, 0f))!!
+        assertEquals(9.8f, out[0], 1e-4f)
+        assertEquals(0f, out[2], 1e-4f)
+        assertEquals(FilterStatus.Running, b.status(3))  // rate kept: no new "measuring" wait
+    }
 }
