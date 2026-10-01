@@ -182,3 +182,21 @@ describe("review fixes", () => {
     expect(csv.trim().split("\n")[3]).toBe("0.000000,handle 1,1,1,2,3,");
   });
 });
+
+describe("filtered values", () => {
+  it("stores vf alongside v and reads it back for the same window", () => {
+    const h = createHistory();
+    h.push(rec(1, 1.0, [1, 2, 3]), 0);
+    h.push(rec(1, 1.1, [4, 5, 6], { vf: [0.4, 0.5, 0.6] }), 0);
+    const { v, vf } = h.read(1, 60);
+    expect(Array.from(v[0])).toEqual([1, 4]);
+    expect(vf.length).toBe(3);
+    expect(Number.isNaN(vf[0][0])).toBe(true);
+    expect(vf[2][1]).toBe(0.6);
+  });
+  it("returns no vf arrays when nothing in the window was filtered", () => {
+    const h = createHistory();
+    h.push(rec(2, 1.0, [1, 2, 3]), 0);
+    expect(h.read(2, 60).vf).toEqual([]);
+  });
+});
