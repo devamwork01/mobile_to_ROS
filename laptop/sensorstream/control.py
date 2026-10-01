@@ -168,6 +168,17 @@ class ControlServer:
         await _send(s.ws, {"type": p.MSG_CONFIGURE, **config})
         return True
 
+    async def send_filters(self, configs: dict) -> int:
+        """Push the laptop's filter settings to every connected phone (it filters its own preview)."""
+        n = 0
+        for s in list(self._sessions.values()):
+            try:
+                await _send(s.ws, {"type": "filters", "configs": configs})
+                n += 1
+            except Exception:
+                continue  # a phone mid-disconnect; it gets the settings again on its next hello
+        return n
+
     async def send_resend(self, device_id: int, handle: int, from_seq: int, to_seq: int) -> bool:
         """Ask the phone to resend a missing seq range from its on-phone recording (backfill)."""
         s = self._sessions.get(device_id)

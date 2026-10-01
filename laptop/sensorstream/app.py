@@ -94,7 +94,7 @@ async def _selftest_generator(udp_port: int, hz: float) -> None:
         sock.close()
 
 
-def handle_filter_command(msg: dict, bank, insights, broadcast) -> bool:
+def handle_filter_command(msg: dict, bank, insights, broadcast, on_change=None) -> bool:
     """filter_set / filter_clear / filter_suggest from the dashboard. Returns False for other commands."""
     cmd = msg.get("cmd")
     key = str(msg.get("key") or "")
@@ -108,10 +108,14 @@ def handle_filter_command(msg: dict, bank, insights, broadcast) -> bool:
         # running: a refused change leaves the previous filter (if any) in place
         broadcast(bank.snapshot() if ok else {"kind": "filter_error", "key": key, "message": why,
                                                "running": key in bank.configs})
+        if ok and on_change:
+            on_change()  # e.g. push the new settings to the phone
         return True
     if cmd == "filter_clear":
         bank.clear(key)
         broadcast(bank.snapshot())
+        if on_change:
+            on_change()
         return True
     if cmd == "filter_suggest":
         src = insights.suggest(handle) if handle is not None else None
@@ -249,6 +253,7 @@ async def run(args: argparse.Namespace) -> None:
         if kind == "phone_connected":
             reconciler.set_device_client(ev["device_id"], ev.get("client_id", ""))
             filterbank.set_catalog(ev.get("sensors") or [])
+            push_filters()  # the phone filters its own preview with the laptop's settings
         elif kind == "backfill":
             reconciler.on_backfill(ev["device_id"], ev["handle"], ev["frames"])
             return   # raw frames are not browser-bound
@@ -258,6 +263,9 @@ async def run(args: argparse.Namespace) -> None:
         dash.broadcast(ev)
 
     control = ControlServer(udp_port, on_event=on_control_event)
+
+    def push_filters() -> None:
+        asyncio.get_running_loop().create_task(control.send_filters(filterbank.configs))
     dash.control_handler = control.handle
 
     def record_meta() -> Optional[dict]:
@@ -275,7 +283,7 @@ async def run(args: argparse.Namespace) -> None:
     rec_base = recorder.start(args.log_dir, record_meta()) if args.record else None
 
     def ui_command(msg: dict) -> None:
-        if handle_filter_command(msg, filterbank, insights, dash.broadcast):
+        if handle_filter_command(msg, filterbank, insights, dash.broadcast, push_filters):
             return
         cmd = msg.get("cmd")
         if cmd == "record_start" and not recorder.is_recording and not testruns.active:

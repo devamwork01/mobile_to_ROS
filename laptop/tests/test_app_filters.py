@@ -49,3 +49,13 @@ def test_errors_say_whether_a_filter_is_still_running():
     assert sent[-1]["kind"] == "filter_error" and sent[-1]["running"] is True    # the previous filter stays
     handle_filter_command({"cmd": "filter_set", "key": "4:G", "handle": 4, "config": {"lowpass": 5}}, bank, FakeInsights(None), sent.append)
     assert sent[-1]["running"] is False
+
+
+def test_on_change_fires_only_after_successful_changes():
+    calls, bank = [], FilterBank()
+    on_change = lambda: calls.append(1)
+    handle_filter_command({"cmd": "filter_set", "key": "1:Acc", "handle": 3, "config": LP}, bank, FakeInsights(None), [].append, on_change)
+    handle_filter_command({"cmd": "filter_set", "key": "1:Acc", "handle": 3, "config": {"lowpass": 5}}, bank, FakeInsights(None), [].append, on_change)
+    handle_filter_command({"cmd": "filter_clear", "key": "1:Acc"}, bank, FakeInsights(None), [].append, on_change)
+    handle_filter_command({"cmd": "filter_suggest", "key": "1:Acc", "handle": 3}, bank, FakeInsights(None), [].append, on_change)
+    assert calls == [1, 1]
