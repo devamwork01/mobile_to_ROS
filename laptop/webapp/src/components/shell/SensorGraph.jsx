@@ -6,7 +6,7 @@ import { AXIS } from "../../telemetry/signals.js";
 import { frameIntervalMs, report } from "../../lib/renderBudget.js";
 import { useThemeStamp } from "../../lib/theme.js";
 
-import { seriesSpec, withGaps } from "./seriesSpec.js";
+import { seriesSpec, withGaps, yRange } from "./seriesSpec.js";
 
 const COLORS = [AXIS.X, AXIS.Y, AXIS.Z, "#b57edc"];
 // Frozen end time per handle while paused. Module-level so it survives the remount that
@@ -30,7 +30,10 @@ const token = (css, name) => `rgb(${css.getPropertyValue(name).trim().split(/\s+
 // fade(): the raw trace sits behind the filtered one when a filter is active.
 const fade = (hex) => `${hex}59`;
 
-export default function SensorGraph({ handle, kind, window: win, paused, show, filtered = false, trace = "both" }) {
+// minSpan: smallest y span (single-value sensors; 0 = auto). stepped: on-change sensors hold their
+// value until the next report, so draw steps, never break the line on a quiet spell, and read the
+// whole history so the value held from before the window still shows.
+export default function SensorGraph({ handle, kind, window: win, paused, show, filtered = false, trace = "both", minSpan = 0, stepped = false }) {
   const host = useRef(null);
   const uRef = useRef(null);
   const st = useRef({ dirty: true, force: true, win, paused, show, filtered });
@@ -52,7 +55,12 @@ export default function SensorGraph({ handle, kind, window: win, paused, show, f
       font: "10px ui-monospace, Consolas, monospace",
     };
     const series = [{}];
-    spec.labels.forEach((l, i) => series.push({ label: l, stroke: filtered ? fade(COLORS[i]) : COLORS[i], width: filtered ? 1.1 : 1.4, points: { show: false } }));
+    const paths = stepped ? uPlot.paths.stepped({ align: 1 }) : undefined;
+    const c0 = kind === "scalar" ? token(css, "--accent") : null;
+    spec.labels.forEach((l, i) => {
+      const col = c0 || COLORS[i];
+      series.push({ label: l, stroke: filtered ? fade(col) : col, width: filtered ? 1.1 : 1.6, points: { show: false }, paths });
+    });
     if (spec.mag) series.push({ label: "|v|", stroke: token(css, "--fg"), width: 1.2, dash: [4, 3], points: { show: false }, show: false });
     if (filtered) spec.labels.forEach((l, i) => series.push({ label: `f${l}`, stroke: COLORS[i], width: 1.8, points: { show: false } }));
     const size = () => ({ width: Math.max(el.clientWidth, 100), height: Math.max(el.clientHeight, 80) });
@@ -63,7 +71,10 @@ export default function SensorGraph({ handle, kind, window: win, paused, show, f
         legend: { show: false },
         cursor: { show: true, points: { size: 5 } },
         padding: [8, 10, 0, 4],
-        scales: { x: { time: false, range: () => [-st.current.win, 0] } },
+        scales: {
+          x: { time: false, range: () => [-st.current.win, 0] },
+          ...(minSpan > 0 ? { y: { range: (_, mn, mx) => yRange(mn, mx, minSpan) } } : {}),
+        },
         axes: [{ ...axis, values: (_, vals) => vals.map((x) => `${x.toFixed(0)}s`) }, { ...axis, size: 50 }],
       },
       [[], ...series.slice(1).map(() => [])],
@@ -114,7 +125,7 @@ export default function SensorGraph({ handle, kind, window: win, paused, show, f
         }
         until = pausedAt.get(handle);
       } else pausedAt.delete(handle);
-      const { t, v, vf } = history.read(handle, s.win, { until, into });
+      const { t, v, vf } = history.read(handle, stepped ? 60 : s.win, { until, into });
       const data = [t];
       for (let i = 0; i < spec.n; i++) data.push(v[i] || new Array(t.length).fill(null));
       if (spec.mag) {
@@ -123,7 +134,7 @@ export default function SensorGraph({ handle, kind, window: win, paused, show, f
         data.push(m); // hidden series: contents unused, no per-frame math
       }
       if (filtered) for (let i = 0; i < spec.n; i++) data.push(vf[i] || new Array(t.length).fill(null));
-      u.setData(withGaps(data, gapThreshold(t)));
+      u.setData(stepped ? data : withGaps(data, gapThreshold(t)));
       report("plot");
     };
     raf = requestAnimationFrame(tick);
@@ -135,7 +146,7 @@ export default function SensorGraph({ handle, kind, window: win, paused, show, f
       u.destroy();
       uRef.current = null;
     };
-  }, [handle, kind, themeStamp, filtered]);
+  }, [handle, kind, themeStamp, filtered, minSpan, stepped]);
 
   // Window / pause changes: redraw at the next frame slot.
   useEffect(() => {
