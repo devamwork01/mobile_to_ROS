@@ -1,3 +1,4 @@
+import pytest
 import json
 
 from sensorstream import protocol as p
@@ -95,3 +96,29 @@ def test_a_single_stream_pause_does_not_disturb_the_rate():
     run(b, 3, 1, 300, fs=100.0)
     run(b, 3, 1, 100, fs=100.0, start=300, t0=1_000_000_000 + 2_000_000_000)  # 2 s pause, then 100 Hz
     assert abs(b.fs(3) - 100.0) < 2
+
+
+def test_timestamp_jitter_does_not_rebuild_the_filter():
+    # Browser check found the filtered spectrum 25-45 dB ABOVE raw: jittery timestamps (~3 ms on
+    # 10 ms) pushed the rate estimate across the 5 % threshold, rebuilding (and zeroing) the chain.
+    import numpy as np
+    rng = np.random.default_rng(0)
+    b = FilterBank()
+    b.set_catalog([{"handle": 1, "type": 1, "name": "Acc"}])
+    b.set("1:Acc", {"lowpass": {"hz": 3.0, "order": 4}, "notches": []})
+    t, chains = 1_000_000_000, set()
+    for i in range(6000):
+        t += int(max(1e6, rng.normal(10e6, 2.8e6)))
+        b.process(p.Datagram(device_id=1, records=[p.Record(1, 1, i, t, 3, [9.0, 0.0, 1.0])]))
+        if 1 in b._chains:
+            chains.add(id(b._chains[1]))
+    assert len(chains) == 1
+
+
+def test_a_new_chain_starts_in_steady_state_no_step():
+    b = FilterBank()
+    b.set_catalog([{"handle": 3, "type": 1, "name": "Acc"}])
+    b.set("1:Acc", {"lowpass": {"hz": 3.0, "order": 4}, "notches": [{"hz": 10.0, "q": 5.0}]})
+    out = run(b, 3, 1, 300)  # constant input (1, 2, 3)
+    first = min(k[1] for k in out)
+    assert out[(3, first)] == pytest.approx([1.0, 2.0, 3.0], abs=1e-9)

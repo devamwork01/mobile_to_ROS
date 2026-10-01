@@ -97,6 +97,16 @@ class FilterChain:
         self.n_axes = int(n_axes)
         self._sec = sections(config, fs)
         self._z = [[[0.0, 0.0] for _ in self._sec] for _ in range(self.n_axes)]
+        self._primed = [False] * self.n_axes
+
+    def _prime(self, a: int, x: float) -> None:
+        """Start axis `a` in steady state for input x, as if it had been x forever. A zeroed state
+        would turn the first sample (e.g. 9.8 m/s^2 of gravity) into a step that rings broadband."""
+        for i, (b0, b1, b2, a1, a2) in enumerate(self._sec):
+            y = x * (b0 + b1 + b2) / (1.0 + a1 + a2)
+            z2 = b2 * x - a2 * y
+            self._z[a][i] = [b1 * x - a1 * y + z2, z2]
+            x = y
 
     def process(self, values) -> List[float]:
         out = []
@@ -105,6 +115,9 @@ class FilterChain:
             if x is None or not math.isfinite(x):
                 out.append(float("nan"))  # a bad sample must not poison the state
                 continue
+            if not self._primed[a]:
+                self._prime(a, x)
+                self._primed[a] = True
             z = self._z[a]
             for i, (b0, b1, b2, a1, a2) in enumerate(self._sec):
                 zi = z[i]
@@ -168,6 +181,7 @@ def suggest(f, psd, fs: float) -> dict:
 
 RATE_READY_S = 1.0
 RATE_DRIFT = 0.05
+DRIFT_SAMPLES = 200  # the rate must stay off by > RATE_DRIFT this long before the chain is redesigned
 
 
 def _shape_ok(config) -> bool:
@@ -226,6 +240,7 @@ class FilterBank:
         self._chains: Dict[int, FilterChain] = {}
         self._pending_errors: List[Tuple[str, str]] = []
         self._bad: Dict[int, Tuple[str, float]] = {}   # handle -> (key, fs) already reported invalid
+        self._drift: Dict[int, int] = {}                # handle -> consecutive samples off-rate
 
     # --- configuration -------------------------------------------------------------------------
     def _load(self) -> Dict[str, dict]:
@@ -316,8 +331,16 @@ class FilterBank:
         if cfg is None or fs is None or self._type_of.get(handle, self._type_from_key(key)) in EXCLUDED_TYPES:
             return None
         ch = self._chains.get(handle)
-        if ch is not None and ch.n_axes == n_axes and abs(fs - ch.fs) / ch.fs <= RATE_DRIFT:
-            return ch
+        if ch is not None and ch.n_axes == n_axes:
+            # Timestamp jitter moves the estimate around; only a sustained change redesigns the
+            # filter (a rebuild restarts its state).
+            if abs(fs - ch.fs) / ch.fs <= RATE_DRIFT:
+                self._drift[handle] = 0
+                return ch
+            self._drift[handle] = self._drift.get(handle, 0) + 1
+            if self._drift[handle] < DRIFT_SAMPLES:
+                return ch
+        self._drift[handle] = 0
         ok, msg = validate(cfg, fs)
         if not ok:
             if self._bad.get(handle) != (key, round(fs)):

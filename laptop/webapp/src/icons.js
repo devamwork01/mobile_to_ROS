@@ -40,6 +40,7 @@ import {
   Square,
   FileText,
   FlaskConical,
+  Filter,
 } from "lucide-react";
 
 export const Icons = {
@@ -83,4 +84,5 @@ export const Icons = {
   Square,
   FileText,
   FlaskConical,
+  Filter,
 };
