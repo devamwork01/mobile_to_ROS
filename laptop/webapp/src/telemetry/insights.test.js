@@ -30,3 +30,18 @@ describe("insights store", () => {
     expect(getOpenReport()).toBeNull();
   });
 });
+
+import { getLastReportEvent } from "./insights.js";
+
+describe("report events carry their recording id", () => {
+  it("records ready and error events with the id they belong to", () => {
+    onInsightsMessage({ kind: "report_ready", id: "recA" });
+    expect(getLastReportEvent()).toMatchObject({ id: "recA", ok: true });
+    onInsightsMessage({ kind: "report_error", id: "recB", message: "bad file" });
+    expect(getLastReportEvent()).toMatchObject({ id: "recB", ok: false, message: "bad file" });
+  });
+  it("a finished test run is reported under its recording id", () => {
+    onInsightsMessage({ kind: "testrun", phase: "done", id: "recC" });
+    expect(getLastReportEvent()).toMatchObject({ id: "recC", ok: true });
+  });
+});

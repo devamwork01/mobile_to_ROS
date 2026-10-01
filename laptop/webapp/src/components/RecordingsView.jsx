@@ -4,7 +4,7 @@ import { listRecordings, querySignal } from "../lib/recordingsApi.js";
 import { signalMeta } from "../telemetry/signals.js";
 import HistoryChart from "./HistoryChart.jsx";
 import { sendCommand } from "../telemetry/store.js";
-import { useReportsVersion, requestOpenReport } from "../telemetry/insights.js";
+import { useLastReportEvent, requestOpenReport } from "../telemetry/insights.js";
 
 const fmtBytes = (b) => (b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(0)} KB` : `${(b / 1048576).toFixed(1)} MB`);
 const fmtDur = (ms) => {
@@ -29,14 +29,20 @@ export default function RecordingsView() {
   const [loadingSig, setLoadingSig] = useState(false);
   const chartWrap = useRef(null);
   const [analysing, setAnalysing] = useState(null); // recording id being analysed
-  const reportsVersion = useReportsVersion();
-  // A finished analysis (or test run) bumps reportsVersion: mark the recording as having a report.
+  const [analyseErr, setAnalyseErr] = useState(null);
+  const reportEvent = useLastReportEvent();
+  // React only to the outcome for *this* recording (other browsers' runs also emit events).
   useEffect(() => {
-    if (!analysing) return;
-    setRecs((prev) => prev && prev.map((r) => (r.id === analysing ? { ...r, hasReport: true } : r)));
-    setSel((s) => (s && s.id === analysing ? { ...s, hasReport: true } : s));
-    setAnalysing(null);
-  }, [reportsVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!reportEvent) return;
+    if (reportEvent.ok) {
+      setRecs((prev) => prev && prev.map((r) => (r.id === reportEvent.id ? { ...r, hasReport: true } : r)));
+      setSel((s) => (s && s.id === reportEvent.id ? { ...s, hasReport: true } : s));
+    }
+    if (reportEvent.id === analysing) {
+      setAnalysing(null);
+      setAnalyseErr(reportEvent.ok ? null : reportEvent.message || "Analysis failed");
+    }
+  }, [reportEvent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     listRecordings()
@@ -129,7 +135,7 @@ export default function RecordingsView() {
                 <button
                   className="btn-ghost text-xs py-1 disabled:opacity-50"
                   disabled={analysing === sel.id}
-                  onClick={() => { setAnalysing(sel.id); sendCommand({ cmd: "analyse", id: sel.id }); }}
+                  onClick={() => { setAnalysing(sel.id); setAnalyseErr(null); sendCommand({ cmd: "analyse", id: sel.id }); }}
                   title="Compute noise, drift, rate and spectra for this recording (full rate, on the server)"
                 >
                   <Icons.Sigma size={13} /> {analysing === sel.id ? "Analysing…" : "Analyse"}
@@ -157,6 +163,7 @@ export default function RecordingsView() {
               )}
             </div>
             {err && <div className="text-xs text-err mt-2">{err}</div>}
+            {analyseErr && <div className="text-xs text-err mt-2">Analysis failed: {analyseErr}</div>}
           </>
         )}
       </section>

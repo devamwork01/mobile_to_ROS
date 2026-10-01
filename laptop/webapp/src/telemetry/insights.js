@@ -6,6 +6,9 @@ let stats = new Map(); // handle -> {handle,type,rate_hz,jitter_ms,gaps,axes:[{m
 const psd = new Map(); // handle -> {f, psd:[[...]...]}
 let testRun = null;
 let reportsVersion = 0;
+let lastReportEvent = null; // {id, ok, message, n}: which recording a report finished/failed for
+let eventSeq = 0;
+const reportEvent = (id, ok, message) => { lastReportEvent = { id, ok, message, n: ++eventSeq }; };
 let openReport = null;
 const listeners = new Set();
 const emit = () => listeners.forEach((l) => l());
@@ -24,12 +27,17 @@ export function onInsightsMessage(m) {
       break;
     case "testrun":
       testRun = m;
-      if (m.phase === "done") reportsVersion += 1;
+      if (m.phase === "done") {
+        reportsVersion += 1;
+        reportEvent(m.id, true);
+      }
       break;
     case "report_ready":
       reportsVersion += 1;
+      reportEvent(m.id, true);
       break;
     case "report_error":
+      reportEvent(m.id, false, m.message);
       break;
     default:
       return false;
@@ -43,6 +51,7 @@ export const getPsd = (h) => psd.get(h);
 export const getTestRun = () => testRun;
 export const getReportsVersion = () => reportsVersion;
 export const getOpenReport = () => openReport;
+export const getLastReportEvent = () => lastReportEvent;
 export function requestOpenReport(id) {
   openReport = id;
   emit();
@@ -60,4 +69,5 @@ export const useInsightStats = (h) => useSyncExternalStore(subscribe, () => stat
 export const usePsd = (h) => useSyncExternalStore(subscribe, () => psd.get(h), () => psd.get(h));
 export const useTestRun = () => useSyncExternalStore(subscribe, getTestRun, getTestRun);
 export const useReportsVersion = () => useSyncExternalStore(subscribe, getReportsVersion, getReportsVersion);
+export const useLastReportEvent = () => useSyncExternalStore(subscribe, getLastReportEvent, getLastReportEvent);
 export const useOpenReportRequest = () => useSyncExternalStore(subscribe, getOpenReport, getOpenReport);
