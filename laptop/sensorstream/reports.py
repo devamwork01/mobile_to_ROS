@@ -10,6 +10,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+from array import array
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -22,6 +23,7 @@ from .recordings import _load_meta
 
 _SSBIN = ".ssbin"
 _REPORT = ".report.json"
+_MAX_VALUES = 4  # analysis uses at most x, y, z, w
 
 
 def valid_id(rid: str) -> bool:
@@ -29,29 +31,39 @@ def valid_id(rid: str) -> bool:
 
 
 def load_samples(ssbin: str) -> Dict[int, dict]:
+    """Per-handle samples, time-sorted, with true duplicates removed.
+
+    A duplicate is the same (seq, t_sensor_ns) pair - what backfill produces when it resends a
+    sample the live stream also delivered. seq alone is not enough: the phone restarts it at 0
+    when a sensor is re-toggled or the app reconnects. Decoded into compact typed arrays (not
+    per-sample Python objects) so a 30-minute multi-sensor recording stays a few hundred MB.
+    """
     raw: Dict[int, dict] = {}
+    pad = [float("nan")] * _MAX_VALUES
     for _t_recv, data in read_frames(ssbin):
         try:
             dg = p.decode_datagram(data)
         except p.ProtocolError:
             continue
         for r in dg.records:
-            s = raw.setdefault(r.sensor_handle, {"type": r.sensor_type, "seen": set(), "t": [], "v": [], "seq": []})
-            if r.seq in s["seen"]:
-                continue
-            s["seen"].add(r.seq)
+            s = raw.get(r.sensor_handle)
+            if s is None:
+                s = raw[r.sensor_handle] = {"type": r.sensor_type, "t": array("q"), "seq": array("q"),
+                                            "v": array("d"), "k": 1}
+            vals = list(r.values[:_MAX_VALUES])
             s["t"].append(r.t_sensor_ns)
-            s["v"].append(list(r.values))
             s["seq"].append(r.seq)
+            s["v"].extend(vals + pad[len(vals):])
+            if len(vals) > s["k"]:
+                s["k"] = len(vals)
     out = {}
     for h, s in raw.items():
-        k = max(len(v) for v in s["v"])
-        v = np.full((len(s["v"]), k), np.nan)
-        for i, row in enumerate(s["v"]):
-            v[i, : len(row)] = row
-        t = np.asarray(s["t"], dtype=np.int64)
-        order = np.argsort(t, kind="stable")
-        out[h] = {"type": s["type"], "t": t[order], "v": v[order], "seq": np.asarray(s["seq"], dtype=np.int64)[order]}
+        t = np.frombuffer(s["t"], dtype=np.int64)
+        seq = np.frombuffer(s["seq"], dtype=np.int64)
+        v = np.frombuffer(s["v"], dtype=np.float64).reshape(-1, _MAX_VALUES)[:, : s["k"]]
+        _, first = np.unique(np.stack([seq, t], axis=1), axis=0, return_index=True)
+        first = first[np.argsort(t[first], kind="stable")]
+        out[h] = {"type": s["type"], "t": t[first].copy(), "v": v[first].copy(), "seq": seq[first].copy()}
     return out
 
 

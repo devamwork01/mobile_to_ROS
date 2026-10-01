@@ -72,3 +72,18 @@ def test_rejects_traversal_ids(tmp_path):
     assert reports.load_report(str(tmp_path), "../secret") is None
     assert reports.load_report(str(tmp_path), "a/b") is None
     assert not reports.valid_id("..")
+
+
+def test_seq_restart_keeps_both_halves(tmp_path):
+    # The phone restarts its per-handle seq at 0 when a sensor is re-toggled or the app
+    # reconnects: same seq, different time = different sample, both must be kept.
+    rec = Recorder()
+    base = rec.start(str(tmp_path), {"model": "P"})
+    for half in range(2):
+        for i in range(300):
+            t = 1_000_000_000 + half * 10_000_000_000 + i * 10_000_000
+            rec.on_datagram(p.Datagram(device_id=1, records=[p.Record(4, 4, i, t, 3, [0.0, 0.0, 0.0])]), i)
+    rec.on_datagram(p.Datagram(device_id=1, records=[p.Record(4, 4, 5, 1_050_000_000, 3, [0.0, 0.0, 0.0])]), 0)  # true dup
+    rec.stop()
+    s = reports.load_samples(base + ".ssbin")
+    assert len(s[4]["t"]) == 600

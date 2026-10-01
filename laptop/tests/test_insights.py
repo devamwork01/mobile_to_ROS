@@ -68,3 +68,15 @@ def test_stale_sensors_are_skipped():
     clk.t += 5
     msgs = s.tick()
     assert all(m["kind"] != "insights" or m["stats"] == [] for m in msgs)
+
+
+def test_seq_restart_is_not_treated_as_duplicates():
+    clk = Clock()
+    s = InsightsSink(clock=clk)
+    feed(s, 3, 4, 300, 100.0)                                   # seq 0..299, t 1.0 .. 3.99 s
+    feed(s, 3, 4, 300, 100.0, t0_ns=5_000_000_000, seq0=0)      # restart: seq 0..299 again, t 5.0 .. 7.99 s
+    st = [m for m in s.tick() if m["kind"] == "insights"][0]["stats"][0]
+    # the window must include the post-restart samples (newest data), not only the old ones
+    assert abs(st["rate_hz"] - 100.0) > 5 or st["gaps"] == 1
+    t, _ = s._rings[3].window(10.0)
+    assert t.size == 600 and t[-1] == 5_000_000_000 + 299 * 10_000_000

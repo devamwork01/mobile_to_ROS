@@ -48,12 +48,15 @@ class _Ring:
         self.last_seen = now
 
     def window(self, seconds: float):
-        """Samples of the last `seconds` (by sensor time), deduplicated by seq, time-sorted."""
+        """Samples of the last `seconds` (by sensor time), time-sorted, true duplicates removed.
+
+        A duplicate is the same (seq, t) pair; seq alone repeats after the phone restarts its
+        counter (sensor re-toggled, reconnect), and those samples are new data."""
         if self.n == 0:
             return np.array([], dtype=np.int64), np.empty((0, self.k))
         idx = (self.head - self.n + np.arange(self.n)) % RING_CAP
         t, seq, v = self.t[idx], self.seq[idx], self.v[idx, : self.k]
-        _, first = np.unique(seq, return_index=True)
+        _, first = np.unique(np.stack([seq, t], axis=1), axis=0, return_index=True)
         t, v = t[first], v[first]
         order = np.argsort(t, kind="stable")
         t, v = t[order], v[order]
