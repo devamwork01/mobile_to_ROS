@@ -30,6 +30,7 @@ import com.sensorstream.ui.components.SsCard
 import com.sensorstream.ui.components.StatusBadge
 import com.sensorstream.ui.components.SamplingRateBadge
 import com.sensorstream.ui.components.MetricCard
+import com.sensorstream.ui.components.FilteredSignalsCard
 import com.sensorstream.ui.components.StreamPhase
 import com.sensorstream.ui.components.phase
 import com.sensorstream.ui.nav.AppNav
@@ -52,6 +53,8 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
     val hasSavedTarget by vm.hasSavedTarget.collectAsState()
     val live by vm.live.collectAsState()
     val connectNotice by vm.connectNotice.collectAsState()
+    val filteredSensors by vm.filteredSensors.collectAsState()
+    val appSettings by vm.settings.collectAsState()
     val c = Ss.colors
 
     // Drive the hero phone from a local orientation preview so it responds to device motion whether
@@ -129,6 +132,10 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(SsDims.gap)) {
             MetricCard("Active Sensors", sel.enabled.size.toString(), Modifier.weight(1f))
             MetricCard("Total Rate", if (totalHz > 0) "$totalHz Hz" else "—", Modifier.weight(1f))
+        }
+        // Laptop-configured filters, run on the phone's own samples (works offline too).
+        if (appSettings.showFiltered && filteredSensors.isNotEmpty()) {
+            FilteredSignalsCard(vm, Modifier.fillMaxWidth())
         }
 
         // Active-sensor summary or empty state.

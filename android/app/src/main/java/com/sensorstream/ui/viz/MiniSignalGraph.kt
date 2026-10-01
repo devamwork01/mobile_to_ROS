@@ -49,6 +49,8 @@ fun MiniSignalGraph(
     labels: List<String> = emptyList(),
     unit: String = "",
     windowMs: Long = 10_000L,
+    /** Latest filtered sample (phone-side filter); drawn bold over the raw trace, which fades. */
+    filtered: FloatArray? = null,
 ) {
     val c = Ss.colors
     val n = colors.size
@@ -60,6 +62,13 @@ fun MiniSignalGraph(
         buffer.add(SystemClock.uptimeMillis(), values.copyOf(minOf(n, values.size)))
     }
     val pts = buffer.visible(windowMs)
+    val fBuffer = remember(n) { TimeWindowBuffer() }
+    val lastFiltered = remember(n) { arrayOfNulls<FloatArray>(1) }
+    if (filtered != null && filtered !== lastFiltered[0]) {
+        lastFiltered[0] = filtered
+        fBuffer.add(SystemClock.uptimeMillis(), filtered.copyOf(minOf(n, filtered.size)))
+    }
+    val fPts = if (filtered != null) fBuffer.visible(windowMs) else emptyList()
 
     // -1 = show all; otherwise the isolated component index.
     var selected by remember(n) { mutableIntStateOf(-1) }
@@ -124,7 +133,21 @@ fun MiniSignalGraph(
                             val y = h - ((p.v[ci] - lo) / span) * h
                             if (!started) { path.moveTo(x, y); started = true } else path.lineTo(x, y)
                         }
-                        drawPath(path, colors.getOrElse(ci) { Color.Gray }, style = Stroke(width = 2.dp.toPx()))
+                        val col = colors.getOrElse(ci) { Color.Gray }
+                        if (fPts.size >= 2) {
+                            drawPath(path, col.copy(alpha = 0.35f), style = Stroke(width = 1.5.dp.toPx()))
+                            val fPath = Path()
+                            var fStarted = false
+                            for (p in fPts) {
+                                if (ci >= p.v.size || !p.v[ci].isFinite()) continue
+                                val x = w * (p.tMs - tStart) / windowMs.toFloat()
+                                val y = h - ((p.v[ci] - lo) / span) * h
+                                if (!fStarted) { fPath.moveTo(x, y); fStarted = true } else fPath.lineTo(x, y)
+                            }
+                            drawPath(fPath, col, style = Stroke(width = 2.5.dp.toPx()))
+                        } else {
+                            drawPath(path, col, style = Stroke(width = 2.dp.toPx()))
+                        }
                     }
                 }
             }

@@ -42,7 +42,7 @@ object FilterConfigCodec {
     fun decode(s: String?): Map<String, FilterConfig> =
         if (s.isNullOrBlank()) emptyMap() else runCatching { parseConfigs(JSONObject(s)) }.getOrDefault(emptyMap())
 
-    private fun hz(x: Double) = if (x == Math.floor(x)) "%.0f".format(x) else "%.1f".format(x)
+    private fun hz(x: Double) = if (x == Math.floor(x)) String.format(java.util.Locale.US, "%.0f", x) else String.format(java.util.Locale.US, "%.1f", x)
 
     /** e.g. "LP 5 Hz · 4th + notch 8 Hz". */
     fun summary(cfg: FilterConfig): String {
