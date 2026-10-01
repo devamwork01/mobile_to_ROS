@@ -43,3 +43,6 @@ android/.kotlin/
 
 # Downloaded 3D model source (not used; Canvas 3D instead)
 samsung-galaxy-s25-ultra/
+
+# Per-sensor filter settings saved by the laptop server
+filters.json

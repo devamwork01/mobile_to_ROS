@@ -26,6 +26,7 @@ from .backfill import GapTracker
 from .control import ControlServer
 from .reconcile import Reconciler
 from .dashboard import DashboardServer
+from .filters import FilterBank, suggest as suggest_filter
 from .insights import InsightsSink
 from .discovery import Advertiser, BEACON_PORT
 from .logging_sink import Recorder
@@ -91,6 +92,34 @@ async def _selftest_generator(udp_port: int, hz: float) -> None:
             await asyncio.sleep(period)
     finally:
         sock.close()
+
+
+def handle_filter_command(msg: dict, bank, insights, broadcast) -> bool:
+    """filter_set / filter_clear / filter_suggest from the dashboard. Returns False for other commands."""
+    cmd = msg.get("cmd")
+    key = str(msg.get("key") or "")
+    handle = msg.get("handle")
+    try:
+        handle = int(handle) if handle is not None else None
+    except (TypeError, ValueError):
+        handle = None
+    if cmd == "filter_set":
+        ok, why = bank.set(key, msg.get("config"), handle=handle)
+        broadcast(bank.snapshot() if ok else {"kind": "filter_error", "key": key, "message": why})
+        return True
+    if cmd == "filter_clear":
+        bank.clear(key)
+        broadcast(bank.snapshot())
+        return True
+    if cmd == "filter_suggest":
+        src = insights.suggest(handle) if handle is not None else None
+        if src is None:
+            broadcast({"kind": "filter_error", "key": key, "message": "Not enough live data yet to suggest a filter."})
+        else:
+            f, psd, fs = src
+            broadcast({"kind": "filter_suggestion", "key": key, "config": suggest_filter(f, psd, fs)})
+        return True
+    return False
 
 
 async def insights_step(insights, testruns, broadcast) -> None:
@@ -175,6 +204,7 @@ async def run(args: argparse.Namespace) -> None:
     recorder = Recorder()
     sync = SyncTracker()
     insights = InsightsSink()
+    filterbank = FilterBank(args.filters_file)
     testruns: Optional[TestRunManager] = None  # created once the control channel exists (below)
 
     # Backfill (Phase 2B): detect per-(client,handle) seq gaps on the live stream and, after a grace
@@ -194,11 +224,12 @@ async def run(args: argparse.Namespace) -> None:
     )
 
     def on_dg(dg, addr, t_recv_ns):
-        sink.on_datagram(dg, addr, t_recv_ns)
+        fv = filterbank.process(dg)  # once per raw sample, before any decimation
+        sink.on_datagram(dg, addr, t_recv_ns, filtered=fv)
         if ros_sink is not None:
             ros_sink.on_datagram(dg, addr, t_recv_ns)
         sync.observe(dg, t_recv_ns)
-        insights.on_datagram(dg, addr, t_recv_ns)
+        insights.on_datagram(dg, addr, t_recv_ns, filtered=fv)
         if testruns is not None:  # UDP can arrive before the run manager is wired
             testruns.on_datagram(dg)
         reconciler.on_live(dg.device_id, dg, t_recv_ns)
@@ -214,6 +245,7 @@ async def run(args: argparse.Namespace) -> None:
         kind = ev.get("kind")
         if kind == "phone_connected":
             reconciler.set_device_client(ev["device_id"], ev.get("client_id", ""))
+            filterbank.set_catalog(ev.get("sensors") or [])
         elif kind == "backfill":
             reconciler.on_backfill(ev["device_id"], ev["handle"], ev["frames"])
             return   # raw frames are not browser-bound
@@ -240,6 +272,8 @@ async def run(args: argparse.Namespace) -> None:
     rec_base = recorder.start(args.log_dir, record_meta()) if args.record else None
 
     def ui_command(msg: dict) -> None:
+        if handle_filter_command(msg, filterbank, insights, dash.broadcast):
+            return
         cmd = msg.get("cmd")
         if cmd == "record_start" and not recorder.is_recording and not testruns.active:
             print("[rec] start:", recorder.start(args.log_dir, record_meta()) + ".ssbin")
@@ -301,6 +335,7 @@ async def run(args: argparse.Namespace) -> None:
             if s.active:
                 msgs.append({"kind": "active_set", "device_id": s.device_id, "handles": s.active})
         msgs.append({"kind": "recording", "active": recorder.is_recording, "rows": recorder.rows})
+        msgs.append(filterbank.snapshot())
         run_status = testruns.status()
         if run_status is not None:
             msgs.append(run_status)
@@ -390,6 +425,8 @@ async def run(args: argparse.Namespace) -> None:
         while True:
             await asyncio.sleep(1.0)
             await insights_step(insights, testruns, dash.broadcast)
+            for key, message in filterbank.errors():
+                dash.broadcast({"kind": "filter_error", "key": key, "message": message})
 
     tasks = [asyncio.create_task(stats_task()), asyncio.create_task(reconcile_task()),
              asyncio.create_task(insights_task())]
@@ -424,6 +461,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--selftest", action="store_true", help="emit a synthetic stream (no phone needed)")
     ap.add_argument("--selftest-hz", type=float, default=100.0)
     ap.add_argument("--log-dir", default="./recordings", help="directory for recordings")
+    ap.add_argument("--filters-file", default="./filters.json", help="where per-sensor filter settings are saved")
     ap.add_argument("--record", action="store_true", help="record the session from start")
     ap.add_argument("--no-discovery", action="store_true", help="disable mDNS + UDP beacon advertising")
     ap.add_argument("--ros", action="store_true", help="publish decoded sensor data to ROS 2 topics (requires a sourced ROS environment)")
