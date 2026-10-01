@@ -218,7 +218,7 @@ async def run(args: argparse.Namespace) -> None:
 
     def _append_backfill(dg, t_recv_ns):
         if recorder.is_recording:
-            recorder.on_datagram(dg, t_recv_ns)
+            recorder.on_datagram(dg, t_recv_ns)  # backfill arrives late/out of order: never filtered
 
     reconciler = Reconciler(
         tracker,
@@ -230,14 +230,14 @@ async def run(args: argparse.Namespace) -> None:
         fv = filterbank.process(dg)  # once per raw sample, before any decimation
         sink.on_datagram(dg, addr, t_recv_ns, filtered=fv)
         if ros_sink is not None:
-            ros_sink.on_datagram(dg, addr, t_recv_ns)
+            ros_sink.on_datagram(dg, addr, t_recv_ns, filtered=fv)
         sync.observe(dg, t_recv_ns)
         insights.on_datagram(dg, addr, t_recv_ns, filtered=fv)
         if testruns is not None:  # UDP can arrive before the run manager is wired
             testruns.on_datagram(dg)
         reconciler.on_live(dg.device_id, dg, t_recv_ns)
         if recorder.is_recording:
-            recorder.on_datagram(dg, t_recv_ns)
+            recorder.on_datagram(dg, t_recv_ns, filtered=fv)
 
     transport, proto = await start_receiver(args.udp_host, args.udp_port, on_dg)
     udp_port = transport.get_extra_info("socket").getsockname()[1]

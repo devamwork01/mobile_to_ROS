@@ -26,7 +26,7 @@ from . import protocol as p
 
 LOG_MAGIC = b"SSLOG1\n"                 # 7-byte file header
 FRAME = struct.Struct("<qI")            # t_recv_ns (i64), datagram length (u32)
-CSV_HEADER = "t_sensor_ns,sensor_type,handle,seq,accuracy,v0,v1,v2,v3,v4,v5\n"
+CSV_HEADER = "t_sensor_ns,sensor_type,handle,seq,accuracy,v0,v1,v2,v3,v4,v5,f0,f1,f2\n"
 
 
 class Recorder:
@@ -59,7 +59,7 @@ class Recorder:
         self.started_at = time.monotonic()
         return self.path_base
 
-    def on_datagram(self, dg: p.Datagram, t_recv_ns: int) -> None:
+    def on_datagram(self, dg: p.Datagram, t_recv_ns: int, filtered=None) -> None:
         if self._bin is None:
             return
         raw = p.encode_datagram(dg)
@@ -70,9 +70,14 @@ class Recorder:
             for r in dg.records:
                 vals = [repr(v) for v in r.values[:6]]
                 vals += [""] * (6 - len(vals))
+                # f0..f2: the laptop filter's output for this exact sample (empty when the sensor has
+                # no filter, the value is NaN, or the row came from backfill). The .ssbin stays raw.
+                fv = filtered.get((r.sensor_handle, r.seq)) if filtered else None
+                fcols = ["" if fv is None or i >= len(fv) or fv[i] is None or fv[i] != fv[i] else repr(fv[i])
+                         for i in range(3)]
                 self._csv.write(
                     f"{r.t_sensor_ns},{r.sensor_type},{r.sensor_handle},{r.seq},{r.accuracy},"
-                    + ",".join(vals)
+                    + ",".join(vals) + "," + ",".join(fcols)
                     + "\n"
                 )
                 self.rows += 1
