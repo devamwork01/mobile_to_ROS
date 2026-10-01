@@ -182,6 +182,9 @@ class StreamEngine(context: Context) {
         }
     }
 
+    /** Receives the laptop's filter settings (set by the UI layer, which persists and applies them). */
+    @Volatile var onFilters: ((JSONObject) -> Unit)? = null
+
     private fun connectControl() {
         val gen = ++connGen
         _state.value = _state.value.copy(connecting = true, error = null)
@@ -195,6 +198,7 @@ class StreamEngine(context: Context) {
                 startTelemetry(udpPort)
             }
             override fun onConfigure(msg: JSONObject) { /* laptop-driven config: reserved */ }
+            override fun onFilters(msg: JSONObject) { this@StreamEngine.onFilters?.invoke(msg) }
             override fun onResend(msg: JSONObject) {
                 if (gen != connGen) return
                 val rec = recorder ?: return

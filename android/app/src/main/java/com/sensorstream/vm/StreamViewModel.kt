@@ -1,5 +1,10 @@
 package com.sensorstream.vm
 
+import com.sensorstream.core.filter.Biquad
+import com.sensorstream.core.filter.FilterConfig
+import com.sensorstream.core.filter.FilterConfigCodec
+import com.sensorstream.core.filter.PhoneFilterBank
+import org.json.JSONObject
 import android.app.Application
 import android.content.Context
 import android.hardware.Sensor
@@ -108,6 +113,7 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     fun setThemeMode(mode: ThemeMode) = updateSettings { it.copy(themeMode = mode) }
     fun setDefault3dWorldFrame(on: Boolean) = updateSettings { it.copy(default3dWorldFrame = on) }
     fun setDefault3dLabels(on: Boolean) = updateSettings { it.copy(default3dLabels = on) }
+    fun setShowFiltered(on: Boolean) = updateSettings { it.copy(showFiltered = on) }
     fun setBatchMode(mode: com.sensorstream.ui.settings.BatchMode) {
         updateSettings { it.copy(batchMode = mode) }
         engine.batchWindowMs = mode.windowMs
@@ -142,6 +148,7 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     private fun makeListener(handle: Int) = object : SensorEventListener {
         override fun onSensorChanged(e: SensorEvent) {
             val v = e.values.copyOf()
+            keyByHandle[handle]?.let { key -> filterTap.onSample(handle, key, catalogTypes[handle] ?: 0, e.timestamp, v) }
             _preview.update { it + (handle to v) }
         }
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
@@ -197,6 +204,59 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // --- On-phone filtering (settings come from the laptop) --------------------------------------
+    // The laptop pushes its filter settings over the control channel; they are persisted so the
+    // phone keeps filtering its own preview samples offline. Filtered sensors are tapped (via the
+    // preview listeners above, at their configured period) while a screen that shows them is up.
+    private val filterBank = PhoneFilterBank()
+    private val filterTap = FilterTap(filterBank)
+    val filterTraces: StateFlow<Map<Int, FilterTrace>> = filterTap.traces
+    private val keyByHandle: Map<Int, String> = catalog.associate { it.handle to "${it.type}:${it.name}" }
+    private val _filterConfigs = MutableStateFlow(FilterConfigCodec.decode(prefs.getString(KEY_FILTERS, null)))
+    val filterConfigs: StateFlow<Map<String, FilterConfig>> = _filterConfigs.asStateFlow()
+
+    data class FilteredSensor(val handle: Int, val key: String, val info: SensorInfo, val config: FilterConfig, val enabled: Boolean)
+
+    private val _filteredSensors = MutableStateFlow<List<FilteredSensor>>(emptyList())
+    /** Sensors on this phone that have a laptop filter (filterable types only). */
+    val filteredSensors: StateFlow<List<FilteredSensor>> = _filteredSensors.asStateFlow()
+
+    private fun recomputeFiltered() {
+        val cfgs = _filterConfigs.value
+        val enabled = _sel.value.enabled
+        _filteredSensors.value = catalog.mapNotNull { info ->
+            val key = keyByHandle[info.handle] ?: return@mapNotNull null
+            val cfg = cfgs[key] ?: return@mapNotNull null
+            if (info.type in Biquad.EXCLUDED_TYPES) return@mapNotNull null
+            FilteredSensor(info.handle, key, info, cfg, info.handle in enabled)
+        }
+        if (tapRefs > 0) applyTap()
+    }
+
+    private fun applyFilterMessage(msg: JSONObject) {
+        val configs = msg.optJSONObject("configs") ?: return
+        val m = FilterConfigCodec.parseConfigs(configs)
+        filterBank.setConfigs(m)
+        _filterConfigs.value = m
+        prefs.edit().putString(KEY_FILTERS, FilterConfigCodec.encode(m)).apply()
+        recomputeFiltered()
+    }
+
+    private var tapRefs = 0
+    private var tapped: Set<Int> = emptySet()
+
+    private fun applyTap() {
+        val want = if (tapRefs > 0) _filteredSensors.value.filter { it.enabled }.map { it.handle }.toSet() else emptySet()
+        (tapped - want).takeIf { it.isNotEmpty() }?.let { stopPreview(*it.toIntArray()) }
+        (want - tapped).takeIf { it.isNotEmpty() }?.let { startPreview(*it.toIntArray()) }
+        tapped = want
+        filterTap.handles = want
+    }
+
+    /** Ref-counted: screens showing filtered signals call this while visible. */
+    fun startFilterTap() { tapRefs++; if (tapRefs == 1) applyTap() }
+    fun stopFilterTap() { tapRefs = maxOf(0, tapRefs - 1); if (tapRefs == 0) applyTap() }
+
     /** Convenience for the hero orientation (rotation vector handle). */
     fun startOrientationPreview() { orientationHandle?.let { startPreview(it) } }
     fun stopOrientationPreview() { orientationHandle?.let { stopPreview(it) } }
@@ -218,6 +278,13 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
             enabled = saved?.enabled ?: defaultEnabled,
             periodByHandle = defaultPeriods + (saved?.periods ?: emptyMap()),
         )
+
+        filterBank.setConfigs(_filterConfigs.value)
+        recomputeFiltered()
+        // Settings arrive on the network thread; apply them on the main thread (preview
+        // registration is main-thread state).
+        engine.onFilters = { msg -> viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) { applyFilterMessage(msg) } }
+        viewModelScope.launch { _sel.collect { recomputeFiltered() } }
 
         viewModelScope.launch {
             while (true) {
@@ -360,10 +427,12 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
         const val KEY_HOST = "target_host"
         const val KEY_PORT = "target_port"
         const val KEY_SELECTION = "selection_v1"
+        const val KEY_FILTERS = "filters_v1"
     }
 
     // Streaming is owned by StreamingService (survives recreation); only stop discovery here.
     override fun onCleared() {
+        engine.onFilters = null
         discovery.stop()
         previewListeners.values.forEach { sensorManager.unregisterListener(it) }
         previewListeners.clear()

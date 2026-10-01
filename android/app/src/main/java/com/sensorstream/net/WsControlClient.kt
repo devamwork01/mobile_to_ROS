@@ -28,6 +28,8 @@ class WsControlClient {
         fun onRtt(ms: Float)
         fun onClosed(reason: String?)
         fun onFailure(t: Throwable)
+        /** Filter settings pushed by the laptop ({"type":"filters","configs":{...}}). */
+        fun onFilters(msg: JSONObject) {}
     }
 
     private var client: OkHttpClient? = null
@@ -62,6 +64,7 @@ class WsControlClient {
                     "hello_ack" -> listener.onHelloAck(msg.optInt("device_id"), msg.optInt("udp_port"))
                     "configure" -> listener.onConfigure(msg)
                     "resend" -> listener.onResend(msg)
+                    "filters" -> listener.onFilters(msg)
                     "heartbeat_ack" -> {
                         val t0 = pendingPings.remove(msg.optInt("seq", -1))
                         if (t0 != null) listener.onRtt((SystemClock.elapsedRealtime() - t0).toFloat())
