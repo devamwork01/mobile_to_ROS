@@ -122,3 +122,39 @@ def test_a_new_chain_starts_in_steady_state_no_step():
     out = run(b, 3, 1, 300)  # constant input (1, 2, 3)
     first = min(k[1] for k in out)
     assert out[(3, first)] == pytest.approx([1.0, 2.0, 3.0], abs=1e-9)
+
+
+def test_wrong_typed_entries_in_file_do_not_stop_startup(tmp_path):
+    path = tmp_path / "filters.json"
+    path.write_text(json.dumps({"1:A": {"lowpass": 5}, "1:B": {"notches": [5]}, "4:G": LP}))
+    assert FilterBank(str(path)).configs == {"4:G": LP}
+
+
+def test_reconnect_resets_the_rate_estimate():
+    b = FilterBank()
+    b.set_catalog([{"handle": 3, "type": 1, "name": "Acc"}])
+    run(b, 3, 1, 1000, fs=400.0, t0=500_000_000_000)
+    assert abs(b.fs(3) - 400) < 5
+    b.set_catalog([{"handle": 3, "type": 1, "name": "Acc"}])        # phone reconnected / rebooted
+    run(b, 3, 1, 300, fs=50.0, t0=1_000_000_000)                     # clock restarted lower
+    assert abs(b.fs(3) - 50) < 2
+
+
+def test_clock_jump_back_resets_the_rate_without_a_reconnect():
+    b = FilterBank()
+    b.set_catalog([{"handle": 3, "type": 1, "name": "Acc"}])
+    run(b, 3, 1, 1000, fs=400.0, t0=500_000_000_000)
+    run(b, 3, 1, 300, fs=50.0, t0=1_000_000_000)
+    assert abs(b.fs(3) - 50) < 2
+
+
+def test_invalid_config_error_is_reported_once_while_rate_drifts():
+    b = FilterBank()
+    b.set_catalog([{"handle": 3, "type": 1, "name": "Acc"}])
+    b.set("1:Acc", {"lowpass": {"hz": 40.0, "order": 4}, "notches": []})
+    t = 1_000_000_000
+    for i in range(3000):                       # 200 Hz drifting smoothly down to ~50 Hz
+        dt = 5_000_000 + (15_000_000 * i) // 3000
+        t += dt
+        b.process(p.Datagram(device_id=1, records=[p.Record(1, 3, i, t, 3, [1.0, 2.0, 3.0])]))
+    assert len(b.errors()) == 1

@@ -103,3 +103,18 @@ def test_suggest_on_pure_noise_is_valid():
     f, p = an.welch_psd(RNG.normal(0, 1, 10000), fs)
     cfg = fl.suggest(f, p, fs)
     assert fl.validate(cfg, fs)[0] and cfg["lowpass"]["hz"] >= 0.5
+
+
+def test_validate_rejects_wrong_types_without_raising():
+    for bad in ({"lowpass": 5}, {"lowpass": None, "notches": [5]}, {"lowpass": None, "notches": "x"},
+                {"lowpass": [1, 2], "notches": []}):
+        assert fl.validate(bad, 100.0)[0] is False
+
+
+def test_suggested_cutoff_always_passes_validation_with_rate_margin():
+    # Rising spectrum: everything above the floor, so the cutoff lands at the band edge.
+    fs = 116.4
+    f = np.linspace(0.2, fs / 2, 300)
+    cfg = fl.suggest(f, 10.0 ** f, fs)  # steep rise: the cutoff lands exactly on the band edge
+    for fs_server in (fs, fs * 0.98):  # the server's EWMA rate can differ slightly
+        assert fl.validate(cfg, fs_server)[0]

@@ -67,6 +67,10 @@ def validate(config, fs: float) -> Tuple[bool, str]:
     nyq = 0.45 * fs
     lp = config.get("lowpass")
     notches = config.get("notches") or []
+    if lp is not None and not isinstance(lp, dict):
+        return False, "Invalid low-pass settings."
+    if not isinstance(notches, list) or not all(isinstance(n, dict) for n in notches):
+        return False, "Invalid notch settings."
     if not lp and not notches:
         return False, "Enable a low-pass or add a notch."
     if lp:
@@ -166,7 +170,9 @@ def suggest(f, psd, fs: float) -> dict:
     floor = float(np.median(p[f >= 0.7 * nyq])) if (f >= 0.7 * nyq).any() else float(np.median(p))
     above = f[sm > 2.0 * floor]
     cutoff = float(above.max()) if above.size else 0.5
-    cutoff = min(max(cutoff, 0.5), nyq)
+    # Stay a little under the 0.45*fs limit (and round down): the server's rate estimate can differ
+    # slightly from the one this spectrum came from, and the suggestion must always be applicable.
+    cutoff = min(max(cutoff, 0.5), math.floor(0.43 * fs * 100) / 100)
     notches: List[dict] = []
     ratio = p / np.maximum(sm, 1e-300)
     cand = [i for i in range(1, f.size - 1)
@@ -176,7 +182,7 @@ def suggest(f, psd, fs: float) -> dict:
             notches.append({"hz": round(float(f[i]), 2), "q": 10.0})
         if len(notches) == MAX_NOTCHES:
             break
-    return {"lowpass": {"hz": round(cutoff, 2), "order": 4}, "notches": sorted(notches, key=lambda n: n["hz"])}
+    return {"lowpass": {"hz": cutoff, "order": 4}, "notches": sorted(notches, key=lambda n: n["hz"])}
 
 
 RATE_READY_S = 1.0
@@ -204,6 +210,13 @@ class _Rate:
         self.long_run = 0
 
     def observe(self, t_ns: int) -> None:
+        if self.last is not None and t_ns < self.last - 1_000_000_000:
+            # Sensor clock went back (phone rebooted, app restarted): start the estimate afresh.
+            self.first = self.last = t_ns
+            self.ewma = None
+            self.n = 1
+            self.long_run = 0
+            return
         if self.last is not None and t_ns > self.last:
             dt = (t_ns - self.last) / 1e9
             if self.ewma is not None and dt > 5.0 * self.ewma:
@@ -239,7 +252,7 @@ class FilterBank:
         self._rates: Dict[int, _Rate] = {}
         self._chains: Dict[int, FilterChain] = {}
         self._pending_errors: List[Tuple[str, str]] = []
-        self._bad: Dict[int, Tuple[str, float]] = {}   # handle -> (key, fs) already reported invalid
+        self._bad: Dict[int, str] = {}                  # handle -> "key|config" already reported invalid
         self._drift: Dict[int, int] = {}                # handle -> consecutive samples off-rate
 
     # --- configuration -------------------------------------------------------------------------
@@ -253,7 +266,14 @@ class FilterBank:
             return {}
         if not isinstance(raw, dict):
             return {}
-        return {k: v for k, v in raw.items() if isinstance(k, str) and _shape_ok(v)}
+        out = {}
+        for k, v in raw.items():  # a hand-edited file must never stop the server from starting
+            try:
+                if isinstance(k, str) and _shape_ok(v):
+                    out[k] = v
+            except Exception:
+                continue
+        return out
 
     def _save(self) -> None:
         if not self._path:
@@ -268,9 +288,13 @@ class FilterBank:
             h, ty, name = s.get("handle"), s.get("type"), s.get("name")
             if h is None or ty is None or not name:
                 continue
-            self._key_of[int(h)] = f"{ty}:{name}"
-            self._type_of[int(h)] = int(ty)
-            self._chains.pop(int(h), None)
+            h = int(h)
+            self._key_of[h] = f"{ty}:{name}"
+            self._type_of[h] = int(ty)
+            # A (re)connecting phone may run at a different rate or reuse the handle for another
+            # sensor: forget everything learned about this handle.
+            for d in (self._chains, self._rates, self._drift, self._bad):
+                d.pop(h, None)
 
     def bind(self, handle: int, key: str) -> None:
         if self._key_of.get(int(handle)) != key:
@@ -343,11 +367,13 @@ class FilterBank:
         self._drift[handle] = 0
         ok, msg = validate(cfg, fs)
         if not ok:
-            if self._bad.get(handle) != (key, round(fs)):
-                self._bad[handle] = (key, round(fs))
+            stamp = f"{key}|{json.dumps(cfg, sort_keys=True)}"
+            if self._bad.get(handle) != stamp:  # once per config, however the rate wanders
+                self._bad[handle] = stamp
                 self._pending_errors.append((key, msg))
             self._chains.pop(handle, None)
             return None
+        self._bad.pop(handle, None)
         ch = self._chains[handle] = FilterChain(cfg, fs, n_axes)
         return ch
 
