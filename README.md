@@ -210,7 +210,7 @@ Tweak the cutoff (slider), order (2/4) and notches, then **Apply**.
   and the **Spectrum** view shows the raw spectrum, the filtered "after" spectrum and the filter's
   response (dashed).
 - Settings are per sensor, shared by every open dashboard and saved in `filters.json`
-  (`--filters-file` to move it). **Recordings stay raw**, so you can always re-filter differently.
+  (`--filters-file` to move it). **The `.ssbin` recording stays raw** (filtered values only appear as extra CSV columns), so you can always re-filter differently.
 - Orientation quaternions and on-change sensors (light, proximity, steps) aren't filtered.
 
 <img src="docs/images/dashboard-filter.jpg" alt="Spectrum of a Galaxy S25 Ultra accelerometer with a 5 Hz low-pass: raw (faint), filtered (bold) and the filter response (dashed)" width="600">
