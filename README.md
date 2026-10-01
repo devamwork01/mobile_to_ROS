@@ -215,8 +215,14 @@ Tweak the cutoff (slider), order (2/4) and notches, then **Apply**.
 
 <img src="docs/images/dashboard-filter.jpg" alt="Spectrum of a Galaxy S25 Ultra accelerometer with a 5 Hz low-pass: raw (faint), filtered (bold) and the filter response (dashed)" width="600">
 
-Next (planned): the filtered signal on the phone's Home screen, `*_filtered` ROS 2 topics, and
-filtered columns in CSV exports.
+**Where the filtered signal goes** (only for sensors with a filter; raw outputs never change):
+- **ROS 2**: `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered`
+  (same message types as the raw topics, full rate).
+- **Recording CSV**: extra columns `f0,f1,f2` next to `v0..v5` (empty when no filter; the `.ssbin`
+  stays raw, and samples recovered by backfill are never filtered).
+- **Snapshot CSV**: extra columns `fx,fy,fz`.
+
+Next (planned): the filtered signal on the phone's Home screen.
 
 ## ROS 2 bridge (optional)
 
@@ -228,6 +234,7 @@ With a ROS 2 environment sourced, `--ros` publishes decoded sensors as standard 
 | `/phone/gyroscope` | `sensor_msgs/Imu` | gyroscope |
 | `/phone/magnetic_field` | `sensor_msgs/MagneticField` | magnetometer |
 | `/phone/orientation` | `geometry_msgs/QuaternionStamped` | rotation vector |
+| `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered` | same as the raw topic | the filtered signal, only while that sensor has a filter (see Filtering) |
 
 ```bash
 # with ROS 2 sourced:
@@ -270,7 +277,8 @@ drift >10%, RSS growth like a leak, or a crash.
 - [x] Dashboard redesign: KPI strip, sensor picker, pinnable/maximisable panels, Snapshot CSV
 - [x] Dashboard insights: per-axis stats, noise density, spectrum, drift, rate stability, Allan deviation, test runs
 - [x] Spectrum-guided filtering on the dashboard (suggest, tweak, before/after)
-- [ ] Filtered signal everywhere: phone Home screen, ROS 2 `*_filtered` topics, CSV columns
+- [x] Filtered signal on ROS 2 (`*_filtered` topics) and in CSV exports
+- [ ] Filtered signal on the phone (on-phone filter, settings synced from the laptop, Home screen)
 - [ ] Recording tools: naming/tags, playback scrubber, CSV export of recordings
 - [x] Phone app redesign (Compose) with on-device 3D orientation
 - [x] ROS 2 output sink (`--ros`)
