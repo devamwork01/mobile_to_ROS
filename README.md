@@ -196,6 +196,28 @@ ever receives a decimated display copy, which would give wrong noise figures and
 
 <img src="docs/images/dashboard-insights.jpg" alt="Insights — per-axis noise table, spectrum and Allan deviation of a test run" width="820">
 
+### Filtering — let the spectrum choose the filter
+
+Each graph panel has a **Filter** button (funnel). **Suggest from spectrum** proposes a filter from the
+live spectrum: a 4th-order Butterworth low-pass at the frequency where the signal sinks into the
+noise floor, plus notches for strong narrow peaks (e.g. a motor vibration) inside the band you keep.
+Tweak the cutoff (slider), order (2/4) and notches, then **Apply**.
+
+- Filtering runs on the laptop server on **every full-rate sample**, before the display stream is
+  down-sampled, using causal real-time filters (the kind a robot stack runs), so what you see is
+  exactly what a downstream consumer would get.
+- The panel then shows raw (faint) and filtered (bold) traces, the footer shows **σ raw → filtered**,
+  and the **Spectrum** view shows the raw spectrum, the filtered "after" spectrum and the filter's
+  response (dashed).
+- Settings are per sensor, shared by every open dashboard and saved in `filters.json`
+  (`--filters-file` to move it). **Recordings stay raw**, so you can always re-filter differently.
+- Orientation quaternions and on-change sensors (light, proximity, steps) aren't filtered.
+
+<img src="docs/images/dashboard-filter.jpg" alt="Spectrum of a Galaxy S25 Ultra accelerometer with a 5 Hz low-pass: raw (faint), filtered (bold) and the filter response (dashed)" width="600">
+
+Next (planned): the filtered signal on the phone's Home screen, `*_filtered` ROS 2 topics, and
+filtered columns in CSV exports.
+
 ## ROS 2 bridge (optional)
 
 With a ROS 2 environment sourced, `--ros` publishes decoded sensors as standard messages:
@@ -247,6 +269,8 @@ drift >10%, RSS growth like a leak, or a crash.
 - [x] Dashboard (cards, graphs, 3D, recordings browser, light/dark)
 - [x] Dashboard redesign: KPI strip, sensor picker, pinnable/maximisable panels, Snapshot CSV
 - [x] Dashboard insights: per-axis stats, noise density, spectrum, drift, rate stability, Allan deviation, test runs
+- [x] Spectrum-guided filtering on the dashboard (suggest, tweak, before/after)
+- [ ] Filtered signal everywhere: phone Home screen, ROS 2 `*_filtered` topics, CSV columns
 - [ ] Recording tools: naming/tags, playback scrubber, CSV export of recordings
 - [x] Phone app redesign (Compose) with on-device 3D orientation
 - [x] ROS 2 output sink (`--ros`)
