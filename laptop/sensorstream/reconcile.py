@@ -8,6 +8,7 @@ client's gaps from the current device.
 """
 from __future__ import annotations
 
+import time
 from typing import Callable, Dict, List, Optional, Tuple
 
 from . import protocol as p
@@ -17,8 +18,10 @@ from .backfill import GapTracker
 class Reconciler:
     def __init__(self, tracker: GapTracker,
                  send_resend: Callable[[int, int, int, int], None],
-                 on_backfilled: Callable[[p.Datagram, int], None]) -> None:
+                 on_backfilled: Callable[[p.Datagram, int], None],
+                 clock: Callable[[], int] = time.monotonic_ns) -> None:
         self._t = tracker
+        self._clock = clock  # same clock as live t_recv, so backfill lands at its arrival time
         self._send_resend = send_resend
         self._on_backfilled = on_backfilled
         self._dev2client: Dict[int, str] = {}
@@ -66,7 +69,7 @@ class Reconciler:
                 continue
             for r in dg.records:
                 got.append(r.seq)
-            self._on_backfilled(dg, 0)       # append to recorder; dedup on read is by (handle, seq)
+            self._on_backfilled(dg, self._clock())  # append to recorder; dedup on read is by (handle, seq)
         self._t.resolve(cid, handle, got)
         got_set = set(got)
         self._inflight = {

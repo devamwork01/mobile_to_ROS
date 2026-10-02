@@ -57,6 +57,16 @@ object BinaryPacketCodec {
     }
 
     /** Convenience allocator variant. */
+    /** Byte offset of the little-endian device id in the packet header (after magic, version, flags). */
+    private const val OFF_DEVICE_ID = 4
+
+    /** Copy of an encoded [datagram] stamped with [deviceId]; everything else byte-identical. */
+    fun withDeviceId(datagram: ByteArray, deviceId: Int): ByteArray {
+        val out = datagram.copyOf()
+        ByteBuffer.wrap(out).order(ByteOrder.LITTLE_ENDIAN).putInt(OFF_DEVICE_ID, deviceId)
+        return out
+    }
+
     fun encode(deviceId: Int, records: List<SensorSample>, flags: Int = 0): ByteArray {
         val stage = (flags and FLAG_STAGE_TS) != 0
         val out = ByteArray(encodedSize(records, stage))

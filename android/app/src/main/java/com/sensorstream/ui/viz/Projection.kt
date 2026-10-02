@@ -135,4 +135,24 @@ object Projection {
         val yaw = ((atan2(r[1], r[4]) * rad) % 360f + 360f) % 360f
         return Triple(roll, pitch, yaw)
     }
+
+    /**
+     * Inverse of [eulerDeg]: the rotation vector `[x,y,z,w]` whose roll / pitch / yaw (degrees) are
+     * the given ones. [eulerDeg] is Android's getOrientation, i.e. R = Rz(-yaw) * Rx(-pitch) * Ry(roll).
+     */
+    fun rotationFromEuler(rollDeg: Float, pitchDeg: Float, yawDeg: Float): FloatArray {
+        fun axisQuat(ax: Int, deg: Float): FloatArray {
+            val h = Math.toRadians(deg.toDouble()).toFloat() / 2f
+            val q = floatArrayOf(0f, 0f, 0f, kotlin.math.cos(h))
+            q[ax] = kotlin.math.sin(h)
+            return q
+        }
+        fun mul(a: FloatArray, b: FloatArray) = floatArrayOf(
+            a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+            a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+            a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+            a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+        )
+        return mul(mul(axisQuat(2, -yawDeg), axisQuat(0, -pitchDeg)), axisQuat(1, rollDeg))
+    }
 }

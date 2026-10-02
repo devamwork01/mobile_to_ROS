@@ -50,7 +50,29 @@ class _QuietHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if dash is not None and urllib.parse.urlparse(self.path).path in ("/", "/index.html"):
+            self._send_page(dash)
+            return
         super().do_GET()
+
+    def _send_page(self, dash) -> None:
+        """index.html with this server's WebSocket port, so the page connects back to the server
+        that served it (a server started with --ws-port other than 8081 would otherwise serve a
+        dashboard talking to a different server)."""
+        try:
+            with open(self.translate_path("/index.html"), "rb") as fh:
+                html = fh.read().decode("utf-8")
+        except OSError:
+            self.send_error(404, "index.html not found")
+            return
+        tag = f"<script>window.__SS_WS_PORT__={int(dash.ws_port)}</script>"
+        html = html.replace("</head>", tag + "</head>", 1) if "</head>" in html else tag + html
+        body = html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def end_headers(self):
         # Vite bundles are content-hashed (/assets/index-<hash>.js), so they can be cached for

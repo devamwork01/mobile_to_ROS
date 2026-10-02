@@ -17,6 +17,9 @@ from .seqloss import SeqLoss
 GRAVITY = 9.80665
 MIN_SAMPLES = 50
 ALLAN_MIN_S = 120.0
+# A run's span is measured between its first and last samples, so a 2 min run reads ~119.99 s;
+# allow for that and the run's start/stop timing.
+ALLAN_SLACK_S = 2.0
 PSD_MIN_RATE = 5.0
 ACCEL_TYPES = {1, 35}          # accelerometer, accelerometer (uncalibrated)
 GYRO_TYPES = {4, 16}           # gyroscope, gyroscope (uncalibrated)
@@ -226,7 +229,7 @@ def analyse_sensor(sensor: dict, preset: str, duration_s: float) -> dict:
         mag = np.linalg.norm(vals[:, :3], axis=1)
         mbias = float(np.nanmean(mag)) - GRAVITY if (still and type_ in ACCEL_TYPES) else None
         rep["magnitude"] = _axis_report(t, mag, fs, spectral, mbias)
-    if spectral and duration_s >= ALLAN_MIN_S and type_ in (ACCEL_TYPES | GYRO_TYPES):
+    if spectral and duration_s >= ALLAN_MIN_S - ALLAN_SLACK_S and type_ in (ACCEL_TYPES | GYRO_TYPES):
         rep["adev"] = {name: allan_deviation(vals[:, i], fs) for i, name in enumerate(names)}
         rep["adev_points"] = {name: adev_points(rep["adev"][name]) for name in names}
     return rep

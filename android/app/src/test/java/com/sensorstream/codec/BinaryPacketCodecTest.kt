@@ -42,4 +42,14 @@ class BinaryPacketCodecTest {
             BinaryPacketCodec.encode(1, records, 0).size,
         )
     }
+
+    @Test fun `withDeviceId restamps only the device id`() {
+        // QA 2026-10-02: backfill resent recorded datagrams under the device id of an earlier
+        // session, so the server filed them under the wrong device.
+        val recs = listOf(SensorSample(1, 0, 12345L, 123456789012345L, 3, floatArrayOf(0.12f, -9.81f, 0.42f)))
+        val old = BinaryPacketCodec.encode(3, recs, BinaryPacketCodec.FLAG_STAGE_TS)
+        val now = BinaryPacketCodec.withDeviceId(old, 9)
+        assertEquals(BinaryPacketCodec.encode(9, recs, BinaryPacketCodec.FLAG_STAGE_TS).toList(), now.toList())
+        assertEquals(3, java.nio.ByteBuffer.wrap(old).order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt(4)) // input untouched
+    }
 }

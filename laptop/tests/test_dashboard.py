@@ -123,3 +123,26 @@ def test_page_is_revalidated_but_hashed_assets_are_cached(tmp_path):
     assert root == "no-cache"
     assert page == "no-cache"
     assert asset == "public, max-age=31536000, immutable"
+
+
+def test_page_tells_the_dashboard_its_own_websocket_port(tmp_path):
+    # QA 2026-10-02: the page always connected to ws :8081 unless ?ws= was given, so a server on
+    # other ports served a dashboard that talked to a different server.
+    (tmp_path / "index.html").write_text("<html><head><title>x</title></head><body></body></html>")
+
+    async def run():
+        dash = DashboardServer(str(tmp_path), "127.0.0.1", 0, "127.0.0.1", 0)
+        await dash.start()
+        try:
+            loop = asyncio.get_running_loop()
+            get = lambda path: urllib.request.urlopen(f"http://127.0.0.1:{dash.http_port}{path}", timeout=3)
+            root = await loop.run_in_executor(None, lambda: get("/"))
+            page = await loop.run_in_executor(None, lambda: get("/index.html?ws=1"))
+            return dash.ws_port, root.read().decode(), root.headers.get("Cache-Control"), page.read().decode()
+        finally:
+            await dash.stop()
+
+    port, root, cache, page = asyncio.run(run())
+    tag = f"<script>window.__SS_WS_PORT__={port}</script></head>"
+    assert tag in root and tag in page
+    assert cache == "no-cache"

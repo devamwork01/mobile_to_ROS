@@ -148,3 +148,23 @@ def test_bias_instability_flags_a_minimum_at_the_last_tau():
     n = 60000
     v = RNG.normal(0, 0.01, n) + np.cumsum(RNG.normal(0, 0.0002, n))
     assert a.adev_points(a.allan_deviation(v, 100.0))["bi_at_edge"] is False
+
+
+def _accel_run(seconds, fs=100.0, type_=1):
+    n = int(seconds * fs)
+    rng = np.random.default_rng(1)
+    return {"handle": 0, "type": type_, "t": _t(n, fs), "v": rng.normal(0, 0.01, (n, 3)) + [0, 0, 9.81],
+            "seq": np.arange(n)}
+
+
+def test_two_minute_run_gets_allan_deviation():
+    # QA 2026-10-02: a "2 min" test run measures 119.99 s of sample span and never got Allan.
+    s = _accel_run(120)
+    span = (s["t"][-1] - s["t"][0]) / 1e9
+    assert span < a.ALLAN_MIN_S
+    assert "adev" in a.analyse_sensor(s, "still", span)
+
+
+def test_short_run_has_no_allan_deviation():
+    s = _accel_run(100)
+    assert "adev" not in a.analyse_sensor(s, "still", (s["t"][-1] - s["t"][0]) / 1e9)
