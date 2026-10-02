@@ -16,6 +16,16 @@ class BiquadGoldenTest {
             val cfg = FilterConfigCodec.parse(case.getJSONObject("config"))!!
             val x = case.getJSONArray("x")
             val y = case.getJSONArray("y")
+            if (case.optBoolean("axes3")) {
+                // Per-axis filter: three different filters on three columns.
+                val chain3 = FilterChain(cfg, fs, 3)
+                for (i in 0 until x.length()) {
+                    val xi = x.getJSONArray(i)
+                    val out = chain3.process(DoubleArray(3) { xi.getDouble(it) })
+                    for (a in 0 until 3) assertEquals("case $c sample $i axis $a", y.getJSONArray(i).getDouble(a), out[a], 1e-9)
+                }
+                continue
+            }
             val chain = FilterChain(cfg, fs, 1)
             for (i in 0 until x.length()) {
                 val out = chain.process(doubleArrayOf(x.getDouble(i)))[0]

@@ -58,4 +58,13 @@ class BiquadTest {
         assertNotNull(Biquad.validate(FilterConfig(null, 4, List(4) { Notch(5.0, 10.0) }), 100.0))
         assertNull(Biquad.validate(FilterConfig(10.0, 4), null))
     }
+
+    @Test fun `per-axis validation names the axis and scalar streams use X`() {
+        val ok = FilterConfig(1.0, 4)
+        val tooHigh = FilterConfig(40.0, 4)
+        val per = FilterConfig(1.0, 4, axes = listOf(ok, ok, tooHigh))
+        assertTrue(Biquad.validate(per, 50.0)!!.startsWith("Z: "))
+        assertNull(Biquad.validate(per, 100.0))
+        assertEquals(1, FilterChain(per, 100.0, 1).process(doubleArrayOf(1013.0)).size)
+    }
 }

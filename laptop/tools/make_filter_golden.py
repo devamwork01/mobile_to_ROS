@@ -9,7 +9,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from sensorstream.filters import FilterChain  # noqa: E402
+from sensorstream.filters import FilterChain, normalise  # noqa: E402
 
 FS = 100.0
 N = 400
@@ -29,6 +29,15 @@ for cname, cfg in configs.items():
     for iname, x in inputs.items():
         y = FilterChain(cfg, FS, 1).process_block(np.array(x)[:, None])[:, 0].tolist()
         cases.append({"config": cfg, "input": iname, "x": x, "y": y})
+# Per-axis: three different filters on a 3-axis input (columns = noise, step, sine).
+x3 = np.column_stack([inputs["noise"], inputs["step"], inputs["sine"]])
+per_axis = {
+    "per_axis_a": normalise({"axes": [configs["lp2"], configs["notches"], configs["lp4_notch"]]}),
+    "per_axis_b": normalise({"axes": [configs["lp4_notch"], configs["lp4_notch"], configs["lp2"]]}),
+}
+for cname, cfg in per_axis.items():
+    y3 = FilterChain(cfg, FS, 3).process_block(x3).tolist()
+    cases.append({"config": cfg, "input": "noise|step|sine", "axes3": True, "x": x3.tolist(), "y": y3})
 out = os.path.join(os.path.dirname(__file__), "..", "..", "android", "app", "src", "test", "resources", "filter_golden.json")
 os.makedirs(os.path.dirname(out), exist_ok=True)
 with open(out, "w", encoding="utf-8") as fh:

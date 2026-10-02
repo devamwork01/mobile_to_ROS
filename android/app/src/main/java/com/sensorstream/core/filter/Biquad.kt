@@ -7,8 +7,16 @@ import kotlin.math.sin
 /** A notch at [hz] with quality [q]. */
 data class Notch(val hz: Double, val q: Double)
 
-/** Same shape as the laptop's filter config: optional Butterworth low-pass + up to 3 notches. */
-data class FilterConfig(val lowpassHz: Double?, val order: Int = 4, val notches: List<Notch> = emptyList())
+/**
+ * Same shape as the laptop's filter config: optional Butterworth low-pass + up to 3 notches.
+ * [axes] (X, Y, Z) makes it a per-axis filter; the top-level fields then mirror X.
+ */
+data class FilterConfig(
+    val lowpassHz: Double?,
+    val order: Int = 4,
+    val notches: List<Notch> = emptyList(),
+    val axes: List<FilterConfig>? = null,
+)
 
 /**
  * Port of laptop/sensorstream/filters.py (RBJ cookbook biquads). Kept numerically identical - a
@@ -41,6 +49,12 @@ object Biquad {
 
     /** null when the config is usable at [fs] (or structurally valid when fs is unknown), else a message. */
     fun validate(cfg: FilterConfig, fs: Double?): String? {
+        cfg.axes?.let { axes ->
+            // Per-axis: every axis must be usable, or the whole filter is refused (never half-applied).
+            if (axes.size != 3 || axes.any { it.axes != null }) return "Per-axis filters need X, Y and Z settings."
+            axes.forEachIndexed { i, ax -> validate(ax, fs)?.let { return "${"XYZ"[i]}: $it" } }
+            return null
+        }
         val nyq = if (fs != null) 0.45 * fs else Double.MAX_VALUE
         if (cfg.lowpassHz == null && cfg.notches.isEmpty()) return "No low-pass or notch set."
         cfg.lowpassHz?.let { hz ->
@@ -58,13 +72,15 @@ object Biquad {
 
 /** Cascade of biquads per axis (direct form II transposed, double state), kept between calls. */
 class FilterChain(val config: FilterConfig, val fs: Double, val nAxes: Int) {
-    private val sec = Biquad.sections(config, fs)
-    private val z = Array(nAxes) { Array(sec.size) { DoubleArray(2) } }
+    // One section list per axis: a per-axis config filters each axis with its own settings.
+    private val secs = Array(nAxes) { a -> Biquad.sections(config.axes?.getOrNull(a) ?: config, fs) }
+    private val z = Array(nAxes) { a -> Array(secs[a].size) { DoubleArray(2) } }
     private val primed = BooleanArray(nAxes)
 
     /** Start axis [a] in steady state for input [x0] (no step response from the first sample). */
     private fun prime(a: Int, x0: Double) {
         var x = x0
+        val sec = secs[a]
         for (i in sec.indices) {
             val s = sec[i]
             val y = x * (s[0] + s[1] + s[2]) / (1.0 + s[3] + s[4])
@@ -81,6 +97,7 @@ class FilterChain(val config: FilterConfig, val fs: Double, val nAxes: Int) {
             var x = if (a < values.size) values[a] else Double.NaN
             if (!x.isFinite()) { out[a] = Double.NaN; continue }
             if (!primed[a]) { prime(a, x); primed[a] = true }
+            val sec = secs[a]
             for (i in sec.indices) {
                 val s = sec[i]
                 val zi = z[a][i]
