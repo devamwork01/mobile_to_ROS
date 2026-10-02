@@ -23,8 +23,10 @@ CLOCK_TYPES = frozenset({1, 2, 4, 11})
 UT_TO_T = 1e-6
 # ROS time and the monotonic clock are read one after the other per datagram (ROS first), so their
 # difference wobbles by ~1 us and a slow read only ever makes it smaller. It is held; it moves up when a
-# read beats it by more than ROS_READ_SLACK_NS (the held one was a slow read) and is re-taken when it
-# moves by more than ROS_CLOCK_STEP_NS (an NTP step of the system clock).
+# read beats it by more than ROS_READ_SLACK_NS (the held one was a slow read, or the clock stepped
+# forward). A drop of more than ROS_CLOCK_STEP_NS (the clock stepped back) is taken only when the next
+# read agrees - one slow read (a GIL stall) is never a step. A real backward step under 1 ms is not
+# followed (bounded: the stamps stay < 1 ms late).
 ROS_READ_SLACK_NS = 10_000
 ROS_CLOCK_STEP_NS = 1_000_000
 IMU_TOPICS = ("/phone/imu/data_raw", "/phone/imu/data",
@@ -50,6 +52,7 @@ class RosPlanner:
         self._guard = StampGuard()
         self._cov: Dict[int, dict] = {}
         self._ros_off: Optional[int] = None
+        self._ros_drop: Optional[int] = None  # a > 1 ms drop seen once, waiting for confirmation
 
     def set_covariance(self, cov: Optional[Dict[int, dict]]) -> None:
         self._cov = dict(cov or {})
@@ -80,9 +83,15 @@ class RosPlanner:
 
     def _ros_offset(self, ros_now_ns: int, mono_now_ns: int) -> int:
         sample = ros_now_ns - mono_now_ns
-        if (self._ros_off is None or abs(sample - self._ros_off) > ROS_CLOCK_STEP_NS
-                or sample - self._ros_off > ROS_READ_SLACK_NS):
-            self._ros_off = sample
+        if self._ros_off is None or sample - self._ros_off > ROS_READ_SLACK_NS:
+            self._ros_off, self._ros_drop = sample, None
+        elif self._ros_off - sample > ROS_CLOCK_STEP_NS:
+            if self._ros_drop is not None and abs(sample - self._ros_drop) <= ROS_CLOCK_STEP_NS:
+                self._ros_off, self._ros_drop = max(sample, self._ros_drop), None
+            else:
+                self._ros_drop = sample
+        else:
+            self._ros_drop = None
         return self._ros_off
 
     def plan(self, dg, t_recv_ns: int, filtered, ros_now_ns: int, mono_now_ns: int) -> List[Out]:

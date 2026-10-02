@@ -101,9 +101,10 @@ def test_devices_have_separate_clocks_and_pairers():
     pl = RosPlanner()
     pl.plan(dg(rec(1, 0, [0.0, 0.0, 9.8]), dev=1), R0, None, NOW, R0)
     # device 2: a different phone clock (offset 5 s larger); its stamp maps from its own clock
-    out = pl.plan(dg(rec(4, 0, [0.1, 0.2, 0.3]), dev=2), R0 + 5_000 * MS, None, NOW + 9 * MS, R0 + 5_000 * MS + 9 * MS)
+    # it arrives 5 s later; ROS time and the monotonic clock advance together (5 s + 9 ms)
+    out = pl.plan(dg(rec(4, 0, [0.1, 0.2, 0.3]), dev=2), R0 + 5_000 * MS, None, NOW + 5_009 * MS, R0 + 5_009 * MS)
     assert [o.topic for o in out] == ["/phone/gyroscope"]    # dev 1's accel is not paired with dev 2's gyro
-    assert out[0].stamp_ns == NOW
+    assert out[0].stamp_ns == NOW + 5_000 * MS               # dev 1's clock would map phone time 0 to NOW
 
 
 def test_cli_has_ros_stamp():
@@ -171,3 +172,23 @@ def test_a_slow_first_clock_read_is_corrected():
     pl.plan(dg(rec(1, 0, [0.0, 0.0, 9.8])), R0, None, NOW, R0 + 500_000)
     b = pl.plan(dg(rec(1, 2, [0.0, 0.0, 9.8], seq=1)), R0 + 2 * MS, None, NOW + 2 * MS, R0 + 2 * MS)[0]
     assert b.stamp_ns == NOW + 2 * MS
+
+
+def _spacings(pl, wobbles):
+    stamps = []
+    for k, wobble_ns in enumerate(wobbles):
+        recv = R0 + k * 2 * MS
+        stamps.append(pl.plan(dg(rec(1, k * 2, [0.0, 0.0, 9.8], seq=k)), recv, None, NOW + (recv - R0) + wobble_ns, recv)[0].stamp_ns)
+    return [b - a for a, b in zip(stamps, stamps[1:])]
+
+
+def test_one_very_slow_clock_read_is_not_a_step():
+    # review: a 5 ms GIL stall between the two clock reads looked like an NTP step and bent one stamp
+    assert _spacings(RosPlanner(), [0, 0, -5 * MS, 0, 0]) == [2 * MS] * 4
+
+
+def test_a_real_backward_clock_step_is_followed_on_the_second_read():
+    # ROS time steps back 5 ms (NTP): the first read is held as a candidate, the second confirms it.
+    # Stamps never go backwards, so they creep (+1 ns) until real time catches up, then resume.
+    sp = _spacings(RosPlanner(), [0, 0, -5 * MS, -5 * MS, -5 * MS, -5 * MS, -5 * MS])
+    assert sp == [2 * MS, 2 * MS, 1, 1, MS - 2, 2 * MS]

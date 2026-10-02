@@ -268,7 +268,10 @@ Without ROS sourced, `--ros` prints a warning and the server runs normally.
   covariance stays 0 (unknown) rather than claiming an exact yaw. Without a Still run the covariances are 0 (ROS "unknown").
   Filtered topics carry the raw covariance (conservative).
 - **Frames**: `frame_id` is `phone`. Android's device axes (x right, y up the screen, z out of the screen)
-  and its East-North-Up world frame match REP-103/REP-145, so no conversion is applied.
+  and its East-North-Up world frame match REP-103/REP-145, so no conversion is applied. "North" is
+  **magnetic** north (the rotation vector uses the magnetometer): set your magnetic declination (e.g.
+  `navsat_transform`'s `magnetic_declination_radians`) if you need true north. No TF is published for
+  `phone`; add a static transform from your robot's base frame.
 
 ## Network priority on a busy Wi-Fi
 

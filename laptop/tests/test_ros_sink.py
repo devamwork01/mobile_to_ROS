@@ -192,6 +192,11 @@ def test_covariance_is_published(ros_env):
 
 def test_sensor_stamps_follow_phone_spacing(ros_env):
     sink, node = ros_env
+    # review: warm the clock-read path first, so a cold first read cannot shift the held offset
+    # mid-test (gyroscope records from another device: nothing reaches the accelerometer topic)
+    warm = p.Datagram(device_id=99, records=[p.Record(4, 9, 0, 0, 3, [0.0, 0.0, 0.0])])
+    for _ in range(20):
+        sink.on_datagram(warm, ("x", 0), time.monotonic_ns())
     stamps = []
     sub = node.create_subscription(Imu, "/phone/accelerometer", lambda m: stamps.append(
         m.header.stamp.sec * 1_000_000_000 + m.header.stamp.nanosec), qos_profile_sensor_data)
