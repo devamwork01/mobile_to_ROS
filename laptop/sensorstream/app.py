@@ -251,6 +251,7 @@ async def run(args: argparse.Namespace) -> None:
     filterbank = FilterBank(args.filters_file)
     filter_reports = ReportStore(report_path(args))
     autofilter: Optional[AutoFilter] = None  # created once push_filters exists (below)
+    phone_now: dict = {"id": None}  # device id of the connected phone (guided tuning)
     testruns: Optional[TestRunManager] = None  # created once the control channel exists (below)
 
     # Backfill (Phase 2B): detect per-(client,handle) seq gaps on the live stream and, after a grace
@@ -302,11 +303,22 @@ async def run(args: argparse.Namespace) -> None:
             filterbank.set_catalog(ev.get("sensors") or [])
             push_filters()  # the phone filters its own preview with the laptop's settings
             refresh_ros_cov(ev.get("model") or "")
+            phone_now["id"] = ev["device_id"]
             if autofilter is not None:  # a (re)connect re-tunes from fresh data
-                autofilter.on_phone_connected(ev.get("model"), ev.get("android"))
+                autofilter.on_phone_connected(ev.get("model"), ev.get("android"), ev.get("caps") or [])
         elif kind == "backfill":
             reconciler.on_backfill(ev["device_id"], ev["handle"], ev["frames"])
             return   # raw frames are not browser-bound
+        elif kind == "tune_window":
+            if autofilter is not None:
+                autofilter.on_tune_window(ev.get("msg") or {})
+            return   # not browser-bound
+        elif kind == "tune_request":
+            if autofilter is not None:
+                autofilter.on_tune_request()
+            return
+        elif kind == "phone_disconnected" and phone_now["id"] == ev.get("device_id"):
+            phone_now["id"] = None
         elif kind == "backfill_unavailable":
             reconciler.on_unavailable(ev["device_id"], ev["handle"], ev["from"], ev["to"])
             return
@@ -318,7 +330,8 @@ async def run(args: argparse.Namespace) -> None:
         asyncio.get_running_loop().create_task(control.send_filters(filterbank.configs))
 
     if args.filter:
-        autofilter = AutoFilter(filterbank, insights, filter_reports, dash.broadcast, push_filters)
+        autofilter = AutoFilter(filterbank, insights, filter_reports, dash.broadcast, push_filters,
+                                send_phone=make_phone_sender(control, phone_now))
     dash.control_handler = control.handle
 
     def record_meta() -> Optional[dict]:
@@ -538,6 +551,14 @@ async def run(args: argparse.Namespace) -> None:
             ros_sink.close()
         transport.close()
         await dash.stop()
+
+
+def make_phone_sender(control, current: dict):
+    """Fire-and-forget control message to the connected phone (guided tuning); dropped without one."""
+    def send(obj: dict) -> None:
+        if current.get("id") is not None:
+            asyncio.get_running_loop().create_task(control.send_json(current["id"], obj))
+    return send
 
 
 def report_path(args) -> str:

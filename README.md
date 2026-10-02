@@ -227,6 +227,12 @@ Tweak the cutoff (slider), order (2/4) and notches, then **Apply**.
   once per phone connection. The findings are printed, written to `filter_report.json` (next to
   `filters.json`; `--filter-report` to change), and shown in the filter pane. Hold the phone the way
   you will use it for those first 10 s - the spectrum is taken from them.
+  With the phone app (v0.1.13+), tuning is **guided**: when the phone connects it says "pick up the
+  phone and move it the way you'll use it", counts down 3 s, **buzzes once**, captures 10 s (countdown
+  on screen), then **buzzes twice** — you can put it down — and shows what was tuned. Only that capture
+  is analysed. A sensor switched on later gets the same prompt (with a stronger buzz that also sounds
+  on silent), and **Re-tune** on the phone's Filtered Signals card repeats it. Older apps, or a capture
+  that never arrives, fall back to automatic tuning 60 s after the sensor starts.
 - Orientation quaternions and on-change sensors (light, proximity, steps) aren't filtered.
 
 <img src="docs/images/dashboard-filter.jpg" alt="Spectrum of a Galaxy S25 Ultra accelerometer with a 5 Hz low-pass: raw (faint), filtered (bold) and the filter response (dashed)" width="600">

@@ -123,3 +123,27 @@ def test_cli_filter_flags_and_report_path():
     assert a.filter is True and report_path(a) == os.path.join("cfg", "filter_report.json")
     a = build_parser().parse_args(["--filter-report", "x.json"])
     assert report_path(a) == "x.json"
+
+
+def test_phone_sender_targets_the_current_phone():
+    import asyncio
+    from sensorstream.app import make_phone_sender
+
+    class Ctl:
+        def __init__(self):
+            self.sent = []
+
+        async def send_json(self, device_id, obj):
+            self.sent.append((device_id, obj))
+            return True
+
+    ctl, current = Ctl(), {"id": None}
+
+    async def go():
+        send = make_phone_sender(ctl, current)
+        send({"type": "tune_prompt"})      # no phone yet: dropped
+        current["id"] = 7
+        send({"type": "tune_prompt", "id": 1})
+        await asyncio.sleep(0)
+    asyncio.run(go())
+    assert ctl.sent == [(7, {"type": "tune_prompt", "id": 1})]
