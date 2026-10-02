@@ -256,13 +256,16 @@ Without ROS sourced, `--ros` prints a warning and the server runs normally.
   that is more than 3 samples old). `/phone/imu/data` is published only while the rotation vector streams.
 - **Timestamps**: every message is stamped with when the phone measured the sample, mapped to ROS time
   from the fastest packets of the last 10 s - no Wi-Fi jitter, a constant ~1 ms late (the fastest
-  transit). The mapping follows clock drift smoothly (at most 1 ms/s) and accepts a phone clock reset
-  only once it has lasted 0.5 s. `--ros-stamp receive` restores laptop-arrival stamps.
+  transit). The mapping follows clock drift smoothly (at most 1 ms/s). Packets arriving more than 1 s
+  late (a stalled link) are treated as network delay and never move it; it is corrected once only when
+  packets prove it too late (arriving over 1 s early for 0.5 s). Only continuous sensors feed it, not
+  on-change ones like the step counter. `--ros-stamp receive` restores laptop-arrival stamps.
 - **Covariance**: run a **Still** test run once per phone model (Test run -> Still, 2 min, phone flat and
   untouched). Its per-axis sigma squared fills the accelerometer, gyroscope and magnetometer covariances
   on every topic, picked up immediately; the server prints which report it uses. Orientation: yaw from
   the rotation vector's own heading accuracy, roll/pitch estimated as (accelerometer sigma / 9.81)^2 (an
-  approximation, usually on the high side). Without a Still run the covariances are 0 (ROS "unknown").
+  approximation, usually on the high side); if the phone gives no heading accuracy, orientation
+  covariance stays 0 (unknown) rather than claiming an exact yaw. Without a Still run the covariances are 0 (ROS "unknown").
   Filtered topics carry the raw covariance (conservative).
 - **Frames**: `frame_id` is `phone`. Android's device axes (x right, y up the screen, z out of the screen)
   and its East-North-Up world frame match REP-103/REP-145, so no conversion is applied.

@@ -75,8 +75,9 @@ def test_orientation_covariance():
     full = ros_cov.orientation_cov([0.01, 0.04, 0.09], 0.1)
     rp = ((0.1 + 0.2) / 2 / 9.81) ** 2
     assert full == pytest.approx(ros_cov.diag([rp, rp, 0.01]))
-    assert ros_cov.orientation_cov(None, 0.1) == pytest.approx(ros_cov.diag([0.0, 0.0, 0.01]))
-    assert ros_cov.orientation_cov([0.01, 0.04, 0.09], None) == pytest.approx(ros_cov.diag([rp, rp, 0.0]))
+    # review: one 0 on the diagonal reads as "exact" in ROS - only all zeros means unknown
+    assert ros_cov.orientation_cov(None, 0.1) == ros_cov.UNKNOWN
+    assert ros_cov.orientation_cov([0.01, 0.04, 0.09], None) == ros_cov.UNKNOWN
     assert ros_cov.orientation_cov(None, None) == ros_cov.UNKNOWN
 
 
@@ -86,3 +87,27 @@ def test_describe_is_ascii():
     some = ros_cov.describe({1: {"var": [0] * 3, "report": "r1"}, 4: {"var": [0] * 3, "report": "r2"}}, "SM-S938B")
     assert some == "ROS covariance: SM-S938B - accel from r1, gyro from r2"
     assert some.isascii() and none.isascii()
+
+
+def test_matrices_are_all_floats():
+    # review: rclpy's double[9] setters reject ints - every IMU publish raised once a report existed
+    for m in (ros_cov.diag([1, 2, 3]), ros_cov.orientation_cov([0.01, 0.04, 0.09], 0.1),
+              ros_cov.UNKNOWN, ros_cov.NOT_PROVIDED):
+        assert all(type(x) is float for x in m)
+
+
+def test_odd_report_shapes_are_skipped(tmp_path):
+    # review: valid JSON of an unexpected shape raised, tearing down the phone's hello
+    good = {"type": 1, "samples": 10, "axes": axes(0.1, 0.1, 0.1)}
+    odd = [
+        {"device": "SM-S938B", "sensors": [good]},
+        {"device": {"model": "SM-S938B"}, "created": 5, "sensors": [good]},
+        {"device": {"model": "SM-S938B"}, "created": "2026-10-03", "sensors": [{"type": 1, "axes": [1, 2, 3]}]},
+        {"device": {"model": "SM-S938B"}, "created": "2026-10-03", "sensors": [{"type": [1], "axes": axes(1, 1, 1)}]},
+        {"device": {"model": "SM-S938B"}, "created": "2026-10-03", "sensors": 7},
+        {"device": {"model": "SM-S938B"}, "created": "2026-09-01", "sensors": [{**good, "samples": "many"}]},
+    ]
+    for i, r in enumerate(odd):
+        (tmp_path / f"odd{i}.report.json").write_text(json.dumps({"id": f"odd{i}", "preset": "still", **r}), encoding="utf-8")
+    report(tmp_path, "ok", "2026-10-02T10:00:00+00:00", [sensor(1)])
+    assert ros_cov.find_covariance(str(tmp_path), "SM-S938B")[1]["report"] == "ok"

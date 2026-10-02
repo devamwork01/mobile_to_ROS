@@ -216,9 +216,14 @@ async def run(args: argparse.Namespace) -> None:
         """Covariance for ROS 2 from the newest Still test run of this phone model."""
         if ros_sink is None or not model:
             return
-        cov = ros_cov.find_covariance(args.log_dir, model)
-        ros_sink.set_covariance(cov)
-        print("   " + ros_cov.describe(cov, model))
+        try:  # runs inside the phone's hello: never let it tear the session down
+            cov = ros_cov.find_covariance(args.log_dir, model)
+            ros_sink.set_covariance(cov)
+            print("   " + ros_cov.describe(cov, model))
+        except Exception as exc:
+            print(f"   (ROS covariance not refreshed: {exc!r})")
+
+    ros_failed = False
 
     recorder = Recorder()
     sync = SyncTracker()
@@ -246,7 +251,13 @@ async def run(args: argparse.Namespace) -> None:
         fv = filterbank.process(dg)  # once per raw sample, before any decimation
         sink.on_datagram(dg, addr, t_recv_ns, filtered=fv)
         if ros_sink is not None:
-            ros_sink.on_datagram(dg, addr, t_recv_ns, filtered=fv)
+            nonlocal ros_failed
+            try:  # a ROS failure must never starve recording, test runs, insights or backfill
+                ros_sink.on_datagram(dg, addr, t_recv_ns, filtered=fv)
+            except Exception as exc:
+                if not ros_failed:
+                    ros_failed = True
+                    print(f"   (ROS publish failed, still streaming to everything else: {exc!r})")
         sync.observe(dg, t_recv_ns)
         insights.on_datagram(dg, addr, t_recv_ns, filtered=fv)
         if testruns is not None:  # UDP can arrive before the run manager is wired

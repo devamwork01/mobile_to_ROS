@@ -93,26 +93,51 @@ def test_lone_outlier_is_ignored():
 def test_short_outlier_burst_never_resets():
     m = ClockMapper()
     ts = feed(m, 0, 3, OFF)
-    ts = feed(m, ts, 0.3, OFF + 100 * S)
+    ts = feed(m, ts, 0.3, OFF - 100 * S)
     feed(m, ts, 1, OFF)
     assert m.resets == 0 and abs(m.offset_ns - OFF) <= 10_000
 
 
-def test_sustained_clock_change_resets_exactly_once():
+def test_late_arrivals_never_reset():
+    # Within one device id the phone clock never jumps (a reboot reconnects as a new device), so
+    # arrivals more than 1 s later than the mapping are transit delay: a stalled link, bufferbloat.
     m = ClockMapper()
     ts = feed(m, 0, 3, OFF)
-    feed(m, ts, 20, OFF + 100 * S)
+    ts = feed(m, ts, 0.6, OFF + 1_200_000_000)   # review: 0.6 s of +1.2 s latency reset it twice
+    ts = feed(m, ts, 20, OFF)
+    ts = feed(m, ts, 20, OFF + 100 * S)
+    feed(m, ts, 1, OFF)
+    assert m.resets == 0 and abs(m.offset_ns - OFF) <= 10_000
+
+
+def test_draining_queue_never_resets():
+    # review: after a 3 s uplink stall the queue drains at 2x real time, d falling at 1 s/s
+    m = ClockMapper()
+    ts = feed(m, 0, 3, OFF)
+    for k in range(1500):
+        m.observe(ts - (OFF + max(0, 3 * S - k * P)), ts)
+        ts += P
+    feed(m, ts, 2, OFF)
+    assert m.resets == 0 and abs(m.offset_ns - OFF) <= 10_000
+
+
+def test_a_too_late_seed_is_corrected_exactly_once():
+    # The first sample arrived 5 s late (queued at connect); arrivals > 1 s earlier than the mapping
+    # prove it too late (transit cannot be negative): corrected once, after 0.5 s.
+    m = ClockMapper()
+    m.observe(0, OFF + 5 * S)
+    feed(m, 5 * S + OFF, 20, OFF)
     assert m.resets == 1
-    assert m.offset_ns == OFF + 100 * S
+    assert m.offset_ns == OFF
 
 
 def test_no_second_reset_within_holdoff():
     m = ClockMapper()
     ts = feed(m, 0, 3, OFF)
-    ts = feed(m, ts, 1, OFF + 100 * S)       # reset #1 after 0.5 s of this
-    feed(m, ts, 5, OFF + 200 * S)            # another jump inside the 10 s hold-off
+    ts = feed(m, ts, 1, OFF - 100 * S)       # reset #1 after 0.5 s of this
+    feed(m, ts, 5, OFF - 200 * S)            # another jump inside the 10 s hold-off
     assert m.resets == 1
-    assert m.offset_ns == OFF + 100 * S
+    assert m.offset_ns == OFF - 100 * S
 
 
 def test_inconsistent_outliers_never_reset():
@@ -131,3 +156,11 @@ def test_stamp_guard_never_goes_backwards_per_topic():
     assert g("/a", 50) == 102
     assert g("/b", 50) == 50
     assert g("/a", 500) == 500
+
+
+def test_stamp_guard_accepts_a_large_backward_correction():
+    # review: pinning to prev + 1 ns after a wrong mapping froze stamps for as long as the error lasted
+    g = StampGuard()
+    assert g("/a", 10 * S) == 10 * S
+    assert g("/a", 8 * S) == 8 * S          # > 1 s back: a corrected mapping, accepted
+    assert g("/a", 8 * S - 5) == 8 * S + 1  # small step back: still nudged

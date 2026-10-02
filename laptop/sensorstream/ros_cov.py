@@ -4,7 +4,9 @@ A Still test run's report holds each axis's standard deviation; its square is th
 on the covariance diagonal. Sensor types are looked up independently (a newer report without a
 gyroscope does not hide an older report's gyroscope), and never across phone models. Orientation:
 yaw from the rotation vector's own heading accuracy, roll/pitch approximated from the accelerometer
-noise (tilt comes from gravity): (mean(sigma_x, sigma_y) / 9.81)^2.
+noise (tilt comes from gravity): (mean(sigma_x, sigma_y) / 9.81)^2 - only when both are known, since a
+single 0 on the diagonal reads as "exact" in ROS (all zeros = unknown). Every value is a float: rclpy's
+double[9] setters reject ints. A report of an unexpected shape is skipped, never raised.
 """
 
 from __future__ import annotations
@@ -21,12 +23,19 @@ UNKNOWN = [0.0] * 9
 NOT_PROVIDED = [-1.0] + [0.0] * 8
 
 
+def _number(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
 def _std3(s: dict) -> Optional[List[float]]:
-    a = s.get("axes") or {}
+    a = s.get("axes")
+    if not isinstance(a, dict):
+        return None
     out = []
     for name in ("x", "y", "z"):
-        x = (a.get(name) or {}).get("std")
-        if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):
+        ax = a.get(name)
+        x = ax.get("std") if isinstance(ax, dict) else None
+        if not _number(x):
             return None
         out.append(float(x))
     return out
@@ -45,17 +54,19 @@ def find_covariance(log_dir: str, model: str) -> Dict[int, dict]:
             continue
         if not isinstance(r, dict) or r.get("preset") != "still":
             continue
-        if (r.get("device") or {}).get("model") != model:
+        dev = r.get("device")
+        if not isinstance(dev, dict) or dev.get("model") != model:
             continue
         reports.append(r)
-    reports.sort(key=lambda r: r.get("created") or "", reverse=True)
+    reports.sort(key=lambda r: r["created"] if isinstance(r.get("created"), str) else "", reverse=True)
     out: Dict[int, dict] = {}
     for r in reports:
-        sensors = [s for s in (r.get("sensors") or []) if isinstance(s, dict)]
-        sensors.sort(key=lambda s: s.get("samples") or 0, reverse=True)
+        sensors = r.get("sensors")
+        sensors = [s for s in sensors if isinstance(s, dict)] if isinstance(sensors, list) else []
+        sensors.sort(key=lambda s: s["samples"] if _number(s.get("samples")) else 0, reverse=True)
         for s in sensors:
             t = s.get("type")
-            if t not in COV_TYPES or t in out or s.get("insufficient"):
+            if type(t) is not int or t not in COV_TYPES or t in out or s.get("insufficient"):
                 continue
             std = _std3(s)
             if std is not None:
@@ -64,18 +75,14 @@ def find_covariance(log_dir: str, model: str) -> Dict[int, dict]:
 
 
 def diag(var3: List[float]) -> List[float]:
-    return [var3[0], 0, 0, 0, var3[1], 0, 0, 0, var3[2]]
+    return [float(var3[0]), 0.0, 0.0, 0.0, float(var3[1]), 0.0, 0.0, 0.0, float(var3[2])]
 
 
 def orientation_cov(accel_var: Optional[List[float]], heading_acc: Optional[float]) -> List[float]:
-    tilt = 0.0
-    if accel_var:
-        s = (math.sqrt(accel_var[0]) + math.sqrt(accel_var[1])) / 2 / G
-        tilt = s * s
-    yaw = heading_acc * heading_acc if heading_acc else 0.0
-    if not tilt and not yaw:
+    if not accel_var or not heading_acc:
         return list(UNKNOWN)
-    return diag([tilt, tilt, yaw])
+    s = (math.sqrt(accel_var[0]) + math.sqrt(accel_var[1])) / 2 / G
+    return diag([s * s, s * s, heading_acc * heading_acc])
 
 
 def describe(cov: Dict[int, dict], model: str) -> str:

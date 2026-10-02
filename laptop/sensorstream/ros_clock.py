@@ -4,8 +4,14 @@ The phone stamps every sample with its own monotonic clock (``t_sensor_ns``); th
 the laptop's ``time.monotonic_ns()`` on arrival (``t_recv_ns``). ``d = t_recv - t_sensor`` is the
 clock offset plus that sample's transit delay, so the minimum ``d`` over a short window is the offset
 plus the fastest transit (~1 ms on a LAN): a constant bias, but no Wi-Fi jitter. ClockMapper tracks
-that minimum and slews toward it, so mapped stamps never jump. A phone clock reset (reboot) is
-accepted only after it is seen consistently for 0.5 s, and at most once per 10 s.
+that minimum and slews toward it, so mapped stamps never jump.
+
+Outliers (|d - offset| > 1 s): within one device id the phone clock never jumps (a reboot reconnects
+as a new device id, which gets a fresh mapper), so an arrival more than 1 s *later* than the mapping
+is transit delay - a stalled link, bufferbloat, a draining queue - and is ignored. An arrival more
+than 1 s *earlier* proves the mapping too late (transit cannot be negative), e.g. a first sample that
+was queued at connect: after 0.5 s (>= 10 samples) of consistent early arrivals the mapper re-seeds,
+at most once per 10 s.
 """
 
 from __future__ import annotations
@@ -79,6 +85,9 @@ class ClockMapper:
         return self._win[0][1]
 
     def _outlier(self, t_recv: int, d: int) -> None:
+        if d > self._applied:  # later than the mapping: transit delay, never a clock change
+            self._run_start = None
+            return
         if self._run_start is None or abs(d - self._run_first) > OUTLIER_NS:
             self._run_start, self._run_first, self._run_min, self._run_count = t_recv, d, d, 0
         self._run_count += 1
@@ -92,14 +101,18 @@ class ClockMapper:
 
 
 class StampGuard:
-    """Per topic, a stamp never repeats or goes backwards: it becomes the previous one + 1 ns."""
+    """Per topic, a stamp never repeats or goes backwards: it becomes the previous one + 1 ns.
+
+    Except a step back of more than 1 s: that is a corrected mapping, and pinning every later stamp
+    to previous + 1 ns would freeze the topic for as long as the error lasted.
+    """
 
     def __init__(self) -> None:
         self._last: Dict[str, int] = {}
 
     def __call__(self, topic: str, ns: int) -> int:
         prev = self._last.get(topic)
-        if prev is not None and ns <= prev:
+        if prev is not None and prev - OUTLIER_NS <= ns <= prev:
             ns = prev + 1
         self._last[topic] = ns
         return ns

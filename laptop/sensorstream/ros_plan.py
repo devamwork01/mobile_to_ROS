@@ -16,6 +16,9 @@ from .ros_cov import NOT_PROVIDED, UNKNOWN, diag, orientation_cov
 from .ros_mapping import ImuPairer, ros_targets
 
 STAMP_MODES = ("sensor", "receive")
+# Only continuously reporting sensors feed the clock: an on-change sensor (e.g. the step counter) is
+# stamped with when its value last changed, which can be an hour before it arrives.
+CLOCK_TYPES = frozenset({1, 2, 4, 11})
 IMU_TOPICS = ("/phone/imu/data_raw", "/phone/imu/data",
               "/phone/imu/data_raw_filtered", "/phone/imu/data_filtered")
 
@@ -70,7 +73,8 @@ class RosPlanner:
         clock = self._clocks.setdefault(dg.device_id, ClockMapper())
         pairer = self._pairers.setdefault(dg.device_id, ImuPairer())
         for r in dg.records:
-            clock.observe(r.t_sensor_ns, t_recv_ns)
+            if r.sensor_type in CLOCK_TYPES:
+                clock.observe(r.t_sensor_ns, t_recv_ns)
         out: List[Out] = []
         for r in dg.records:
             fv = filtered.get((r.sensor_handle, r.seq)) if filtered else None

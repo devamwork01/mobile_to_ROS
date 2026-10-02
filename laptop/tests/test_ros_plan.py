@@ -111,3 +111,24 @@ def test_cli_has_ros_stamp():
     assert build_parser().parse_args(["--ros-stamp", "receive"]).ros_stamp == "receive"
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--ros-stamp", "wall"])
+
+
+def test_covariances_are_floats():
+    pl = RosPlanner()
+    pl.set_covariance({1: {"var": [1, 4, 9], "report": "r"}, 4: {"var": [1, 1, 1], "report": "r"},
+                       2: {"var": [2, 2, 2], "report": "r"}})
+    out = pl.plan(dg(rec(1, 0, [0.0, 0.0, 9.8]), rec(11, 0, [0.0, 0.0, 0.6, 0.8, 0.1]), rec(4, 1, [0.1, 0.2, 0.3]),
+                     rec(2, 1, [1.0, 2.0, 3.0])), R0, None, NOW, R0)
+    assert {o.topic for o in out} >= {"/phone/imu/data", "/phone/magnetic_field"}
+    for o in out:
+        for name, m in o.cov.items():
+            assert all(type(x) is float for x in m), (o.topic, name)
+
+
+def test_on_change_records_do_not_seed_the_clock():
+    # review: a step counter is stamped with the last step's time (maybe an hour ago); seeding the
+    # mapping from it put stamps an hour in the future
+    pl = RosPlanner()
+    hour = 3_600_000
+    out = pl.plan(dg(rec(19, 0, [5.0]), rec(1, hour, [0.0, 0.0, 9.8])), R0, None, NOW, R0)
+    assert [o.stamp_ns for o in out if o.topic == "/phone/accelerometer"] == [NOW]
