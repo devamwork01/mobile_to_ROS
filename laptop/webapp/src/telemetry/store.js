@@ -7,7 +7,8 @@ import { useSyncExternalStore } from "react";
 import { onInsightsMessage } from "./insights.js";
 
 const params = new URLSearchParams(location.search);
-const WS_PORT = params.get("ws") || "8081";
+// ?ws= overrides; otherwise the port injected by the server that served the page (8081 under Vite dev).
+const WS_PORT = params.get("ws") || window.__SS_WS_PORT__ || "8081";
 const WS_URL = `ws://${location.hostname || "localhost"}:${WS_PORT}`;
 
 let meta = {
