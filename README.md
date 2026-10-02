@@ -237,7 +237,7 @@ With a ROS 2 environment sourced, `--ros` publishes decoded sensors as standard 
 |---|---|---|
 | `/phone/accelerometer` | `sensor_msgs/Imu` | accelerometer |
 | `/phone/gyroscope` | `sensor_msgs/Imu` | gyroscope |
-| `/phone/magnetic_field` | `sensor_msgs/MagneticField` | magnetometer |
+| `/phone/magnetic_field` | `sensor_msgs/MagneticField` | magnetometer, in **tesla** as the message defines (Android reports microtesla; converted) |
 | `/phone/orientation` | `geometry_msgs/QuaternionStamped` | rotation vector |
 | `/phone/imu/data_raw` | `sensor_msgs/Imu` | gyroscope + accelerometer, no orientation (input for `imu_filter_madgwick`) |
 | `/phone/imu/data` | `sensor_msgs/Imu` | the same + orientation from the rotation vector (for `robot_localization`) |
@@ -268,7 +268,10 @@ Without ROS sourced, `--ros` prints a warning and the server runs normally.
   covariance stays 0 (unknown) rather than claiming an exact yaw. Without a Still run the covariances are 0 (ROS "unknown").
   Filtered topics carry the raw covariance (conservative).
 - **Frames**: `frame_id` is `phone`. Android's device axes (x right, y up the screen, z out of the screen)
-  and its East-North-Up world frame match REP-103/REP-145, so no conversion is applied.
+  and its East-North-Up world frame match REP-103/REP-145, so no conversion is applied. "North" is
+  **magnetic** north (the rotation vector uses the magnetometer): set your magnetic declination (e.g.
+  `navsat_transform`'s `magnetic_declination_radians`) if you need true north. No TF is published for
+  `phone`; add a static transform from your robot's base frame.
 
 ## Network priority on a busy Wi-Fi
 
