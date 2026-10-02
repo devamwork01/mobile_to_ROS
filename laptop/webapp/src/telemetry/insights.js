@@ -15,6 +15,7 @@ const filterSuggestions = new Map(); // key -> suggested config
 const filterSuggestionAxes = new Map(); // key -> [sX, sY, sZ] per-axis suggestions (3-axis sensors)
 const filterErrors = new Map(); // key -> message
 const filterErrorRunning = new Map(); // key -> the previous filter is still running despite the error
+const filterReports = new Map(); // key -> latest per-axis spectrum findings (server filter_report)
 const listeners = new Set();
 const emit = () => listeners.forEach((l) => l());
 const subscribe = (cb) => {
@@ -56,6 +57,9 @@ export function onInsightsMessage(m) {
       filterErrors.set(m.key, m.message);
       filterErrorRunning.set(m.key, !!m.running);
       break;
+    case "filter_report":
+      filterReports.set(m.key, m.report);
+      break;
     default:
       return false;
   }
@@ -73,6 +77,7 @@ export const getFilterConfig = (key) => filterConfigs[key];
 export const getFilterSuggestion = (key) => filterSuggestions.get(key);
 export const getFilterError = (key) => filterErrors.get(key);
 export const getFilterErrorRunning = (key) => filterErrorRunning.get(key) === true;
+export const getFilterReport = (key) => filterReports.get(key);
 export function clearFilterSuggestion(key) {
   filterSuggestions.delete(key);
   filterSuggestionAxes.delete(key);
@@ -109,6 +114,7 @@ export const useFilterConfig = (key) => useSyncExternalStore(subscribe, () => fi
 export const useFilterSuggestionAxes = (key) => useSyncExternalStore(subscribe, () => filterSuggestionAxes.get(key), () => filterSuggestionAxes.get(key));
 export const useFilterSuggestion = (key) => useSyncExternalStore(subscribe, () => filterSuggestions.get(key), () => filterSuggestions.get(key));
 export const useFilterErrorRunning = (key) => useSyncExternalStore(subscribe, () => filterErrorRunning.get(key) === true, () => filterErrorRunning.get(key) === true);
+export const useFilterReport = (key) => useSyncExternalStore(subscribe, () => filterReports.get(key), () => filterReports.get(key));
 export const useFilterError = (key) => useSyncExternalStore(subscribe, () => filterErrors.get(key), () => filterErrors.get(key));
 export const useLastReportEvent = () => useSyncExternalStore(subscribe, getLastReportEvent, getLastReportEvent);
 export const useOpenReportRequest = () => useSyncExternalStore(subscribe, getOpenReport, getOpenReport);

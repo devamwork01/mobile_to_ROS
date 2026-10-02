@@ -179,6 +179,7 @@ function connect() {
       case "filters":
       case "filter_suggestion":
       case "filter_error":
+      case "filter_report":
         onInsightsMessage(m);
         break;
       case "phone_disconnected":
