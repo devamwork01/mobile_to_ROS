@@ -22,6 +22,7 @@ from typing import Optional
 from . import protocol as p
 from . import recordings
 from . import reports
+from . import ros_cov
 from .backfill import GapTracker
 from .control import ControlServer
 from .reconcile import Reconciler
@@ -207,9 +208,22 @@ async def run(args: argparse.Namespace) -> None:
     if args.ros:
         try:
             from .ros_sink import Ros2Sink
-            ros_sink = Ros2Sink()
+            ros_sink = Ros2Sink(stamp=args.ros_stamp)
         except Exception as exc:
             print(f"   (--ros requested but ROS unavailable, continuing without it: {exc})")
+
+    def refresh_ros_cov(model: str) -> None:
+        """Covariance for ROS 2 from the newest Still test run of this phone model."""
+        if ros_sink is None or not model:
+            return
+        try:  # runs inside the phone's hello: never let it tear the session down
+            cov = ros_cov.find_covariance(args.log_dir, model)
+            ros_sink.set_covariance(cov)
+            print("   " + ros_cov.describe(cov, model))
+        except Exception as exc:
+            print(f"   (ROS covariance not refreshed: {exc!r})")
+
+    ros_failed = False
 
     recorder = Recorder()
     sync = SyncTracker()
@@ -237,7 +251,13 @@ async def run(args: argparse.Namespace) -> None:
         fv = filterbank.process(dg)  # once per raw sample, before any decimation
         sink.on_datagram(dg, addr, t_recv_ns, filtered=fv)
         if ros_sink is not None:
-            ros_sink.on_datagram(dg, addr, t_recv_ns, filtered=fv)
+            nonlocal ros_failed
+            try:  # a ROS failure must never starve recording, test runs, insights or backfill
+                ros_sink.on_datagram(dg, addr, t_recv_ns, filtered=fv)
+            except Exception as exc:
+                if not ros_failed:
+                    ros_failed = True
+                    print(f"   (ROS publish failed, still streaming to everything else: {exc!r})")
         sync.observe(dg, t_recv_ns)
         insights.on_datagram(dg, addr, t_recv_ns, filtered=fv)
         if testruns is not None:  # UDP can arrive before the run manager is wired
@@ -257,6 +277,7 @@ async def run(args: argparse.Namespace) -> None:
             reconciler.set_device_client(ev["device_id"], ev.get("client_id", ""))
             filterbank.set_catalog(ev.get("sensors") or [])
             push_filters()  # the phone filters its own preview with the laptop's settings
+            refresh_ros_cov(ev.get("model") or "")
         elif kind == "backfill":
             reconciler.on_backfill(ev["device_id"], ev["handle"], ev["frames"])
             return   # raw frames are not browser-bound
@@ -281,7 +302,12 @@ async def run(args: argparse.Namespace) -> None:
     def streaming() -> bool:
         return any(s.active for s in control.sessions.values())
 
-    testruns = TestRunManager(recorder, args.log_dir, record_meta, streaming, dash.broadcast)
+    def testrun_broadcast(msg: dict) -> None:
+        dash.broadcast(msg)
+        if msg.get("kind") == "testrun" and msg.get("phase") == "done":
+            refresh_ros_cov((record_meta() or {}).get("model") or "")  # a new Still run fills covariance
+
+    testruns = TestRunManager(recorder, args.log_dir, record_meta, streaming, testrun_broadcast)
 
     rec_base = recorder.start(args.log_dir, record_meta()) if args.record else None
 
@@ -389,7 +415,9 @@ async def run(args: argparse.Namespace) -> None:
     if advertiser is not None:
         print(f"   discovery : mDNS + UDP beacon :{args.beacon_port}   (phone can auto-find this PC)")
     if ros_sink is not None:
-        print("   ROS       : publishing /phone/accelerometer, /phone/gyroscope, /phone/magnetic_field, /phone/orientation")
+        print("   ROS       : publishing /phone/imu/data_raw, /phone/imu/data, /phone/accelerometer, "
+              "/phone/gyroscope, /phone/magnetic_field, /phone/orientation")
+        print(f"               stamps: {args.ros_stamp} time")
     if args.selftest:
         print("   MODE      : SELF-TEST (synthetic accelerometer)")
     if args.record:
@@ -492,6 +520,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--name", default=None, help="name shown in the phone's Servers list (default: this computer's name)")
     ap.add_argument("--no-discovery", action="store_true", help="disable mDNS + UDP beacon advertising")
     ap.add_argument("--ros", action="store_true", help="publish decoded sensor data to ROS 2 topics (requires a sourced ROS environment)")
+    ap.add_argument("--ros-stamp", choices=("sensor", "receive"), default="sensor",
+                    help="ROS message stamps: 'sensor' = when the phone measured the sample, mapped to "
+                         "ROS time (default); 'receive' = when the laptop received it")
     ap.add_argument("--beacon-port", type=int, default=BEACON_PORT, help="UDP discovery beacon port")
     ap.add_argument("--beacon-addr", default="255.255.255.255", help="UDP beacon destination (broadcast)")
     return ap

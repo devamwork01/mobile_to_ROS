@@ -38,7 +38,7 @@ optional ROS 2 bridge.
 | Dashboard | Mission-control layout: always-on link KPIs (latency, jitter, loss, throughput), a sensor picker with live Hz + health dots, and **pinnable panels** you can collapse or maximise — several live graphs at once (uPlot), 3D orientation (Three.js) with recenter/reset, **Snapshot → CSV** of the last 10–60 s, paged recordings browser with server-side LOD, light/dark themes |
 | Phone app | Categorized sensors, per-sensor detail + sampling-rate config with **live actual Hz**, on-device pseudo-3D orientation with **recenter**, diagnostics, background streaming with a **Stop** action in the notification, **one-tap reconnect** to the last laptop, optional **packet batching**, and **export/share** of the on-phone recording |
 | Discovery | mDNS + UDP beacon: the phone lists every server on the network with its name, type and link quality |
-| ROS 2 | Optional `--ros` sink publishing `sensor_msgs/Imu`, `MagneticField`, `QuaternionStamped` |
+| ROS 2 | Optional `--ros` sink: combined `sensor_msgs/Imu` (`/phone/imu/data_raw`, `/phone/imu/data`) stamped with the phone's measurement time, covariance from a Still test run, plus `MagneticField`, `QuaternionStamped` |
 
 ## Try it without a phone (30 seconds)
 
@@ -106,6 +106,7 @@ npm test           # unit tests (Vitest): history buffer, layout store, pin reso
 | `--selftest` | off | Emit a synthetic 4-sensor stream (no phone needed) |
 | `--selftest-hz` | `100` | Synthetic sample rate |
 | `--ros` | off | Publish decoded sensors to ROS 2 topics (requires a sourced ROS 2 environment) |
+| `--ros-stamp` | `sensor` | ROS stamps: `sensor` = phone measurement time mapped to ROS time; `receive` = laptop arrival time |
 | `--record` | off | Record the session from start (to `--log-dir`, default `./recordings`) |
 | `--http-port` | `8080` | Dashboard HTTP port |
 | `--ws-port` | `8081` | Control WebSocket port |
@@ -238,6 +239,9 @@ With a ROS 2 environment sourced, `--ros` publishes decoded sensors as standard 
 | `/phone/gyroscope` | `sensor_msgs/Imu` | gyroscope |
 | `/phone/magnetic_field` | `sensor_msgs/MagneticField` | magnetometer |
 | `/phone/orientation` | `geometry_msgs/QuaternionStamped` | rotation vector |
+| `/phone/imu/data_raw` | `sensor_msgs/Imu` | gyroscope + accelerometer, no orientation (input for `imu_filter_madgwick`) |
+| `/phone/imu/data` | `sensor_msgs/Imu` | the same + orientation from the rotation vector (for `robot_localization`) |
+| `/phone/imu/data_raw_filtered`, `/phone/imu/data_filtered` | same as the raw topic | while the accelerometer or gyroscope has a filter (filtered value where there is one; orientation never filtered) |
 | `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered` | same as the raw topic | the filtered signal, only while that sensor has a filter (see Filtering) |
 
 ```bash
@@ -247,6 +251,24 @@ ros2 topic echo /phone/accelerometer
 ```
 
 Without ROS sourced, `--ros` prints a warning and the server runs normally.
+
+- **Combined IMU**: one message per gyroscope sample, with the newest accelerometer sample (skipped when
+  that is more than 3 samples old). `/phone/imu/data` is published only while the rotation vector streams.
+- **Timestamps**: every message is stamped with when the phone measured the sample, mapped to ROS time
+  from the fastest packets of the last 10 s - no Wi-Fi jitter, a constant ~1 ms late (the fastest
+  transit). The mapping follows clock drift smoothly (at most 1 ms/s). Packets arriving more than 1 s
+  late (a stalled link) are treated as network delay and never move it; it is corrected once only when
+  packets prove it too late (arriving over 1 s early for 0.5 s). Only continuous sensors feed it, not
+  on-change ones like the step counter. `--ros-stamp receive` restores laptop-arrival stamps.
+- **Covariance**: run a **Still** test run once per phone model (Test run -> Still, 2 min, phone flat and
+  untouched). Its per-axis sigma squared fills the accelerometer, gyroscope and magnetometer covariances
+  on every topic, picked up immediately; the server prints which report it uses. Orientation: yaw from
+  the rotation vector's own heading accuracy, roll/pitch estimated as (accelerometer sigma / 9.81)^2 (an
+  approximation, usually on the high side); if the phone gives no heading accuracy, orientation
+  covariance stays 0 (unknown) rather than claiming an exact yaw. Without a Still run the covariances are 0 (ROS "unknown").
+  Filtered topics carry the raw covariance (conservative).
+- **Frames**: `frame_id` is `phone`. Android's device axes (x right, y up the screen, z out of the screen)
+  and its East-North-Up world frame match REP-103/REP-145, so no conversion is applied.
 
 ## Network priority on a busy Wi-Fi
 
