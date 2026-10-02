@@ -107,6 +107,8 @@ npm test           # unit tests (Vitest): history buffer, layout store, pin reso
 | `--selftest-hz` | `100` | Synthetic sample rate |
 | `--ros` | off | Publish decoded sensors to ROS 2 topics (requires a sourced ROS 2 environment) |
 | `--ros-stamp` | `sensor` | ROS stamps: `sensor` = phone measurement time mapped to ROS time; `receive` = laptop arrival time |
+| `--filter` | off | Auto per-axis filters for accelerometer / gyroscope / magnetometer from each axis's spectrum, 10 s after each starts |
+| `--filter-report` | next to `--filters-file` | Where `--filter` writes `filter_report.json` |
 | `--record` | off | Record the session from start (to `--log-dir`, default `./recordings`) |
 | `--http-port` | `8080` | Dashboard HTTP port |
 | `--ws-port` | `8081` | Control WebSocket port |
@@ -215,6 +217,16 @@ Tweak the cutoff (slider), order (2/4) and notches, then **Apply**.
 - Settings are per sensor, shared by every open dashboard and saved in `filters.json`
   (`--filters-file` to move it). **The `.ssbin` recording stays raw** (filtered values only appear as extra CSV columns), so you can always re-filter differently.
 - **Per axis**: tick *Per axis* in the filter editor to give X, Y and Z their own filter (e.g. a lower cutoff on X/Y and a notch only on Z). *Suggest from spectrum* then fills each axis from its own spectrum, and the Spectrum view draws one response curve per axis. Per-axis filters run everywhere the filtered signal goes (ROS 2, CSV, the phone).
+- **Filter pane**: the Filter button on a panel opens the editor as a pane on the right (the panels
+  narrow to make room, the edited panel is outlined); it stays open after Apply so you can compare,
+  and ✕ or Esc closes it. *Spectrum findings* there show, per axis, the noise floor, the low-pass and
+  its delay, notches (and how far each peak stood out) and the expected sigma before -> after.
+- **Automatic (`--filter`)**: `python -m sensorstream.app --filter` gives the accelerometer, gyroscope
+  and magnetometer per-axis filters on its own: 10 s after each sensor starts streaming (also one
+  switched on later), each axis is tuned from its own spectrum and applied (replacing saved filters),
+  once per phone connection. The findings are printed, written to `filter_report.json` (next to
+  `filters.json`; `--filter-report` to change), and shown in the filter pane. Hold the phone the way
+  you will use it for those first 10 s - the spectrum is taken from them.
 - Orientation quaternions and on-change sensors (light, proximity, steps) aren't filtered.
 
 <img src="docs/images/dashboard-filter.jpg" alt="Spectrum of a Galaxy S25 Ultra accelerometer with a 5 Hz low-pass: raw (faint), filtered (bold) and the filter response (dashed)" width="600">

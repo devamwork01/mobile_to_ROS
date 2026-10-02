@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import SensorPicker from "./SensorPicker.jsx";
 import PanelGrid from "./PanelGrid.jsx";
+import FilterPane from "./FilterPane.jsx";
 import { layout, useLayout } from "../../lib/layout.js";
 import { defaultPinKeys } from "../../telemetry/sensors.js";
 
@@ -18,6 +19,7 @@ export default function Dashboard({ meta, rows, onInfo }) {
       <div className="flex-1 min-w-0 overflow-auto">
         <PanelGrid meta={meta} rows={rows} />
       </div>
+      <FilterPane />
     </div>
   );
 }
