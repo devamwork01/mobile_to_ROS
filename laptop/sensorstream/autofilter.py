@@ -264,6 +264,7 @@ WAIT_NOTICE_EXTRA_S = 30.0  # a sensor this long past its tuning time gets one "
 GUIDE_MIN_RUN_S = 2.0   # a sensor is in the prompt once it has streamed this long
 FALLBACK_S = 60.0       # silent tuning once a phone has connected (old app, abandoned capture)
 LEAD_S, SETTLE_S, CAPTURE_S = 3, 0.5, 10
+STILL_S = 3             # still phase measuring the noise, when no Still report covers a sensor
 PROMPT_SLACK_S = 20.0   # a prompt without a capture this long after its end is abandoned
 STREAMING_S = 2.0       # a sensor seen within this many seconds is streaming
 CONNECT_WAIT_S = 5.0    # the connect prompt waits for every streaming sensor, at most this long
@@ -321,10 +322,14 @@ class AutoFilter:
     def __init__(self, bank, insights, reports: ReportStore, broadcast: Callable[[dict], None],
                  on_change: Optional[Callable[[], None]] = None, print_fn: Callable[[str], None] = print,
                  now: Callable[[], str] = now_iso, send_phone: Optional[Callable[[dict], None]] = None,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic,
+                 still_noise: Optional[Callable[[str], Dict[int, List[float]]]] = None) -> None:
         self._bank, self._insights, self._reports = bank, insights, reports
         self._broadcast, self._on_change, self._print, self._now = broadcast, on_change, print_fn, now
         self._send_phone, self._clock = send_phone, clock
+        self._still_noise = still_noise   # model -> {type: [noise PSD level x, y, z]} (Still reports)
+        self._model: Optional[str] = None
+        self._last_rec: Optional[dict] = None
         self._runs = RunTracker()
         self._types: Dict[int, int] = {}
         self._tuned: set = set()
@@ -362,6 +367,7 @@ class AutoFilter:
         self._noticed.clear()
         self._reports.device = {"model": model, "android": android} if model else None
         self._phone = True
+        self._model = model
         self._guided = "tune" in (caps or ()) and self._send_phone is not None
         self._pending = None
         self._prompted = False
@@ -420,11 +426,13 @@ class AutoFilter:
             return
         self._prompted = True
         pid, self._next_id = self._next_id, self._next_id + 1
-        self._pending = {"id": pid, "handles": handles,
-                         "deadline": now + LEAD_S + SETTLE_S + CAPTURE_S + PROMPT_SLACK_S}
+        refs = self._report_noise()
+        still_s = 0 if all(self._types.get(h) in refs for h in handles) else STILL_S
+        self._pending = {"id": pid, "handles": handles, "refs": refs, "still_s": still_s,
+                         "deadline": now + LEAD_S + still_s + SETTLE_S + CAPTURE_S + PROMPT_SLACK_S}
         names = [self._name(h) for h in handles]
         self._send({"type": "tune_prompt", "id": pid, "reason": reason, "attention": reason == "new_sensor",
-                    "lead_s": LEAD_S, "capture_s": CAPTURE_S,
+                    "lead_s": LEAD_S, "still_s": still_s, "capture_s": CAPTURE_S,
                     "sensors": [{"handle": h, "name": nm} for h, nm in zip(handles, names)]})
         self._print(f"[filter] guided tuning ({reason}): prompted {', '.join(names)}".encode("ascii", "replace").decode())
 
@@ -446,7 +454,10 @@ class AutoFilter:
         windows = {}
         for w in raw if isinstance(raw, list) else []:
             try:
-                windows[int(w["handle"])] = (int(w["from_ns"]), int(w["to_ns"]))
+                still = None
+                if isinstance(w, dict) and "still_from_ns" in w and "still_to_ns" in w:
+                    still = (int(w["still_from_ns"]), int(w["still_to_ns"]))
+                windows[int(w["handle"])] = (int(w["from_ns"]), int(w["to_ns"]), still)
             except (TypeError, ValueError, KeyError, OverflowError):
                 continue
         self._print(f"[filter] guided tuning: capture received ({len(windows)} of {len(p['handles'])} sensors)")
@@ -457,13 +468,21 @@ class AutoFilter:
                 if h not in windows:
                     why = "no capture from the phone"
                 else:
-                    t, v = self._insights.samples_between(h, *windows[h])
+                    frm, to, still = windows[h]
+                    t, v = self._insights.samples_between(h, frm, to)
+                    noise, source = None, None
+                    if still is not None:
+                        st, sv = self._insights.samples_between(h, *still)
+                        noise = noise_level(st, sv)
+                        source = "still" if noise else None
+                    if noise is None and self._types.get(h) in p["refs"]:
+                        noise, source = p["refs"][self._types[h]], "report"
                     why = capture_problem(t)
                     if why is None and v.shape[1] < 3:
                         why = "not a 3-axis sensor"
                     if why is None:
                         f, fs, per = spectra(t, v)
-                        why, cfgs, _ = self._apply(h, ty, f, fs, per)
+                        why, cfgs, _ = self._apply(h, ty, f, fs, per, noise=noise, source=source, require_motion=True)
             except Exception as exc:  # never let one sensor break the answer (or the phone's link)
                 why = f"could not be tuned ({exc.__class__.__name__})"
             if why is None:
@@ -473,7 +492,7 @@ class AutoFilter:
                 self._print(f"[filter] {self._name(h)}: not tuned - {why} (Re-tune on the phone, or automatic at 60 s)"
                             .encode("ascii", "replace").decode())
             results.append({"handle": h, "name": self._name(h), "ok": why is None,
-                            "summary": summary(cfgs) if cfgs else None, "message": why})
+                            "summary": self._result_summary(cfgs), "message": why})
         self._send({"type": "tune_result", "id": p["id"], "sensors": results})
 
     def _tune(self, h: int, ty: int) -> bool:
@@ -482,19 +501,26 @@ class AutoFilter:
             self._why[h] = "not enough live data yet"
             return False  # retried on the next tick
         f, _, fs, per = src
-        why, _, refused = self._apply(h, ty, f, fs, list(per)[:3])
+        refs = self._report_noise()
+        why, _, refused = self._apply(h, ty, f, fs, list(per)[:3], noise=refs.get(ty),
+                                      source="report" if ty in refs else None)
         if refused:
             self._failed.add(h)
         elif why:
             self._why[h] = why
         return why is None
 
-    def _apply(self, h: int, ty: int, f, fs: float, per):
+    def _apply(self, h: int, ty: int, f, fs: float, per, noise=None, source=None, require_motion=False):
         """Tune handle h from per-axis PSDs: (why_not | None, configs | None, refused_by_FilterBank)."""
         bank_fs = self._bank.fs(h)
         if bank_fs and abs(bank_fs - fs) > RATE_AGREE * bank_fs:
             return f"the rate estimates disagree (spectrum {fs:.1f} Hz, filter {bank_fs:.1f} Hz)", None, False
-        found = [suggest_details(f, p, fs) for p in per]
+        if noise:
+            found = [motion_cutoff(f, p, n, fs) for p, n in zip(per, noise)]
+            if require_motion and not any(d.get("moved") for _, d in found):
+                return "the phone didn't move during the capture - Re-tune and move it", None, False
+        else:
+            found = [suggest_details(f, p, fs) for p in per]
         cfgs = [c for c, _ in found]
         key = self._bank.key_of(h) or f"{ty}:{GENERIC[ty]}"
         ok, why = self._bank.set(key, {**cfgs[0], "axes": cfgs}, handle=h)
@@ -506,7 +532,9 @@ class AutoFilter:
         self._broadcast(self._bank.snapshot())
         if self._on_change:
             self._on_change()
-        rec = sensor_report(key, h, ty, fs, f, per, cfgs, [d for _, d in found], self._now())
+        rec = sensor_report(key, h, ty, fs, f, per, cfgs, [d for _, d in found], self._now(),
+                            noise=noise, noise_source=source)
+        self._last_rec = rec
         try:
             self._reports.add(rec, persist=True)
         except OSError as exc:  # the filter runs; only the report file is missing
@@ -514,6 +542,21 @@ class AutoFilter:
         self._broadcast({"kind": "filter_report", "key": key, "report": rec})
         self._print(format_report(rec))
         return None, cfgs, False
+
+    def _report_noise(self) -> Dict[int, List[float]]:
+        if self._still_noise is None or not self._model:
+            return {}
+        try:
+            return self._still_noise(self._model) or {}
+        except Exception:
+            return {}
+
+    def _result_summary(self, cfgs) -> Optional[str]:
+        """The phone's one-line result: per-axis filters, plus the noise reduction when it is known."""
+        if not cfgs:
+            return None
+        g = gain_text(self._last_rec) if self._last_rec else ""
+        return summary(cfgs) + (f" · {g}" if g else "")
 
     def _notice_waiting(self) -> None:
         """One line per sensor 30 s past its tuning time (10 s, or 60 s once a phone said hello) and still untuned, saying why."""

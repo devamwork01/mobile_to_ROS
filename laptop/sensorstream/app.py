@@ -333,7 +333,8 @@ async def run(args: argparse.Namespace) -> None:
 
     if args.filter:
         autofilter = AutoFilter(filterbank, insights, filter_reports, dash.broadcast, push_filters,
-                                send_phone=make_phone_sender(control, phone_now))
+                                send_phone=make_phone_sender(control, phone_now),
+                                still_noise=lambda model: ros_cov.find_noise(args.log_dir, model))
     dash.control_handler = control.handle
 
     def record_meta() -> Optional[dict]:

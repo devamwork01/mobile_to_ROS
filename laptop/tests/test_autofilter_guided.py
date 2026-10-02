@@ -120,10 +120,10 @@ def test_timeout_abandons_and_falls_back_at_60s():
     g = G()
     g.stream([0, 2], 0, 2.5)
     g.af.tick()
-    g.stream([0, 2], 2.5, 34)                           # no tune_window within 3 + 0.5 + 10 + 20 s
+    g.stream([0, 2], 2.5, 37)                           # no tune_window within 3 + 3 + 0.5 + 10 + 20 s
     g.af.tick()
     assert any("no capture" in m for m in g.printed)
-    g.stream([0, 2], 36.5, 20)
+    g.stream([0, 2], 39.5, 17)
     g.af.tick()
     assert not g.bank.configs and len(g.prompts()) == 1  # not re-prompted, not yet 60 s
     g.stream([0, 2], 56.5, 5)
@@ -250,3 +250,102 @@ def test_old_phone_waiting_notice_is_meaningful():
     g.stream([0, 2], 0, 45)
     g.af.tick()
     assert not [m for m in g.printed if "None" in m]
+
+
+def motion_rows(n, hz=5.0, amp=1.0, seed=7):
+    X = np.fft.rfft(np.random.default_rng(seed).normal(0.0, 1.0, n))
+    X[np.fft.rfftfreq(n, 1.0 / FS) > hz] = 0
+    y = np.fft.irfft(X, n)
+    return amp * y / y.std()
+
+
+class GM(G):
+    """G with a motion signal added to all axes from sample index k0."""
+    def stream_motion(self, handles, t0, secs, rows):
+        for k in range(int(secs * FS)):
+            t = t0 + k / FS
+            recs = []
+            for h in handles:
+                ty = {0: 1, 2: 4, 4: 2}[h]
+                m = float(rows[k])
+                n = self.seq.get(h, 0)
+                self.seq[h] = n + 1
+                recs.append(p.Record(ty, h, n, int(t * S), 3, [m + self.rng.normal(0, 0.01), m + self.rng.normal(0, 0.01), 9.8 + m + self.rng.normal(0, 0.01)]))
+            dg = p.Datagram(device_id=1, records=recs)
+            self.now = t
+            self.ins.on_datagram(dg, None, 0)
+            self.bank.process(dg)
+            self.af.on_datagram(dg)
+        return t0 + secs
+
+
+def guided_with(noise_refs=None):
+    g = GM()
+    g.af._still_noise = (lambda model: noise_refs) if noise_refs is not None else None
+    return g
+
+
+def test_prompt_asks_for_a_still_phase_only_without_report_noise():
+    g = guided_with()
+    g.stream([0, 2], 0, 2.5)
+    g.af.tick()
+    assert g.prompts()[0]["still_s"] == 3
+    N = 2 * 0.01 ** 2 / FS
+    g2 = guided_with({1: [N] * 3, 4: [N] * 3})
+    g2.stream([0, 2], 0, 2.5)
+    g2.af.tick()
+    assert g2.prompts()[0]["still_s"] == 0
+
+
+def test_still_window_sets_the_noise_and_the_cutoff_follows_the_motion():
+    g = guided_with()
+    g.stream([0, 2], 0, 2.5)
+    g.af.tick()
+    pid = g.prompts()[0]["id"]
+    g.stream([0, 2], 2.5, 3.5)                                   # still: 2.5 .. 6.0
+    g.stream_motion([0, 2], 6.0, 11, motion_rows(1100))          # motion: 6.0 .. 17.0
+    g.af.on_tune_window({"type": "tune_window", "id": pid, "windows": [
+        {"handle": h, "still_from_ns": int(3.0 * S), "still_to_ns": int(5.9 * S), "from_ns": int(6.5 * S), "to_ns": int(16.9 * S)}
+        for h in (0, 2)]})
+    res = [m for m in g.phone if m["type"] == "tune_result"][-1]
+    assert all(s["ok"] for s in res["sensors"]) and "x lower" in res["sensors"][0]["summary"]
+    ax = g.bank.configs["1:Acc"]["axes"][0]
+    assert 3.0 <= ax["lowpass"]["hz"] <= 6.0
+    assert g.af._reports.records["1:Acc"]["noise_source"] == "still"
+
+
+def test_window_without_still_range_uses_report_noise():
+    N = 2 * 0.01 ** 2 / FS
+    g = guided_with({1: [N] * 3, 4: [N] * 3})
+    g.stream([0, 2], 0, 2.5)
+    g.af.tick()
+    pid = g.prompts()[0]["id"]
+    g.stream_motion([0, 2], 2.5, 11, motion_rows(1100))
+    g.window(pid, 3.0, 13.4)
+    assert g.af._reports.records["1:Acc"]["noise_source"] == "report"
+    assert g.bank.configs["1:Acc"]["axes"][0]["lowpass"]["hz"] <= 6.0
+
+
+def test_bad_still_window_falls_back_to_report_noise():
+    N = 2 * 0.01 ** 2 / FS
+    g = guided_with({1: [N] * 3, 4: [N] * 3})
+    g.stream([0, 2], 0, 2.5)
+    g.af.tick()
+    pid = g.prompts()[0]["id"]
+    g.stream_motion([0, 2], 2.5, 11, motion_rows(1100))
+    g.af.on_tune_window({"type": "tune_window", "id": pid, "windows": [
+        {"handle": h, "still_from_ns": int(2.6 * S), "still_to_ns": int(3.0 * S), "from_ns": int(3.0 * S), "to_ns": int(13.4 * S)}
+        for h in (0, 2)]})
+    assert g.af._reports.records["1:Acc"]["noise_source"] == "report"
+
+
+def test_no_motion_is_refused():
+    N = 2 * 0.01 ** 2 / FS
+    g = guided_with({1: [N] * 3, 4: [N] * 3})
+    g.stream([0, 2], 0, 2.5)
+    g.af.tick()
+    pid = g.prompts()[0]["id"]
+    g.stream([0, 2], 2.5, 11)                                    # nobody moved the phone
+    res = g.window(pid, 3.0, 13.4)
+    assert {s["message"] for s in res["sensors"]} == {"the phone didn't move during the capture - Re-tune and move it"}
+    assert not g.bank.configs

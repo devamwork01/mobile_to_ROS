@@ -224,11 +224,13 @@ python -m sensorstream.app --filter      # add --ros to publish the filtered top
 1. On the phone, under **Sensors**, switch on **Acceleration**, **Angular Velocity** and (if you want
    it) **Magnetic Field**. Then **Connection** → pick your server → **Connect & Stream**.
 2. About 2 s later the phone shows **"Pick up the phone and move it the way you'll use it"** and
-   counts down 3 s.
+   counts down 3 s. (If you haven't done a **Still test run** for this phone yet, it first asks you to
+   **leave the phone on the table for 3 s** — that measures the sensor noise — and then to pick it up.)
 3. **One buzz** → move the phone the way it will be used (in your hand, on the robot's mount, tilting
    and turning as in real use) while the screen counts down **10 s**.
 4. **Two buzzes** → done, put it down. The phone shows what it tuned per sensor, e.g.
-   `✓ Accelerometer: X/Y LP 6.2 Hz | Z LP 9.4 Hz`, and the laptop prints a table per sensor.
+   `✓ Accelerometer: X/Y LP 6.2 Hz | Z LP 9.4 Hz · noise 4.8x lower`, and the laptop prints a table
+  per sensor.
 5. That's it — the filtered signal now goes everywhere (dashboard, ROS 2 `*_filtered`, recordings,
    the phone). To repeat it (new mount, different use), tap **Re-tune** on the phone: on the result
    card or on the **Filtered Signals** card on Home. To look closer or adjust, use a panel's
@@ -251,6 +253,12 @@ No phone at hand? `python -m sensorstream.app --selftest --filter` tunes the syn
   **triple buzz** (alarm-type vibration, so it also buzzes with the ringer on silent; Do Not Disturb
   may still block it). With the app in the background, the streaming notification shows the
   instruction and countdown. A reconnect (even after a Wi-Fi blip) tunes again from fresh data.
+- **Noise is measured, not guessed:** the cutoff goes where your motion sinks into the sensor's real
+  noise, keeping 99 % of the motion's power. The noise comes from a **Still test run** for your phone
+  model if you have one (Test run → Still, once); otherwise from 3 s of the phone lying still at the
+  start of the capture. The report shows the noise before → after (e.g. `noise 4.8x lower`). A
+  capture where the phone didn't move is refused ("Re-tune and move it") rather than giving a filter
+  that would smear real motion.
 - **Only the capture counts:** the phone marks the 10 s window with the sensors' own timestamps,
   starting 0.5 s after the buzz, so the vibration never enters the analysed data.
 - **It replaces saved filters** for those sensors (in `filters.json`). To keep hand-tuned filters,
@@ -269,9 +277,10 @@ The laptop console after a guided capture looks like this:
 [filter] guided tuning (connect): prompted lsm6dsv_0 Accelerometer Non-wakeup, lsm6dsv_0 Gyroscope Non-wakeup
 [filter] guided tuning: capture received (2 of 2 sensors)
 [filter] Acceleration (lsm6dsv_0 Accelerometer Non-wakeup) @ 116.4 Hz
-   axis  noise/rtHz   cutoff   order  delay    notches              sigma raw -> filtered
-   X     7.73e-04     6.20     4        67 ms  -                    0.412 -> 0.395
+   axis  noise/rtHz   cutoff   order  delay    notches              noise sd raw -> filtered
+   X     7.73e-04     6.20     4        67 ms  -                    0.008322 -> 0.002712
    ...
+   (noise 3.1x lower; noise measured from the still)
 ```
 
 #### Tuning by hand (dashboard)
@@ -324,7 +333,8 @@ can re-filter differently later.
 |---|---|
 | No prompt and no buzz on the phone | The app is older than v0.1.13 (update it; meanwhile filters are still tuned automatically 60 s after each sensor starts), or the server was started without `--filter`. |
 | A prompt but no buzz | Vibration is off or Do Not Disturb blocks it; follow the on-screen countdown instead. |
-| A cutoff of 0.5 Hz on an axis | That axis barely moved during the capture (only noise). Tap **Re-tune** and move the phone as in real use. |
+| `the phone didn't move during the capture` | Nothing stood out of the sensor noise. Tap **Re-tune** and move the phone as in real use. |
+| Noise only slightly lower (e.g. `1.2x lower`) | Your motion uses most of the bandwidth (fast shaking/vibration), so the filter keeps it; that is correct. For a smoother signal, move more gently during the capture or lower the cutoff by hand. |
 | `not enough data in the capture` / `data gap during the capture` | The stream was interrupted (Wi-Fi drop, sensor switched off/on) during the 10 s. Tap **Re-tune**; otherwise it is tuned automatically at 60 s. |
 | `the rate estimates disagree` | The sampling rate was still settling (just after starting or changing a sensor's rate). Tap **Re-tune** a few seconds later. |
 | `[filter] ... still waiting - <reason>` on the laptop | A sensor hasn't been tuned well past its time; the reason says why (e.g. gaps or irregular timestamps). |
