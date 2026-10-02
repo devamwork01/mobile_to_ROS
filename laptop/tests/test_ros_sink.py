@@ -154,3 +154,42 @@ def test_no_filter_means_no_filtered_topic_traffic(ros_env):
     dg = p.Datagram(device_id=1, records=[p.Record(1, 0, 8, 123, 3, [0.1, 9.8, 0.2])])
     received = _collect(node, "/phone/accelerometer_filtered", Imu, lambda: sink.on_datagram(dg, ("x", 0), 0), timeout=0.5)
     assert received == []
+
+
+def test_combined_imu_data_raw_and_data(ros_env):
+    sink, node = ros_env
+    dg = p.Datagram(device_id=1, records=[
+        p.Record(1, 0, 0, 1_000_000, 3, [0.0, 0.0, 9.8]),
+        p.Record(11, 1, 0, 1_000_000, 3, [0.0, 0.0, 0.6, 0.8, 0.1]),
+        p.Record(4, 2, 0, 2_000_000, 3, [0.1, 0.2, 0.3])])
+    raw = _collect(node, "/phone/imu/data_raw", Imu, lambda: sink.on_datagram(dg, ("x", 0), 0))
+    assert len(raw) == 1
+    assert raw[0].angular_velocity.z == pytest.approx(0.3) and raw[0].linear_acceleration.z == pytest.approx(9.8)
+    assert raw[0].orientation_covariance[0] == -1.0
+    data = _collect(node, "/phone/imu/data", Imu, lambda: sink.on_datagram(dg, ("x", 0), 0))
+    assert data and data[0].orientation.w == pytest.approx(0.8)
+    assert data[0].orientation_covariance[8] == pytest.approx(0.01)   # heading accuracy 0.1 rad
+
+
+def test_covariance_is_published(ros_env):
+    sink, node = ros_env
+    sink.set_covariance({1: {"var": [0.01, 0.04, 0.09], "report": "r"}})
+    dg = p.Datagram(device_id=1, records=[p.Record(1, 0, 0, 123, 3, [0.1, 9.8, 0.2])])
+    got = _collect(node, "/phone/accelerometer", Imu, lambda: sink.on_datagram(dg, ("x", 0), 0))
+    assert list(got[0].linear_acceleration_covariance) == pytest.approx([0.01, 0, 0, 0, 0.04, 0, 0, 0, 0.09])
+
+
+def test_sensor_stamps_follow_phone_spacing(ros_env):
+    sink, node = ros_env
+    stamps = []
+    sub = node.create_subscription(Imu, "/phone/accelerometer", lambda m: stamps.append(
+        m.header.stamp.sec * 1_000_000_000 + m.header.stamp.nanosec), qos_profile_sensor_data)
+    t0 = time.monotonic_ns()
+    for k, late_ms in enumerate([1, 9, 2, 15, 1]):   # 2 ms apart on the phone, jittery arrival
+        dg = p.Datagram(device_id=1, records=[p.Record(1, 0, k, k * 2_000_000, 3, [0.0, 0.0, 9.8])])
+        sink.on_datagram(dg, ("x", 0), t0 + k * 2_000_000 + late_ms * 1_000_000)
+    deadline = time.monotonic() + 2.0
+    while len(stamps) < 5 and time.monotonic() < deadline:
+        rclpy.spin_once(node, timeout_sec=0.05)
+    node.destroy_subscription(sub)
+    assert [b - a for a, b in zip(stamps, stamps[1:])] == [2_000_000] * 4

@@ -103,3 +103,11 @@ def test_devices_have_separate_clocks_and_pairers():
     out = pl.plan(dg(rec(4, 0, [0.1, 0.2, 0.3]), dev=2), R0 + 5_000 * MS, None, NOW + 9 * MS, R0 + 5_000 * MS + 9 * MS)
     assert [o.topic for o in out] == ["/phone/gyroscope"]    # dev 1's accel is not paired with dev 2's gyro
     assert out[0].stamp_ns == NOW
+
+
+def test_cli_has_ros_stamp():
+    from sensorstream.app import build_parser
+    assert build_parser().parse_args([]).ros_stamp == "sensor"
+    assert build_parser().parse_args(["--ros-stamp", "receive"]).ros_stamp == "receive"
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["--ros-stamp", "wall"])
