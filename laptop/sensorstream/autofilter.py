@@ -135,6 +135,7 @@ class RunTracker:
 
 
 RUN_S = 10.0  # seconds of one unbroken run before a sensor is tuned (= the insights window)
+RATE_AGREE = 0.05  # the spectrum's rate and FilterBank's must agree this well before tuning
 
 
 class ReportStore:
@@ -224,6 +225,9 @@ class AutoFilter:
         if src is None or len(src) < 4 or len(src[3]) < 3:
             return False  # not enough live data yet: retried on the next tick
         f, _, fs, per = src
+        bank_fs = self._bank.fs(h)
+        if bank_fs and abs(bank_fs - fs) > RATE_AGREE * bank_fs:
+            return False  # the two rate estimates disagree (still settling): retried on the next tick
         per = list(per)[:3]
         found = [suggest_details(f, p, fs) for p in per]
         cfgs = [c for c, _ in found]

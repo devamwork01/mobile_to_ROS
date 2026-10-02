@@ -197,3 +197,20 @@ def test_report_store_ignores_a_broken_file(tmp_path):
         assert st.applied == {}
         st.add({"key": "1:Acc", "axes": []}, persist=True)
         assert list(json.loads(path.read_text(encoding="utf-8"))["sensors"]) == ["1:Acc"]
+
+
+def test_waits_while_the_filter_rate_and_the_spectrum_rate_disagree(tmp_path):
+    # smoke test on Windows: the spectrum said one rate, FilterBank another, and the per-axis config
+    # was refused for good; disagreement now means "wait", not "fail"
+    h = Harness(tmp_path)
+    t = 0
+    for k in range(1200):  # FilterBank sees 50 Hz; the fake spectrum says 100 Hz
+        h.bank.process(p.Datagram(device_id=1, records=[p.Record(1, 0, k, t, 3, [0.0, 0.0, 9.8])]))
+        t += S // 50
+    h.stream(0, 1, 0, 11)
+    assert h.af.tick() == 0 and ACC not in h.bank.configs
+    assert not [m for m in h.sent if m["kind"] == "filter_error"]
+    for k in range(1200, 3000):  # FilterBank's estimate converges to 100 Hz
+        t += S // 100
+        h.bank.process(p.Datagram(device_id=1, records=[p.Record(1, 0, k, t, 3, [0.0, 0.0, 9.8])]))
+    assert h.af.tick() == 1

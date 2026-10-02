@@ -95,3 +95,31 @@ def test_suggest_per_axis_for_six_value_sensors_uses_first_three():
     handle_filter_command({"cmd": "filter_suggest", "key": "16:GU", "handle": 5}, FilterBank(),
                           FakeInsights((f, flat, 100.0, [flat, flat, peak, flat])), sent.append)
     assert len(sent[-1]["axes"]) == 3 and sent[-1]["axes"][2]["notches"]
+
+
+def test_suggest_also_reports_per_axis_findings(tmp_path):
+    import numpy as np
+    from sensorstream import analysis as an
+    from sensorstream.autofilter import ReportStore
+    fs = 100.0
+    f, psd = an.welch_psd(np.random.default_rng(1).normal(0, 1, 5000), fs)
+    store = ReportStore(str(tmp_path / "filter_report.json"))
+    sent, bank = [], FilterBank()
+    handle_filter_command({"cmd": "filter_suggest", "key": "1:Acc", "handle": 3}, bank,
+                          FakeInsights((f, psd, fs, [psd, psd, psd])), sent.append, reports=store)
+    rep = [m for m in sent if m["kind"] == "filter_report"]
+    assert len(rep) == 1 and rep[0]["key"] == "1:Acc" and len(rep[0]["report"]["axes"]) == 3
+    assert store.records["1:Acc"]["handle"] == 3
+    assert not (tmp_path / "filter_report.json").exists()  # a suggestion is not an applied filter
+
+
+def test_cli_filter_flags_and_report_path():
+    import os
+    from sensorstream.app import build_parser, report_path
+    a = build_parser().parse_args([])
+    assert a.filter is False and a.filter_report is None
+    assert report_path(a) == os.path.join(".", "filter_report.json")
+    a = build_parser().parse_args(["--filter", "--filters-file", os.path.join("cfg", "f.json")])
+    assert a.filter is True and report_path(a) == os.path.join("cfg", "filter_report.json")
+    a = build_parser().parse_args(["--filter-report", "x.json"])
+    assert report_path(a) == "x.json"
