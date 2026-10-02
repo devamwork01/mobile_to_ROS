@@ -24,6 +24,7 @@ export default function SpectrumGraph({ handle, labels, filter = null, fs = null
   const data = usePsd(handle);
   const theme = useThemeStamp();
   const withFilter = !!filter;
+  const perAxis = !!filter?.axes; // per-axis filter: one response curve per axis
 
   useEffect(() => {
     const sub = () => sendCommand({ cmd: "psd_subscribe", handles: [handle] });
@@ -40,7 +41,8 @@ export default function SpectrumGraph({ handle, labels, filter = null, fs = null
     const series = [{}, ...labels.map((l, i) => ({ label: l, stroke: withFilter ? fade(COLORS[i]) : COLORS[i], width: withFilter ? 1 : 1.3, points: { show: false } }))];
     if (withFilter) {
       labels.forEach((l, i) => series.push({ label: `f${l}`, stroke: COLORS[i], width: 1.6, points: { show: false } }));
-      series.push({ label: "response", stroke: token(css, "--fg"), width: 1.2, dash: [5, 4], alpha: 0.6, points: { show: false } });
+      if (perAxis) labels.forEach((l, i) => series.push({ label: `r${l}`, stroke: COLORS[i], width: 1.2, dash: [5, 4], alpha: 0.8, points: { show: false } }));
+      else series.push({ label: "response", stroke: token(css, "--fg"), width: 1.2, dash: [5, 4], alpha: 0.6, points: { show: false } });
     }
     const size = () => ({ width: Math.max(el.clientWidth, 100), height: Math.max(el.clientHeight, 80) });
     const accent = token(css, "--accent");
@@ -68,7 +70,7 @@ export default function SpectrumGraph({ handle, labels, filter = null, fs = null
     const ro = new ResizeObserver(() => u.setSize(size()));
     ro.observe(el);
     return () => { ro.disconnect(); u.destroy(); uRef.current = null; };
-  }, [handle, labels.length, theme, withFilter]);
+  }, [handle, labels.length, theme, withFilter, perAxis]);
 
   // Suggestion markers: cutoff (long dashes) and notches (short dashes).
   useEffect(() => {
@@ -88,11 +90,12 @@ export default function SpectrumGraph({ handle, labels, filter = null, fs = null
       labels.forEach((_, i) => cols.push(pos(data.psd_f && data.psd_f[i])));
       const top = Math.max(...raw.flat().filter((y) => y != null), 1e-30);
       const rate = fs || 2 * data.f[data.f.length - 1];
-      cols.push(responseCurve(filter, rate, data.f, top));
+      if (perAxis) labels.forEach((_, i) => cols.push(responseCurve(filter.axes[i] || filter, rate, data.f, top)));
+      else cols.push(responseCurve(filter, rate, data.f, top));
     }
     const { series } = clampDecades(cols.slice(1), 8);
     u.setData([cols[0], ...series]);
-  }, [data, labels.length, withFilter, filter, fs]);
+  }, [data, labels.length, withFilter, perAxis, filter, fs]);
 
   return (
     <div className="absolute inset-0 pt-1">

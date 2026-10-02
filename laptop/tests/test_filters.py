@@ -118,3 +118,55 @@ def test_suggested_cutoff_always_passes_validation_with_rate_margin():
     cfg = fl.suggest(f, 10.0 ** f, fs)  # steep rise: the cutoff lands exactly on the band edge
     for fs_server in (fs, fs * 0.98):  # the server's EWMA rate can differ slightly
         assert fl.validate(cfg, fs_server)[0]
+
+
+# --- per-axis filters ------------------------------------------------------------------------
+AX = {"lowpass": {"hz": 0.5, "order": 4}, "notches": []}
+AZ = {"lowpass": {"hz": 5.0, "order": 4}, "notches": [{"hz": 8.0, "q": 10.0}]}
+PER = {"axes": [AX, AX, AZ]}
+
+
+def test_per_axis_chain_equals_three_single_axis_chains():
+    rng = np.random.default_rng(7)
+    x = rng.normal(0, 1, (300, 3)) + [0, 0, 9.8]
+    got = fl.FilterChain(fl.normalise(PER), 100.0, 3).process_block(x)
+    for a, cfg in enumerate([AX, AX, AZ]):
+        want = fl.FilterChain(cfg, 100.0, 1).process_block(x[:, a:a + 1])[:, 0]
+        assert np.allclose(got[:, a], want, atol=1e-12)
+
+
+def test_normalise_mirrors_x_and_keeps_plain_configs():
+    n = fl.normalise(PER)
+    assert n["lowpass"] == AX["lowpass"] and n["notches"] == [] and len(n["axes"]) == 3
+    assert "axes" not in fl.normalise({"lowpass": {"hz": 5.0, "order": 4}, "notches": []})
+
+
+def test_validate_names_the_failing_axis():
+    ok, msg = fl.validate({"axes": [AX, AX, {"lowpass": {"hz": 40.0, "order": 4}, "notches": []}]}, 50.0)
+    assert not ok and msg.startswith("Z: ")
+    assert not fl.validate({"axes": [AX, AX]}, 100.0)[0]                       # must be 3 entries
+    assert not fl.validate({"axes": [AX, AX, {"lowpass": None, "notches": []}]}, 100.0)[0]
+    assert fl.validate(PER, 100.0)[0]
+
+
+def test_scalar_stream_uses_axis_x_only():
+    ch = fl.FilterChain(fl.normalise(PER), 100.0, 1)
+    assert len(ch.process([1013.0])) == 1
+
+
+def test_bank_stores_and_snapshots_per_axis():
+    b = fl.FilterBank(None)
+    ok, _ = b.set("1:acc", PER)
+    assert ok and b.snapshot()["configs"]["1:acc"]["axes"][2] == AZ
+    assert b.snapshot()["configs"]["1:acc"]["lowpass"] == AX["lowpass"]
+
+
+def test_loaded_filters_are_normalised(tmp_path):
+    # Review: a hand-edited filters.json with a broken top level next to valid axes ran on the
+    # laptop but was silently dropped by the phone (which parses the top level too).
+    import json as _json
+    p = tmp_path / "filters.json"
+    p.write_text(_json.dumps({"1:acc": {"lowpass": None, "notches": [{"hz": 8}], "axes": [AX, AX, AZ]}}))
+    cfg = fl.FilterBank(str(p)).configs["1:acc"]
+    assert cfg == fl.normalise({"axes": [AX, AX, AZ]})
+    assert cfg["lowpass"] == AX["lowpass"] and cfg["notches"] == []

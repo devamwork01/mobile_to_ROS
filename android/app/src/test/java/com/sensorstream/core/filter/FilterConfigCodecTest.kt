@@ -2,6 +2,7 @@ package com.sensorstream.core.filter
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FilterConfigCodecTest {
@@ -28,5 +29,21 @@ class FilterConfigCodecTest {
         assertEquals("LP 5 Hz · 4th + notch 8 Hz", FilterConfigCodec.summary(FilterConfig(5.0, 4, listOf(Notch(8.0, 10.0)))))
         assertEquals("LP 2.5 Hz · 2nd", FilterConfigCodec.summary(FilterConfig(2.5, 2)))
         assertEquals("notch 3, 12 Hz", FilterConfigCodec.summary(FilterConfig(null, 4, listOf(Notch(3.0, 5.0), Notch(12.0, 9.0)))))
+    }
+
+    @Test fun `per-axis config round-trips and summarises`() {
+        val x = FilterConfig(0.5, 4)
+        val z = FilterConfig(5.0, 4, listOf(Notch(8.0, 10.0)))
+        val cfg = FilterConfig(0.5, 4, axes = listOf(x, x, z))
+        val back = FilterConfigCodec.decode(FilterConfigCodec.encode(mapOf("1:acc" to cfg)))["1:acc"]!!
+        assertEquals(cfg, back)
+        assertEquals(1, back.axes!![2].notches.size)
+        assertEquals("X/Y LP 0.5 Hz · 4th | Z LP 5 Hz · 4th + notch 8 Hz", FilterConfigCodec.summary(back))
+        // grouped only when identical: 0.51 and 0.54 Hz both display as "0.5" but stay separate groups
+        val near = FilterConfig(0.51, 4, axes = listOf(FilterConfig(0.51, 4), FilterConfig(0.54, 4), FilterConfig(0.51, 4)))
+        assertEquals("X/Z LP 0.5 Hz · 4th | Y LP 0.5 Hz · 4th", FilterConfigCodec.summary(near))
+        // a malformed axes list makes the whole entry invalid (skipped), never half a filter
+        val bad = org.json.JSONObject("""{"1:acc":{"lowpass":{"hz":5,"order":4},"notches":[],"axes":[{"lowpass":{"hz":5,"order":4},"notches":[]}]}}""")
+        assertTrue(FilterConfigCodec.parseConfigs(bad).isEmpty())
     }
 }
