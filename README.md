@@ -37,6 +37,7 @@ optional ROS 2 bridge.
 | Reliability | On-phone bounded recording + laptop **backfill** (gap detect → resend → dedup) for lossless capture across Wi-Fi drops / screen-off |
 | Dashboard | Mission-control layout: always-on link KPIs (latency, jitter, loss, throughput), a sensor picker with live Hz + health dots, and **pinnable panels** you can collapse or maximise — several live graphs at once (uPlot), 3D orientation (Three.js) with recenter/reset, **Snapshot → CSV** of the last 10–60 s, paged recordings browser with server-side LOD, light/dark themes |
 | Phone app | Categorized sensors, per-sensor detail + sampling-rate config with **live actual Hz**, on-device pseudo-3D orientation with **recenter**, diagnostics, background streaming with a **Stop** action in the notification, **one-tap reconnect** to the last laptop, optional **packet batching**, and **export/share** of the on-phone recording |
+| Filtering | Spectrum-guided per-axis filters (low-pass + notches), by hand on the dashboard or automatic with `--filter`: the phone guides a 10 s capture (prompt + buzzes) and the server tunes accelerometer, gyroscope and magnetometer from it; the filtered signal reaches the dashboard, ROS 2, recordings and the phone |
 | Discovery | mDNS + UDP beacon: the phone lists every server on the network with its name, type and link quality |
 | ROS 2 | Optional `--ros` sink: combined `sensor_msgs/Imu` (`/phone/imu/data_raw`, `/phone/imu/data`) stamped with the phone's measurement time, covariance from a Still test run, plus `MagneticField`, `QuaternionStamped` |
 
@@ -107,7 +108,8 @@ npm test           # unit tests (Vitest): history buffer, layout store, pin reso
 | `--selftest-hz` | `100` | Synthetic sample rate |
 | `--ros` | off | Publish decoded sensors to ROS 2 topics (requires a sourced ROS 2 environment) |
 | `--ros-stamp` | `sensor` | ROS stamps: `sensor` = phone measurement time mapped to ROS time; `receive` = laptop arrival time |
-| `--filter` | off | Auto per-axis filters for accelerometer / gyroscope / magnetometer from each axis's spectrum, 10 s after each starts |
+| `--filter` | off | Automatic per-axis filters for accelerometer / gyroscope / magnetometer, tuned from a guided 10 s capture on the phone (app v0.1.13+) — see [Filtering](#filtering--let-the-spectrum-choose-the-filter) |
+| `--filters-file` | `./filters.json` | Where the running filters are saved |
 | `--filter-report` | next to `--filters-file` | Where `--filter` writes `filter_report.json` |
 | `--record` | off | Record the session from start (to `--log-dir`, default `./recordings`) |
 | `--http-port` | `8080` | Dashboard HTTP port |
@@ -151,7 +153,8 @@ Once the laptop server is running and the phone is streaming, here's what you're
 </p>
 
 - **Home** shows a live 3D view of the phone's orientation (device axes vs. the world frame), plus connection status, latency (median of the last 10 heartbeat round trips, so one Wi-Fi hiccup doesn't jump the number), and the total sample rate (sensors set to **Max** count at their measured rate while streaming). Tap the **recenter** button (target icon) on the 3D view to zero it on the current pose; tap it again to return to absolute orientation. If the Wi-Fi link drops, the status shows **Reconnecting** and the app reconnects on its own (the phone keeps recording meanwhile, so the gap is backfilled).
-- **Filtered Signals** (Home, when a filter is set on the laptop): per filtered sensor a live 10 s graph (raw faint, filtered bold; tap to switch axis), the filter (e.g. `LP 5 Hz · 4th + notch 8 Hz`) and **σ raw → filtered**. The phone runs the same filters itself and remembers the settings, so this keeps working offline. The sensor's detail graph also overlays the filtered trace. Hide it under **Settings → Filtering**.
+- **Filtered Signals** (Home, when a filter is set on the laptop): per filtered sensor a live 10 s graph (raw faint, filtered bold; tap to switch axis), the filter (e.g. `LP 5 Hz · 4th + notch 8 Hz`) and **σ raw → filtered**; with `--filter`, its header has **Re-tune**. The phone runs the same filters itself and remembers the settings, so this keeps working offline. The sensor's detail graph also overlays the filtered trace. Hide it under **Settings → Filtering**.
+- **Filter tuning** (server started with `--filter`): a card at the top asks you to pick up and move the phone, counts down, buzzes once to start and twice when done, then shows what was tuned per sensor, with **Re-tune** and **Dismiss**. See [Filtering](#filtering--let-the-spectrum-choose-the-filter).
 - **Sensors** lists every sensor grouped by category (Motion / Orientation / Magnetic / …) with a per-sensor toggle and sampling-rate control — pick what you want to stream.
 - **Connection** lists every SensorStream server on the network (scrollable): its name, type (laptop / desktop / Raspberry Pi), OS and address, with signal bars and the round trip measured from the phone. Tap one to choose where the phone streams; the last one used is marked and kept on top. A server that stops answering greys out and then drops off. *Enter address manually* covers networks that block discovery. The choice is remembered, and Home offers one-tap reconnect. Run several servers? Give each a `--name`.
 - While streaming, sensor cards show the requested rate **and** the rate the sensor actually delivers (e.g. `100 Hz · 116 live`) — Android treats the requested rate as a hint.
@@ -203,10 +206,80 @@ ever receives a decimated display copy, which would give wrong noise figures and
 
 ### Filtering — let the spectrum choose the filter
 
-Each graph panel has a **Filter** button (funnel). **Suggest from spectrum** proposes a filter from the
-live spectrum: a 4th-order Butterworth low-pass at the frequency where the signal sinks into the
-noise floor, plus notches for strong narrow peaks (e.g. a motor vibration) inside the band you keep.
-Tweak the cutoff (slider), order (2/4) and notches, then **Apply**.
+SensorStream can filter the accelerometer, gyroscope and magnetometer for you, one filter per axis,
+chosen from what the spectrum shows: a low-pass where the real signal ends and the noise begins,
+plus notches for narrow vibration lines (a motor, a fan). Let the server do it automatically
+(guided by the phone), or tune by hand on the dashboard. The raw data is always kept.
+
+#### Quick start — automatic, guided filters
+
+You need the phone app **v0.1.13 or newer** (APK from [Releases](../../releases)) for the guided
+prompt; older apps still get automatic filters, just without the prompt (see below).
+
+```bash
+cd laptop
+python -m sensorstream.app --filter      # add --ros to publish the filtered topics to ROS 2 too
+```
+
+1. On the phone, under **Sensors**, switch on **Acceleration**, **Angular Velocity** and (if you want
+   it) **Magnetic Field**. Then **Connection** → pick your server → **Connect & Stream**.
+2. About 2 s later the phone shows **"Pick up the phone and move it the way you'll use it"** and
+   counts down 3 s.
+3. **One buzz** → move the phone the way it will be used (in your hand, on the robot's mount, tilting
+   and turning as in real use) while the screen counts down **10 s**.
+4. **Two buzzes** → done, put it down. The phone shows what it tuned per sensor, e.g.
+   `✓ Accelerometer: X/Y LP 6.2 Hz | Z LP 9.4 Hz`, and the laptop prints a table per sensor.
+5. That's it — the filtered signal now goes everywhere (dashboard, ROS 2 `*_filtered`, recordings,
+   the phone). To repeat it (new mount, different use), tap **Re-tune** on the phone: on the result
+   card or on the **Filtered Signals** card on Home. To look closer or adjust, use a panel's
+   **Filter** button on the dashboard (see *Tuning by hand*).
+
+> **Why move the phone?** The filter is tuned to the motion it sees during those 10 s. A phone lying
+> still shows only noise, which gives very low cutoffs (e.g. 0.5 Hz, about 0.8 s of lag) — right for
+> a phone that really stays still, wrong for one that moves.
+
+No phone at hand? `python -m sensorstream.app --selftest --filter` tunes the synthetic stream after
+10 s (no prompt — the selftest has no phone).
+
+#### What `--filter` does, in detail
+
+- **Which sensors:** accelerometer, gyroscope and magnetometer (those that are streaming); each axis
+  gets its own low-pass (4th-order Butterworth) and up to 3 notches. Orientation and on-change sensors
+  are never filtered.
+- **When:** once per phone connection — about 2 s after the phone connects, one guided capture for
+  all streaming sensors. A sensor switched on later gets its own prompt, opened by a stronger
+  **triple buzz** (alarm-type vibration, so it also buzzes with the ringer on silent; Do Not Disturb
+  may still block it). With the app in the background, the streaming notification shows the
+  instruction and countdown. A reconnect (even after a Wi-Fi blip) tunes again from fresh data.
+- **Only the capture counts:** the phone marks the 10 s window with the sensors' own timestamps,
+  starting 0.5 s after the buzz, so the vibration never enters the analysed data.
+- **It replaces saved filters** for those sensors (in `filters.json`). To keep hand-tuned filters,
+  run without `--filter` — saved filters keep running either way.
+- **Fallbacks:** with an older phone app, or when a capture never arrives, is cancelled or fails (see
+  *Troubleshooting filters*), the sensor is tuned automatically from its last 10 s, 60 s after it
+  started streaming; the console says so. Without any phone (`--selftest`), after 10 s.
+- **What it reports:** per sensor and axis — the noise floor (noise density), the chosen low-pass and
+  the delay it adds, each notch and how far its peak stood out, and the expected σ before → after.
+  Printed on the laptop, written to `filter_report.json`, and shown in the dashboard's filter pane
+  under *Spectrum findings*.
+
+The laptop console after a guided capture looks like this:
+
+```
+[filter] guided tuning (connect): prompted lsm6dsv_0 Accelerometer Non-wakeup, lsm6dsv_0 Gyroscope Non-wakeup
+[filter] guided tuning: capture received (2 of 2 sensors)
+[filter] Acceleration (lsm6dsv_0 Accelerometer Non-wakeup) @ 116.4 Hz
+   axis  noise/rtHz   cutoff   order  delay    notches              sigma raw -> filtered
+   X     7.73e-04     6.20     4        67 ms  -                    0.412 -> 0.395
+   ...
+```
+
+#### Tuning by hand (dashboard)
+
+Each graph panel has a **Filter** button (funnel). It opens the filter editor as a **pane on the
+right** (the panels narrow to make room; the edited panel is outlined). **Suggest from spectrum**
+proposes a filter from the live spectrum; tweak the cutoff (slider), order (2/4) and notches, then
+**Apply**. The pane stays open so you can compare and adjust; ✕ or Esc closes it.
 
 - Filtering runs on the laptop server on **every full-rate sample**, before the display stream is
   down-sampled, using causal real-time filters (the kind a robot stack runs), so what you see is
@@ -214,38 +287,50 @@ Tweak the cutoff (slider), order (2/4) and notches, then **Apply**.
 - The panel then shows raw (faint) and filtered (bold) traces, the footer shows **σ raw → filtered**,
   and the **Spectrum** view shows the raw spectrum, the filtered "after" spectrum and the filter's
   response (dashed).
-- Settings are per sensor, shared by every open dashboard and saved in `filters.json`
-  (`--filters-file` to move it). **The `.ssbin` recording stays raw** (filtered values only appear as extra CSV columns), so you can always re-filter differently.
-- **Per axis**: tick *Per axis* in the filter editor to give X, Y and Z their own filter (e.g. a lower cutoff on X/Y and a notch only on Z). *Suggest from spectrum* then fills each axis from its own spectrum, and the Spectrum view draws one response curve per axis. Per-axis filters run everywhere the filtered signal goes (ROS 2, CSV, the phone).
-- **Filter pane**: the Filter button on a panel opens the editor as a pane on the right (the panels
-  narrow to make room, the edited panel is outlined); it stays open after Apply so you can compare,
-  and ✕ or Esc closes it. *Spectrum findings* there show, per axis, the noise floor, the low-pass and
-  its delay, notches (and how far each peak stood out) and the expected sigma before -> after.
-- **Automatic (`--filter`)**: `python -m sensorstream.app --filter` gives the accelerometer, gyroscope
-  and magnetometer per-axis filters on its own: 10 s after each sensor starts streaming (also one
-  switched on later), each axis is tuned from its own spectrum and applied (replacing saved filters),
-  once per phone connection. The findings are printed, written to `filter_report.json` (next to
-  `filters.json`; `--filter-report` to change), and shown in the filter pane. Hold the phone the way
-  you will use it for those first 10 s - the spectrum is taken from them.
-  With the phone app (v0.1.13+), tuning is **guided**: when the phone connects it says "pick up the
-  phone and move it the way you'll use it", counts down 3 s, **buzzes once**, captures 10 s (countdown
-  on screen), then **buzzes twice** — you can put it down — and shows what was tuned. Only that capture
-  is analysed. A sensor switched on later gets the same prompt (with a stronger buzz that also sounds
-  on silent), and **Re-tune** on the phone's Filtered Signals card repeats it. Older apps, or a capture
-  that never arrives, fall back to automatic tuning 60 s after the sensor starts.
-- Orientation quaternions and on-change sensors (light, proximity, steps) aren't filtered.
+- **Per axis**: tick *Per axis* to give X, Y and Z their own filter (e.g. a lower cutoff on X/Y and a
+  notch only on Z). *Suggest from spectrum* then fills each axis from its own spectrum, and the
+  Spectrum view draws one response curve per axis.
+- *Spectrum findings* in the pane show what the spectrum showed per axis (as in the `--filter`
+  report), after `--filter` or a *Suggest*.
+- If the running filter changes while you edit (e.g. `--filter` re-tuned it), the pane says so and
+  offers **Reload**; **Apply** would replace it with your settings.
+- Settings are per sensor, shared by every open dashboard, and saved in `filters.json`.
 
 <img src="docs/images/dashboard-filter.jpg" alt="Spectrum of a Galaxy S25 Ultra accelerometer with a 5 Hz low-pass: raw (faint), filtered (bold) and the filter response (dashed)" width="600">
 
+#### Files
+
+| File | Written by | What's in it |
+|---|---|---|
+| `filters.json` (`--filters-file`) | Apply / Clear on the dashboard, `--filter` | The filters that run, per sensor (kept across restarts, pushed to the phone) |
+| `filter_report.json` (`--filter-report`; default next to `filters.json`) | `--filter` | Per sensor and axis: sample rate, noise density, cutoff and order, delay, notches with prominence, expected σ raw / filtered, time; plus the phone model |
+
+The `.ssbin` recording always stays raw (filtered values appear only as extra CSV columns), so you
+can re-filter differently later.
+
 **Where the filtered signal goes** (only for sensors with a filter; raw outputs never change):
-- **ROS 2**: `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered`
-  (same message types as the raw topics, full rate).
+- **ROS 2**: `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered`,
+  `/phone/imu/data_raw_filtered`, `/phone/imu/data_filtered` (same message types as the raw topics, full rate).
 - **Recording CSV**: extra columns `f0,f1,f2` next to `v0..v5` (empty when no filter; the `.ssbin`
   stays raw, and samples recovered by backfill are never filtered).
 - **Snapshot CSV**: extra columns `fx,fy,fz`.
 - **Phone**: the laptop sends its filter settings to the phone on connect and on every change; the
   phone saves them and filters its own samples (designed for the phone's measured rate), shown on
   Home and the sensor detail graph, even when disconnected. Streaming to the laptop stays raw.
+
+#### Troubleshooting filters
+
+| You see | What it means / what to do |
+|---|---|
+| No prompt and no buzz on the phone | The app is older than v0.1.13 (update it; meanwhile filters are still tuned automatically 60 s after each sensor starts), or the server was started without `--filter`. |
+| A prompt but no buzz | Vibration is off or Do Not Disturb blocks it; follow the on-screen countdown instead. |
+| A cutoff of 0.5 Hz on an axis | That axis barely moved during the capture (only noise). Tap **Re-tune** and move the phone as in real use. |
+| `not enough data in the capture` / `data gap during the capture` | The stream was interrupted (Wi-Fi drop, sensor switched off/on) during the 10 s. Tap **Re-tune**; otherwise it is tuned automatically at 60 s. |
+| `the rate estimates disagree` | The sampling rate was still settling (just after starting or changing a sensor's rate). Tap **Re-tune** a few seconds later. |
+| `[filter] ... still waiting - <reason>` on the laptop | A sensor hasn't been tuned well past its time; the reason says why (e.g. gaps or irregular timestamps). |
+| `[filter] guided tuning: no capture from the phone` | The phone never sent the capture (app closed, link dropped); those sensors are tuned automatically at 60 s. |
+| Your hand-tuned filter was replaced | `--filter` re-tunes on every (re)connect. Run without `--filter` to keep saved filters. |
+| The card stays on "Working out the filters…" | The laptop never answered (e.g. it restarted); tap **Dismiss**, then **Re-tune**. |
 
 ## ROS 2 bridge (optional)
 
@@ -326,6 +411,8 @@ drift >10%, RSS growth like a leak, or a crash.
 - [x] Spectrum-guided filtering on the dashboard (suggest, tweak, before/after)
 - [x] Filtered signal on ROS 2 (`*_filtered` topics) and in CSV exports
 - [x] Filtered signal on the phone (on-phone filter, settings synced from the laptop, Home screen)
+- [x] Per-axis filters; filter side pane with spectrum findings
+- [x] Automatic filters (`--filter`) with a guided capture on the phone (prompt, buzzes, Re-tune)
 - [ ] Recording tools: naming/tags, playback scrubber, CSV export of recordings
 - [x] Phone app redesign (Compose) with on-device 3D orientation
 - [x] ROS 2 output sink (`--ros`)
