@@ -98,3 +98,27 @@ describe("per-axis summary only groups truly identical filters", () => {
     expect(filterSummary({ axes: [o2, o4, o4] })).toBe("X LP 5 (2nd) · Y/Z LP 5");
   });
 });
+
+import { followServer } from "./filterConfig.js";
+
+describe("pane draft vs the server's running filter", () => {
+  // review I2: the pane stays open, and --filter / another dashboard change the filter under it
+  const tuned = { lowpass: { hz: 0.5, order: 4 }, notches: [], axes: [
+    { lowpass: { hz: 0.5, order: 4 }, notches: [] }, { lowpass: { hz: 0.5, order: 4 }, notches: [] },
+    { lowpass: { hz: 5, order: 4 }, notches: [{ hz: 8, q: 10 }] }] };
+  it("an untouched draft follows the server", () => {
+    const r = followServer(configToDraft(undefined), tuned, false);
+    expect(r.stale).toBe(false);
+    expect(draftToConfig(r.draft)).toEqual(draftToConfig(configToDraft(tuned)));
+    expect(r.draft.perAxis).toBe(true);
+  });
+  it("an edited draft is kept and flagged stale", () => {
+    const mine = { ...configToDraft(undefined), lpOn: true, lpHz: 3 };
+    const r = followServer(mine, tuned, true);
+    expect(r.draft).toBe(mine);
+    expect(r.stale).toBe(true);
+  });
+  it("a cleared filter empties an untouched draft", () => {
+    expect(followServer(configToDraft(tuned), undefined, false).draft).toEqual(configToDraft(undefined));
+  });
+});

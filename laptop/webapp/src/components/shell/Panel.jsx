@@ -77,8 +77,10 @@ export default function Panel({
 }) {
   return (
     <section className={`panel flex flex-col min-w-0 overflow-hidden ${className}`}>
-      <header className={`flex items-center gap-2 px-3 py-1.5 min-h-[40px] ${collapsed ? "" : "border-b border-line"}`}>
-        <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted truncate">{title}</h2>
+      {/* Narrow panels (e.g. beside the filter pane) wrap the tools onto a second line rather than
+          squeezing the title away. */}
+      <header className={`flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 min-h-[40px] ${collapsed ? "" : "border-b border-line"}`}>
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted truncate min-w-[5.5rem]">{title}</h2>
         {unit && <span className="text-[11px] text-faint whitespace-nowrap">{unit}</span>}
         {live}
         {badge}

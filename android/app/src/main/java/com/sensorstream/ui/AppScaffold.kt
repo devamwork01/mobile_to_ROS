@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sensorstream.ui.components.SsIcons
+import com.sensorstream.ui.components.TuneCard
 import com.sensorstream.ui.nav.AppNav
 import com.sensorstream.ui.nav.Screen
 import com.sensorstream.ui.nav.rememberAppNav
@@ -77,7 +78,11 @@ fun AppScaffold(vm: StreamViewModel) {
         // column instead of stretching edge-to-edge.
         Box(Modifier.fillMaxSize().padding(pad).background(Ss.colors.bg), contentAlignment = Alignment.TopCenter) {
             Box(Modifier.widthIn(max = 640.dp).fillMaxSize()) {
-                AppContent(vm, nav, current)
+                // Guided filter tuning (server --filter) shows above whichever screen is open.
+                Column(Modifier.fillMaxSize()) {
+                    TuneCard(vm, compact = current !is Screen.Home, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                    Box(Modifier.weight(1f)) { AppContent(vm, nav, current) }
+                }
             }
         }
     }

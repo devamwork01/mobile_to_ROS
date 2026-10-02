@@ -27,7 +27,8 @@ from .backfill import GapTracker
 from .control import ControlServer
 from .reconcile import Reconciler
 from .dashboard import DashboardServer
-from .filters import FilterBank, suggest as suggest_filter
+from .autofilter import AutoFilter, ReportStore, now_iso, sensor_report
+from .filters import FilterBank, suggest as suggest_filter, suggest_details
 from .insights import InsightsSink
 from .discovery import Advertiser, BEACON_PORT, ServerIdentity, start_probe_responder
 from .logging_sink import Recorder
@@ -59,11 +60,21 @@ async def _selftest_generator(udp_port: int, hz: float) -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     dest = ("127.0.0.1", udp_port)
     period = 1.0 / hz
+    period_ns = int(round(1e9 / hz))
     seqs = [0, 0, 0, 0]  # accel, gyro, mag, rotation-vector
-    t0 = time.monotonic()
+    # Ideal sensor timestamps (like a phone's hardware clock) and deadline pacing on the precise
+    # perf_counter: on Windows the monotonic clock ticks every ~15.6 ms and asyncio treats shorter
+    # sleeps as already due, so a plain sleep(1/hz) loop spun with many samples sharing a timestamp.
+    res = max(time.get_clock_info("monotonic").resolution, 0.001)
+    t0_ns, start, k = time.monotonic_ns(), time.perf_counter(), 0
     try:
         while True:
-            t = time.monotonic() - t0
+            delay = start + k * period - time.perf_counter()
+            if delay > 0:
+                await asyncio.sleep(max(delay, res * 1.05))  # an oversleep is caught up by the next samples
+            else:
+                await asyncio.sleep(0)  # catching up: still let the server handle each packet
+            t = k * period
             yaw = t * 0.6
             pitch = 0.35 * math.sin(t * 0.5)
             cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
@@ -72,7 +83,8 @@ async def _selftest_generator(udp_port: int, hz: float) -> None:
             ax, ay, az = 9.81 * math.sin(pitch), 0.6 * math.sin(t * 3), 9.81 * math.cos(pitch)
             gx, gy, gz = 0.15 * math.sin(t * 2), 0.35 * math.cos(t * 0.5), 0.6
             mx, my, mz = 28 * math.cos(yaw), 28 * math.sin(yaw), -40 + 3 * math.sin(t)
-            tn = time.monotonic_ns()
+            tn = t0_ns + k * period_ns
+            k += 1
 
             def rec(handle, stype, vals):
                 r = p.Record(stype, handle, seqs[handle], tn, 3, vals, t_acquire_ns=tn, t_serialize_ns=tn + 250_000)
@@ -90,12 +102,11 @@ async def _selftest_generator(udp_port: int, hz: float) -> None:
                 ],
             )
             sock.sendto(p.encode_datagram(dg), dest)
-            await asyncio.sleep(period)
     finally:
         sock.close()
 
 
-def handle_filter_command(msg: dict, bank, insights, broadcast, on_change=None) -> bool:
+def handle_filter_command(msg: dict, bank, insights, broadcast, on_change=None, reports=None) -> bool:
     """filter_set / filter_clear / filter_suggest from the dashboard. Returns False for other commands."""
     cmd = msg.get("cmd")
     key = str(msg.get("key") or "")
@@ -127,8 +138,17 @@ def handle_filter_command(msg: dict, bank, insights, broadcast, on_change=None) 
             f, psd, fs = src[:3]
             per = list(src[3])[:3] if len(src) > 3 else []  # filters run on the first 3 values
             # Per-axis suggestions (each axis from its own spectrum) for sensors with >= 3 axes.
-            axes = [suggest_filter(f, p, fs) for p in per] if len(per) == 3 else None
+            found = [suggest_details(f, p, fs) for p in per] if len(per) == 3 else None
+            axes = [c for c, _ in found] if found else None
             broadcast({"kind": "filter_suggestion", "key": key, "config": suggest_filter(f, psd, fs), "axes": axes})
+            if found and reports is not None:  # what the spectrum showed, per axis (not saved to the file)
+                try:
+                    ty = int(key.split(":", 1)[0])
+                except ValueError:
+                    ty = 0
+                rec = sensor_report(key, handle, ty, fs, f, per, axes, [d for _, d in found], now_iso())
+                reports.add(rec, persist=False)
+                broadcast({"kind": "filter_report", "key": key, "report": rec})
         return True
     return False
 
@@ -229,6 +249,9 @@ async def run(args: argparse.Namespace) -> None:
     sync = SyncTracker()
     insights = InsightsSink()
     filterbank = FilterBank(args.filters_file)
+    filter_reports = ReportStore(report_path(args))
+    autofilter: Optional[AutoFilter] = None  # created once push_filters exists (below)
+    phone_now: dict = {"id": None}  # device id of the connected phone (guided tuning)
     testruns: Optional[TestRunManager] = None  # created once the control channel exists (below)
 
     # Backfill (Phase 2B): detect per-(client,handle) seq gaps on the live stream and, after a grace
@@ -249,6 +272,8 @@ async def run(args: argparse.Namespace) -> None:
 
     def on_dg(dg, addr, t_recv_ns):
         fv = filterbank.process(dg)  # once per raw sample, before any decimation
+        if autofilter is not None:
+            autofilter.on_datagram(dg)
         sink.on_datagram(dg, addr, t_recv_ns, filtered=fv)
         if ros_sink is not None:
             nonlocal ros_failed
@@ -278,9 +303,24 @@ async def run(args: argparse.Namespace) -> None:
             filterbank.set_catalog(ev.get("sensors") or [])
             push_filters()  # the phone filters its own preview with the laptop's settings
             refresh_ros_cov(ev.get("model") or "")
+            phone_now["id"] = ev["device_id"]
+            if autofilter is not None:  # a (re)connect re-tunes from fresh data
+                autofilter.on_phone_connected(ev.get("model"), ev.get("android"), ev.get("caps") or [])
         elif kind == "backfill":
             reconciler.on_backfill(ev["device_id"], ev["handle"], ev["frames"])
             return   # raw frames are not browser-bound
+        elif kind in ("tune_window", "tune_request"):
+            if autofilter is not None:
+                try:  # runs inside the phone's control socket: never let it drop the link
+                    if kind == "tune_window":
+                        autofilter.on_tune_window(ev.get("msg") or {})
+                    else:
+                        autofilter.on_tune_request()
+                except Exception as exc:
+                    print(f"[filter] guided tuning: {kind} failed: {exc!r}")
+            return   # not browser-bound
+        elif kind == "phone_disconnected" and phone_now["id"] == ev.get("device_id"):
+            phone_now["id"] = None
         elif kind == "backfill_unavailable":
             reconciler.on_unavailable(ev["device_id"], ev["handle"], ev["from"], ev["to"])
             return
@@ -290,6 +330,10 @@ async def run(args: argparse.Namespace) -> None:
 
     def push_filters() -> None:
         asyncio.get_running_loop().create_task(control.send_filters(filterbank.configs))
+
+    if args.filter:
+        autofilter = AutoFilter(filterbank, insights, filter_reports, dash.broadcast, push_filters,
+                                send_phone=make_phone_sender(control, phone_now))
     dash.control_handler = control.handle
 
     def record_meta() -> Optional[dict]:
@@ -312,7 +356,7 @@ async def run(args: argparse.Namespace) -> None:
     rec_base = recorder.start(args.log_dir, record_meta()) if args.record else None
 
     def ui_command(msg: dict) -> None:
-        if handle_filter_command(msg, filterbank, insights, dash.broadcast, push_filters):
+        if handle_filter_command(msg, filterbank, insights, dash.broadcast, push_filters, reports=filter_reports):
             return
         cmd = msg.get("cmd")
         if cmd == "record_start" and not recorder.is_recording and not testruns.active:
@@ -376,6 +420,7 @@ async def run(args: argparse.Namespace) -> None:
                 msgs.append({"kind": "active_set", "device_id": s.device_id, "handles": s.active})
         msgs.append({"kind": "recording", "active": recorder.is_recording, "rows": recorder.rows})
         msgs.append(filterbank.snapshot())
+        msgs.extend(filter_reports.messages())
         run_status = testruns.status()
         if run_status is not None:
             msgs.append(run_status)
@@ -418,6 +463,8 @@ async def run(args: argparse.Namespace) -> None:
         print("   ROS       : publishing /phone/imu/data_raw, /phone/imu/data, /phone/accelerometer, "
               "/phone/gyroscope, /phone/magnetic_field, /phone/orientation")
         print(f"               stamps: {args.ros_stamp} time")
+    if args.filter:
+        print(f"   FILTER    : per-axis filters for accel/gyro/mag 10 s after each starts  (report: {report_path(args)})")
     if args.selftest:
         print("   MODE      : SELF-TEST (synthetic accelerometer)")
     if args.record:
@@ -479,6 +526,11 @@ async def run(args: argparse.Namespace) -> None:
             await insights_step(insights, testruns, dash.broadcast)
             for key, message in filterbank.errors():
                 dash.broadcast({"kind": "filter_error", "key": key, "message": message, "running": False})
+            if autofilter is not None:
+                try:
+                    autofilter.tick()
+                except Exception as exc:  # a tuning failure must not stop the insights loop
+                    print(f"[filter] auto-filter tick failed: {exc!r}")
 
     tasks = [asyncio.create_task(stats_task()), asyncio.create_task(reconcile_task()),
              asyncio.create_task(insights_task())]
@@ -503,6 +555,21 @@ async def run(args: argparse.Namespace) -> None:
         await dash.stop()
 
 
+def make_phone_sender(control, current: dict):
+    """Fire-and-forget control message to the connected phone (guided tuning); dropped without one."""
+    def send(obj: dict) -> None:
+        if current.get("id") is not None:
+            asyncio.get_running_loop().create_task(control.send_json(current["id"], obj))
+    return send
+
+
+def report_path(args) -> str:
+    """filter_report.json beside filters.json unless --filter-report says otherwise."""
+    if args.filter_report:
+        return args.filter_report
+    return os.path.join(os.path.dirname(args.filters_file) or ".", "filter_report.json")
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Laptop-side sensor telemetry receiver + dashboard")
     ap.add_argument("--udp-host", default="0.0.0.0", help="telemetry bind address")
@@ -516,6 +583,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--selftest-hz", type=float, default=100.0)
     ap.add_argument("--log-dir", default="./recordings", help="directory for recordings")
     ap.add_argument("--filters-file", default="./filters.json", help="where per-sensor filter settings are saved")
+    ap.add_argument("--filter", action="store_true",
+                    help="auto per-axis filters for the accelerometer, gyroscope and magnetometer, tuned from "
+                         "each axis's spectrum 10 s after each starts streaming (overwrites their saved filters)")
+    ap.add_argument("--filter-report", default=None,
+                    help="where --filter writes its per-axis spectrum findings (default: filter_report.json "
+                         "next to --filters-file)")
     ap.add_argument("--record", action="store_true", help="record the session from start")
     ap.add_argument("--name", default=None, help="name shown in the phone's Servers list (default: this computer's name)")
     ap.add_argument("--no-discovery", action="store_true", help="disable mDNS + UDP beacon advertising")

@@ -29,8 +29,18 @@ accelerometer (|a| ≈ 9.8) appear in the Sensors table.
 
 ## 4. Stream from the phone
 - Put phone and laptop on the **same Wi-Fi** (see troubleshooting if they can't reach each other).
-- Open **Sensor Stream**, enter the laptop **IP** and **port** (`5005`), tap **Start streaming**.
-- The phone shows live Ax/Ay/Az + rate; the laptop dashboard shows the same values and Hz.
+- Open **SensorStream** → **Connection**: the laptop appears in the server list (or use *Enter
+  address manually* with its IP and control port `8081`). Pick it and tap **Connect & Stream**.
+- The phone shows live values + rate; the laptop dashboard shows the same values and Hz.
+
+### 4b. Automatic filters (optional)
+Start the server with `--filter` (phone app v0.1.13+ for the guided prompt):
+```bash
+python -m sensorstream.app --filter
+```
+About 2 s after the phone connects it asks you to pick it up: **one buzz** → move it the way you'll
+use it for 10 s → **two buzzes** → done; the phone shows what was tuned and the laptop prints a
+per-axis table. Details, files and troubleshooting: README → *Filtering*.
 
 ## 5. Coordinate sanity check (Phase 1)
 Lay the phone flat, screen up, on a table. You should see about:

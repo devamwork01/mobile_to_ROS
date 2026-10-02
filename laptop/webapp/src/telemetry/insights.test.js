@@ -70,3 +70,14 @@ describe("spectrum messages keep the filtered curves", () => {
     expect(getPsd(9).psd_f).toEqual([[0.5, 0.1]]);
   });
 });
+
+import { getFilterReport } from "./insights.js";
+
+describe("filter reports", () => {
+  it("stores the latest report per sensor key", () => {
+    expect(onInsightsMessage({ kind: "filter_report", key: "1:Acc", report: { key: "1:Acc", axes: [1] } })).toBe(true);
+    onInsightsMessage({ kind: "filter_report", key: "1:Acc", report: { key: "1:Acc", axes: [2] } });
+    expect(getFilterReport("1:Acc").axes).toEqual([2]);
+    expect(getFilterReport("4:Gyro")).toBe(undefined);
+  });
+});

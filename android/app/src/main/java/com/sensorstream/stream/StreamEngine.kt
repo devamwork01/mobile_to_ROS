@@ -2,10 +2,16 @@ package com.sensorstream.stream
 
 import com.sensorstream.codec.BinaryPacketCodec
 import com.sensorstream.core.RttMedian
+import com.sensorstream.core.TuneAction
+import com.sensorstream.core.TuneFlow
+import com.sensorstream.core.TuneMessages
+import com.sensorstream.core.TunePhase
+import com.sensorstream.core.TunePrompt
 import com.sensorstream.core.filter.FilterSettings
 import android.content.Context
 import android.hardware.SensorManager
 import android.os.Build
+import android.os.SystemClock
 import com.sensorstream.core.SensorInfo
 import com.sensorstream.core.SensorSample
 import com.sensorstream.net.WsControlClient
@@ -14,6 +20,7 @@ import com.sensorstream.sensor.SensorRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -26,6 +33,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+
+/** Guided filter tuning on screen: the server's prompt and where the flow is. */
+data class TuneUi(val prompt: TunePrompt, val phase: TunePhase)
 
 /** A user's choice to stream one sensor at a requested period. */
 data class Selection(val handle: Int, val periodUs: Int)
@@ -71,6 +81,17 @@ class StreamEngine(context: Context) {
     private val latest = ConcurrentHashMap<Int, SensorSample>()
     private val hz = ConcurrentHashMap<Int, Float>()
     private val lastTs = ConcurrentHashMap<Int, Long>()
+
+    private val haptics = Haptics(context.applicationContext)
+    private val _tune = MutableStateFlow<TuneUi?>(null)
+    /** Guided filter tuning on screen (server --filter), or null. */
+    val tune: StateFlow<TuneUi?> = _tune.asStateFlow()
+    private val _tuneAvailable = MutableStateFlow(false)
+    /** The server runs guided tuning this session (shows Re-tune). */
+    val tuneAvailable: StateFlow<Boolean> = _tuneAvailable.asStateFlow()
+    @Volatile private var tuneFlow: TuneFlow? = null
+    private var tuneJob: Job? = null
+    private val tuneFrom = ConcurrentHashMap<Int, Long>()
 
     fun latestFor(handle: Int): SensorSample? = latest[handle]
     fun hzFor(handle: Int): Float = hz[handle] ?: 0f
@@ -211,6 +232,18 @@ class StreamEngine(context: Context) {
             }
             override fun onConfigure(msg: JSONObject) { /* laptop-driven config: reserved */ }
             override fun onFilters(msg: JSONObject) { filterSettings.apply(msg) }
+            override fun onTunePrompt(msg: JSONObject) {
+                if (gen != connGen) return
+                TuneMessages.parsePrompt(msg)?.let { startTune(it) }
+            }
+            override fun onTuneResult(msg: JSONObject) {
+                if (gen != connGen) return
+                val (id, rs) = TuneMessages.parseResult(msg) ?: return
+                val f = tuneFlow ?: return
+                if (f.prompt.id != id) return
+                f.onResult(rs)
+                _tune.value = TuneUi(f.prompt, f.phase(SystemClock.elapsedRealtime()))
+            }
             override fun onResend(msg: JSONObject) {
                 if (gen != connGen) return
                 val rec = recorder ?: return
@@ -253,6 +286,7 @@ class StreamEngine(context: Context) {
     // Control channel dropped: pause ONLY the UDP sender and, if still desired, reconnect with
     // backoff. Acquisition + recording keep running across the outage (lossless; seq continuous).
     private fun onDropped() {
+        cancelTune(notify = false)
         controller.disconnectSender()
         // streaming stays true — the recorder is still capturing; only network delivery paused.
         // Latency is meaningless without a link, so clear it rather than show a stale value.
@@ -326,6 +360,7 @@ class StreamEngine(context: Context) {
         .put("app_version", com.sensorstream.BuildConfig.VERSION_NAME)
         .put("client_id", clientId)
         .put("sensors", catalogJson())
+        .put("caps", JSONArray().put(TuneMessages.CAP))
 
     /** The sensor catalog as sent in `hello` — also used for an exported recording's .meta.json. */
     fun catalogJson(): JSONArray {
@@ -354,7 +389,47 @@ class StreamEngine(context: Context) {
         return sensors
     }
 
+    /** Run one guided capture: cues, on-screen countdown, window marks from the newest sample times. */
+    private fun startTune(p: TunePrompt) {
+        tuneJob?.cancel()
+        _tuneAvailable.value = true
+        val flow = TuneFlow(p, SystemClock.elapsedRealtime())
+        tuneFlow = flow
+        tuneFrom.clear()
+        tuneJob = scope?.launch {
+            while (isActive) {
+                val now = SystemClock.elapsedRealtime()
+                for (a in flow.step(now)) when (a) {
+                    is TuneAction.Vibrate -> haptics.buzz(a.buzz)
+                    TuneAction.MarkStart -> p.sensors.forEach { tuneFrom[it.handle] = lastTs[it.handle] ?: 0L }
+                    TuneAction.MarkEnd -> control.sendJson(TuneMessages.window(p.id,
+                        p.sensors.map { Triple(it.handle, tuneFrom[it.handle] ?: 0L, lastTs[it.handle] ?: 0L) }))
+                }
+                if (tuneFlow === flow) _tune.value = TuneUi(p, flow.phase(now))
+                if (flow.finished) break
+                delay(100)
+            }
+        }
+    }
+
+    /** End a guided capture early (streaming stopped / link dropped); tell the server if possible. */
+    private fun cancelTune(notify: Boolean) {
+        val f = tuneFlow ?: return
+        tuneJob?.cancel()
+        if (notify && !f.finished) control.sendJson(TuneMessages.cancelled(f.prompt.id))
+        tuneFlow = null
+        _tune.value = null
+    }
+
+    fun requestRetune() { control.sendJson(TuneMessages.request()) }
+
+    fun dismissTune() {
+        if (tuneFlow?.finished != false) { tuneFlow = null; _tune.value = null }
+    }
+
     fun stop() {
+        cancelTune(notify = true)
+        _tuneAvailable.value = false
         desired = false
         connGen++  // invalidate in-flight callbacks so nothing reconnects after stop
         controller.onUiSample = null

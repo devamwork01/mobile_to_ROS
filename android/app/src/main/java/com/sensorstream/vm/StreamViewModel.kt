@@ -250,6 +250,12 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     private val keyByHandle: Map<Int, String> = catalog.associate { it.handle to "${it.type}:${it.name}" }
     val filterConfigs: StateFlow<Map<String, FilterConfig>> = engine.filterSettings.configs
 
+    /** Guided filter tuning (server --filter): the flow on screen, and whether Re-tune is offered. */
+    val tune: StateFlow<com.sensorstream.stream.TuneUi?> = engine.tune
+    val tuneAvailable: StateFlow<Boolean> = engine.tuneAvailable
+    fun retuneFilters() = engine.requestRetune()
+    fun dismissTune() = engine.dismissTune()
+
     data class FilteredSensor(val handle: Int, val key: String, val info: SensorInfo, val config: FilterConfig, val enabled: Boolean)
 
     private val _filteredSensors = MutableStateFlow<List<FilteredSensor>>(emptyList())

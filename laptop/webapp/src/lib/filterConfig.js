@@ -121,3 +121,10 @@ export function filterBadge(config, error, running = false) {
   if (config) return { label: "filtered", tone: "accent", title: "A filter is running on this sensor (server-side, full rate)" };
   return null;
 }
+
+// The pane stays open while the server's running filter can change under it (--filter tuning,
+// a reconnect re-tune, another dashboard). An untouched draft follows the server; an edited one is
+// kept and flagged stale, so Apply never silently replaces a newer filter.
+export function followServer(draft, active, dirty) {
+  return dirty ? { draft, stale: true } : { draft: configToDraft(active), stale: false };
+}

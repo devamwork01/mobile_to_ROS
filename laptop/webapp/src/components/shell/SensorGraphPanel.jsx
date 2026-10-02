@@ -1,11 +1,11 @@
-import { lazy, Suspense, useCallback, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import Panel, { IconBtn, LiveValues, StatusBadge, Segmented, NotStreaming } from "./Panel.jsx";
 import { layout, WINDOWS } from "../../lib/layout.js";
 import { seriesSpec } from "./seriesSpec.js";
 import InsightFooter from "./InsightFooter.jsx";
-import FilterEditor from "./FilterEditor.jsx";
 import { useFilterConfig, useFilterSuggestion, useFilterSuggestionAxes, useFilterError, useFilterErrorRunning, useInsightStats } from "../../telemetry/insights.js";
 import { FILTERABLE, filterBadge, filterSummary } from "../../lib/filterConfig.js";
+import { useFilterPane, openFilterPane } from "../../lib/filterPane.js";
 
 const SensorGraph = lazy(() => import("./SensorGraph.jsx"));
 // Server-computed (full-rate) spectrum; shares the uPlot chunk with SensorGraph.
@@ -31,18 +31,18 @@ export default function SensorGraphPanel({ pin, row, state, maximized }) {
   const fcfg = fcfgSet && (!ferror || frunning) ? fcfgSet : null; // only treat it as filtered while it actually runs
   const suggestion = useFilterSuggestion(row.key);
   const suggestionAxes = useFilterSuggestionAxes(row.key);
-  const [editTab, setEditTab] = useState(null); // axis tab open in a per-axis editor, else null
-  const onTab = useCallback((t) => setEditTab(t), []);
+  const pane = useFilterPane();
+  const editing = pane?.row.key === row.key; // this sensor is open in the filter side pane
+  const editTab = editing ? pane.tab : null; // axis tab open in a per-axis editor, else null
   const shownSuggestion = editTab != null && suggestionAxes ? suggestionAxes[editTab] : suggestion;
   const fs = useInsightStats(row.handle)?.rate_hz || null;
-  const [editing, setEditing] = useState(false);
   const [trace, setTrace] = useState("both"); // raw | filtered | both (only with an active filter)
 
   const viewSwitch = (
     <Segmented options={[["signal", "Signal"], ["spectrum", "Spectrum"]]} value={view} onChange={setView} />
   );
   const filterBtn = filterable ? (
-    <IconBtn title={fcfgSet ? "Filter - edit" : "Filter"} icon="Filter" active={!!fcfgSet} onClick={() => setEditing(true)} />
+    <IconBtn title={fcfgSet ? "Filter - edit" : "Filter"} icon="Filter" active={!!fcfgSet} onClick={() => openFilterPane(row)} />
   ) : null;
   const tools = spectrum ? (
     <>
@@ -90,7 +90,6 @@ export default function SensorGraphPanel({ pin, row, state, maximized }) {
   );
 
   return (
-    <>
     <Panel
       title={row.label}
       unit={row.unit}
@@ -111,7 +110,7 @@ export default function SensorGraphPanel({ pin, row, state, maximized }) {
       onCollapse={() => layout.toggleCollapsed(pin.key)}
       onMaximize={() => layout.maximize(maximized ? null : pin.key)}
       onClose={() => layout.unpin(pin.key)}
-      className="flex-1"
+      className={`flex-1 ${editing ? "ring-2 ring-accent" : ""}`}
       bodyClassName={maximized ? "" : "h-52"}
       footer={state === "off" ? null : <InsightFooter handle={row.handle} n={spec.n} />}
     >
@@ -127,7 +126,5 @@ export default function SensorGraphPanel({ pin, row, state, maximized }) {
         </Suspense>
       )}
     </Panel>
-    {editing && <FilterEditor row={row} fs={fs} onClose={() => setEditing(false)} onTab={onTab} />}
-    </>
   );
 }

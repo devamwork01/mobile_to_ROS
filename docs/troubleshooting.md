@@ -38,3 +38,9 @@ accept any AGP upgrade suggestion.
 ## Dashboard opens but stays "disconnected"
 The page reaches the WebSocket on port `8081` by default. If you changed `--ws-port`, open
 `http://<host>:8080/?ws=<newport>`. Check nothing else is bound to 8080/8081.
+
+## Filters: no prompt, no buzz, odd cutoffs
+See the *Troubleshooting filters* table in the README's **Filtering** section. In short: the guided
+prompt needs the server started with `--filter` and phone app v0.1.13+; a 0.5 Hz cutoff means that
+axis didn't move during the capture (tap **Re-tune** and move the phone as in real use); a failed
+capture (Wi-Fi gap) is retried with **Re-tune** or tuned automatically 60 s after the sensor started.

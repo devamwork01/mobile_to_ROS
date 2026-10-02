@@ -188,14 +188,18 @@ def _smooth(f: np.ndarray, p: np.ndarray) -> np.ndarray:
     return out
 
 
-def suggest(f, psd, fs: float) -> dict:
+def suggest_details(f, psd, fs: float) -> Tuple[dict, dict]:
+    """suggest()'s configuration plus what it saw: the noise floor (PSD units, the median PSD in the
+    top 30 % of the band) and each chosen notch's prominence (peak PSD / smoothed PSD), in the
+    config's notch order."""
     f = np.asarray(f, dtype=np.float64)
     p = np.asarray(psd, dtype=np.float64)
     nyq = 0.45 * fs
     band = (f > 0) & (f <= nyq) & np.isfinite(p)
     f, p = f[band], p[band]
     if f.size < 8:
-        return {"lowpass": {"hz": round(min(max(0.5, 0.25 * fs), nyq), 2), "order": 4}, "notches": []}
+        return ({"lowpass": {"hz": round(min(max(0.5, 0.25 * fs), nyq), 2), "order": 4}, "notches": []},
+                {"floor": None, "prominence": []})
     sm = _smooth(f, p)
     floor = float(np.median(p[f >= 0.7 * nyq])) if (f >= 0.7 * nyq).any() else float(np.median(p))
     above = f[sm > 2.0 * floor]
@@ -203,16 +207,22 @@ def suggest(f, psd, fs: float) -> dict:
     # Stay a little under the 0.45*fs limit (and round down): the server's rate estimate can differ
     # slightly from the one this spectrum came from, and the suggestion must always be applicable.
     cutoff = min(max(cutoff, 0.5), math.floor(0.43 * fs * 100) / 100)
-    notches: List[dict] = []
+    picked: List[Tuple[dict, float]] = []
     ratio = p / np.maximum(sm, 1e-300)
     cand = [i for i in range(1, f.size - 1)
             if ratio[i] > 10.0 and p[i] >= p[i - 1] and p[i] >= p[i + 1] and 0.5 <= f[i] < cutoff]
     for i in sorted(cand, key=lambda i: -ratio[i]):
-        if all(abs(f[i] - nt["hz"]) >= 1.0 for nt in notches):
-            notches.append({"hz": round(float(f[i]), 2), "q": 10.0})
-        if len(notches) == MAX_NOTCHES:
+        if all(abs(f[i] - nt["hz"]) >= 1.0 for nt, _ in picked):
+            picked.append(({"hz": round(float(f[i]), 2), "q": 10.0}, float(ratio[i])))
+        if len(picked) == MAX_NOTCHES:
             break
-    return {"lowpass": {"hz": cutoff, "order": 4}, "notches": sorted(notches, key=lambda n: n["hz"])}
+    picked.sort(key=lambda nr: nr[0]["hz"])
+    return ({"lowpass": {"hz": cutoff, "order": 4}, "notches": [nt for nt, _ in picked]},
+            {"floor": floor, "prominence": [r for _, r in picked]})
+
+
+def suggest(f, psd, fs: float) -> dict:
+    return suggest_details(f, psd, fs)[0]
 
 
 RATE_READY_S = 1.0
@@ -330,6 +340,9 @@ class FilterBank:
         if self._key_of.get(int(handle)) != key:
             self._key_of[int(handle)] = key
             self._chains.pop(int(handle), None)
+
+    def key_of(self, handle: int) -> Optional[str]:
+        return self._key_of.get(int(handle))
 
     def _type_from_key(self, key: str) -> Optional[int]:
         try:
