@@ -84,10 +84,10 @@ def test_once_per_connection_and_reconnect_retunes_from_fresh_data(tmp_path):
     assert h.af.tick() == 1
     h.stream(0, 1, 11, 5)
     assert h.af.tick() == 0 and h.changes == [1]
-    h.af.on_phone_connected("SM-S938B", "16")
-    h.stream(0, 1, 16, 5)
+    h.af.on_phone_connected("SM-S938B", "16")  # old app: no "tune" capability -> silent tuning at 60 s
+    h.stream(0, 1, 16, 50)
     assert h.af.tick() == 0
-    h.stream(0, 1, 21, 6)
+    h.stream(0, 1, 66, 11)
     assert h.af.tick() == 1 and h.changes == [1, 1]
     assert h.reports.device == {"model": "SM-S938B", "android": "16"}
 
@@ -237,8 +237,8 @@ def test_a_phone_clock_reset_never_tunes_from_the_previous_session():
             af.on_datagram(dg)
 
     feed(5000, 60, line_hz=20.0)          # old session: phone up for 5000 s, a strong 20 Hz line on Z
-    af.on_phone_connected("SM-S938B", "16")
-    feed(100, 12)                          # rebooted phone: clock starts low, quiet data
+    af.on_phone_connected("SM-S938B", "16")  # an app without guided tuning: tuned 60 s into the run
+    feed(100, 61)                          # rebooted phone: clock starts low, quiet data
     assert af.tick() == 1
     z = bank.configs[ACC]["axes"][2]
     assert z["notches"] == []              # nothing from the old 20 Hz line

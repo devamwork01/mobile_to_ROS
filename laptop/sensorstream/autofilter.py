@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import time
 from datetime import datetime, timezone
 from typing import Callable, Dict, List, Optional
 
@@ -189,6 +190,12 @@ class RunTracker:
 RUN_S = 10.0  # seconds of one unbroken run before a sensor is tuned (= the insights window)
 RATE_AGREE = 0.05  # the spectrum's rate and FilterBank's must agree this well before tuning
 WAIT_NOTICE_S = 40.0  # a sensor streaming this long without being tuned gets one "still waiting" line
+# Guided tuning (a phone with the "tune" capability): prompt, phone-marked capture, result.
+GUIDE_MIN_RUN_S = 2.0   # a sensor is in the prompt once it has streamed this long
+FALLBACK_S = 60.0       # silent tuning once a phone has connected (old app, abandoned capture)
+LEAD_S, SETTLE_S, CAPTURE_S = 3, 0.5, 10
+PROMPT_SLACK_S = 20.0   # a prompt without a capture this long after its end is abandoned
+STREAMING_S = 2.0       # a sensor seen within this many seconds is streaming
 
 
 class ReportStore:
@@ -242,9 +249,11 @@ class AutoFilter:
 
     def __init__(self, bank, insights, reports: ReportStore, broadcast: Callable[[dict], None],
                  on_change: Optional[Callable[[], None]] = None, print_fn: Callable[[str], None] = print,
-                 now: Callable[[], str] = now_iso) -> None:
+                 now: Callable[[], str] = now_iso, send_phone: Optional[Callable[[dict], None]] = None,
+                 clock: Callable[[], float] = time.monotonic) -> None:
         self._bank, self._insights, self._reports = bank, insights, reports
         self._broadcast, self._on_change, self._print, self._now = broadcast, on_change, print_fn, now
+        self._send_phone, self._clock = send_phone, clock
         self._runs = RunTracker()
         self._types: Dict[int, int] = {}
         self._tuned: set = set()
@@ -252,16 +261,26 @@ class AutoFilter:
         self._span: Dict[int, list] = {}   # handle -> [first, last] sensor time seen this connection
         self._why: Dict[int, str] = {}     # handle -> why the last tuning attempt waited
         self._noticed: set = set()
+        self._phone = False          # a phone said hello (then silent tuning waits FALLBACK_S)
+        self._guided = False         # ...and it runs guided captures
+        self._pending: Optional[dict] = None  # the prompt in flight: id, handles, deadline
+        self._next_id = 1
+        self._prompted = False       # a prompt was sent this connection (later ones are "new_sensor")
+        self._attempted: set = set() # handles whose guided capture was analysed (no silent tuning after)
+        self._abandoned: set = set() # handles of an abandoned/cancelled capture (silent tuning at 60 s)
+        self._retune = False
+        self._seen: Dict[int, float] = {}
 
     def on_datagram(self, dg) -> None:
         for r in dg.records:
             if r.sensor_type in AUTO_TYPES:
                 self._types[r.sensor_handle] = r.sensor_type
                 self._runs.observe(r.sensor_handle, r.t_sensor_ns)
+                self._seen[r.sensor_handle] = self._clock()
                 sp = self._span.setdefault(r.sensor_handle, [r.t_sensor_ns, r.t_sensor_ns])
                 sp[1] = max(sp[1], r.t_sensor_ns)
 
-    def on_phone_connected(self, model: Optional[str] = None, android: Optional[str] = None) -> None:
+    def on_phone_connected(self, model: Optional[str] = None, android: Optional[str] = None, caps=()) -> None:
         """A (re)connect re-tunes everything from fresh data."""
         self._tuned.clear()
         self._failed.clear()
@@ -271,16 +290,143 @@ class AutoFilter:
         self._why.clear()
         self._noticed.clear()
         self._reports.device = {"model": model, "android": android} if model else None
+        self._phone = True
+        self._guided = "tune" in (caps or ()) and self._send_phone is not None
+        self._pending = None
+        self._prompted = False
+        self._attempted.clear()
+        self._abandoned.clear()
+        self._retune = False
+        self._seen.clear()
 
     def tick(self) -> int:
         n = 0
+        if self._guided:
+            self._guided_tick()
+        wait = FALLBACK_S if self._phone else RUN_S
+        pending = set(self._pending["handles"]) if self._pending else set()
         for h, ty in list(self._types.items()):
-            if h in self._tuned or h in self._failed or self._runs.run_seconds(h) < RUN_S:
+            if (h in self._tuned or h in self._failed or h in self._attempted or h in pending
+                    or self._runs.run_seconds(h) < wait):
                 continue
             if self._tune(h, ty):
                 n += 1
-        self._notice_waiting()
+        if not self._guided:
+            self._notice_waiting()
         return n
+
+    def _name(self, h: int) -> str:
+        key = self._bank.key_of(h) or f"{self._types.get(h, 0)}:{GENERIC.get(self._types.get(h), 'Sensor')}"
+        return key.split(":", 1)[1] if ":" in key else key
+
+    def _send(self, obj: dict) -> None:
+        if self._send_phone is not None:
+            self._send_phone(obj)
+
+    def _guided_tick(self) -> None:
+        now = self._clock()
+        p = self._pending
+        if p is not None:
+            if now <= p["deadline"]:
+                return
+            self._abandoned.update(p["handles"])
+            self._pending = None
+            self._print("[filter] guided tuning: no capture from the phone - those sensors tune automatically at 60 s")
+            return
+        streaming = [h for h in self._types
+                     if now - self._seen.get(h, -1e18) < STREAMING_S and self._runs.run_seconds(h) >= GUIDE_MIN_RUN_S]
+        if self._retune:
+            handles, reason = streaming, "retune"
+        else:
+            handles = [h for h in streaming if h not in self._tuned and h not in self._failed
+                       and h not in self._attempted and h not in self._abandoned]
+            reason = "new_sensor" if self._prompted else "connect"
+        self._retune = False
+        if not handles:
+            return
+        self._prompted = True
+        pid, self._next_id = self._next_id, self._next_id + 1
+        self._pending = {"id": pid, "handles": handles,
+                         "deadline": now + LEAD_S + SETTLE_S + CAPTURE_S + PROMPT_SLACK_S}
+        names = [self._name(h) for h in handles]
+        self._send({"type": "tune_prompt", "id": pid, "reason": reason, "attention": reason == "new_sensor",
+                    "lead_s": LEAD_S, "capture_s": CAPTURE_S,
+                    "sensors": [{"handle": h, "name": nm} for h, nm in zip(handles, names)]})
+        self._print(f"[filter] guided tuning ({reason}): prompted {', '.join(names)}".encode("ascii", "replace").decode())
+
+    def on_tune_request(self) -> None:
+        """The phone's Re-tune button: the next tick prompts every streaming sensor again."""
+        if self._guided:
+            self._retune = True
+
+    def on_tune_window(self, msg: dict) -> None:
+        p = self._pending
+        if p is None or msg.get("id") != p["id"]:
+            return  # late, duplicated or from before a reconnect
+        self._pending = None
+        if msg.get("cancelled"):
+            self._abandoned.update(p["handles"])
+            self._print("[filter] guided tuning cancelled on the phone - those sensors tune automatically at 60 s")
+            return
+        windows = {}
+        for w in msg.get("windows") or []:
+            try:
+                windows[int(w["handle"])] = (int(w["from_ns"]), int(w["to_ns"]))
+            except (TypeError, ValueError, KeyError):
+                continue
+        results = []
+        for h in p["handles"]:
+            ty, cfgs = self._types.get(h), None
+            if h not in windows:
+                why = "no capture from the phone"
+            else:
+                t, v = self._insights.samples_between(h, *windows[h])
+                why = capture_problem(t)
+                if why is None and v.shape[1] < 3:
+                    why = "not a 3-axis sensor"
+                if why is None:
+                    f, fs, per = spectra(t, v)
+                    why, cfgs, _ = self._apply(h, ty, f, fs, per)
+            self._attempted.add(h)
+            results.append({"handle": h, "name": self._name(h), "ok": why is None,
+                            "summary": summary(cfgs) if cfgs else None, "message": why})
+        self._send({"type": "tune_result", "id": p["id"], "sensors": results})
+
+    def _tune(self, h: int, ty: int) -> bool:
+        src = self._insights.suggest(h)
+        if src is None or len(src) < 4 or len(src[3]) < 3:
+            self._why[h] = "not enough live data yet"
+            return False  # retried on the next tick
+        f, _, fs, per = src
+        why, _, refused = self._apply(h, ty, f, fs, list(per)[:3])
+        if refused:
+            self._failed.add(h)
+        elif why:
+            self._why[h] = why
+        return why is None
+
+    def _apply(self, h: int, ty: int, f, fs: float, per):
+        """Tune handle h from per-axis PSDs: (why_not | None, configs | None, refused_by_FilterBank)."""
+        bank_fs = self._bank.fs(h)
+        if bank_fs and abs(bank_fs - fs) > RATE_AGREE * bank_fs:
+            return f"the rate estimates disagree (spectrum {fs:.1f} Hz, filter {bank_fs:.1f} Hz)", None, False
+        found = [suggest_details(f, p, fs) for p in per]
+        cfgs = [c for c, _ in found]
+        key = self._bank.key_of(h) or f"{ty}:{GENERIC[ty]}"
+        ok, why = self._bank.set(key, {**cfgs[0], "axes": cfgs}, handle=h)
+        if not ok:
+            self._print(f"[filter] {key}: not applied - {why}".encode("ascii", "replace").decode())
+            self._broadcast({"kind": "filter_error", "key": key, "message": why, "running": key in self._bank.configs})
+            return why, None, True
+        self._tuned.add(h)
+        self._broadcast(self._bank.snapshot())
+        if self._on_change:
+            self._on_change()
+        rec = sensor_report(key, h, ty, fs, f, per, cfgs, [d for _, d in found], self._now())
+        self._reports.add(rec, persist=True)
+        self._broadcast({"kind": "filter_report", "key": key, "report": rec})
+        self._print(format_report(rec))
+        return None, cfgs, False
 
     def _notice_waiting(self) -> None:
         """One line per sensor that has streamed WAIT_NOTICE_S without being tuned, saying why."""
@@ -295,33 +441,3 @@ class AutoFilter:
                    else "no unbroken 10 s run of data yet (gaps or irregular timestamps)")
             key = self._bank.key_of(h) or f"{ty}:{GENERIC[ty]}"
             self._print(f"[filter] {key}: still waiting - {why}".encode("ascii", "replace").decode())
-
-    def _tune(self, h: int, ty: int) -> bool:
-        src = self._insights.suggest(h)
-        if src is None or len(src) < 4 or len(src[3]) < 3:
-            self._why[h] = "not enough live data yet"
-            return False  # retried on the next tick
-        f, _, fs, per = src
-        bank_fs = self._bank.fs(h)
-        if bank_fs and abs(bank_fs - fs) > RATE_AGREE * bank_fs:
-            self._why[h] = f"the rate estimates disagree (spectrum {fs:.1f} Hz, filter {bank_fs:.1f} Hz)"
-            return False  # the two rate estimates disagree (still settling): retried on the next tick
-        per = list(per)[:3]
-        found = [suggest_details(f, p, fs) for p in per]
-        cfgs = [c for c, _ in found]
-        key = self._bank.key_of(h) or f"{ty}:{GENERIC[ty]}"
-        ok, why = self._bank.set(key, {**cfgs[0], "axes": cfgs}, handle=h)
-        if not ok:
-            self._failed.add(h)
-            self._print(f"[filter] {key}: not applied - {why}".encode("ascii", "replace").decode())
-            self._broadcast({"kind": "filter_error", "key": key, "message": why, "running": key in self._bank.configs})
-            return False
-        self._tuned.add(h)
-        self._broadcast(self._bank.snapshot())
-        if self._on_change:
-            self._on_change()
-        rec = sensor_report(key, h, ty, fs, f, per, cfgs, [d for _, d in found], self._now())
-        self._reports.add(rec, persist=True)
-        self._broadcast({"kind": "filter_report", "key": key, "report": rec})
-        self._print(format_report(rec))
-        return True
