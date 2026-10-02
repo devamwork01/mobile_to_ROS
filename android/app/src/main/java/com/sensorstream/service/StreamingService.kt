@@ -1,5 +1,6 @@
 package com.sensorstream.service
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -13,6 +14,10 @@ import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.launch
+import com.sensorstream.core.TunePhase
 import com.sensorstream.stream.Selection
 import com.sensorstream.stream.StreamHolder
 
@@ -28,6 +33,10 @@ class StreamingService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private var tuneWatch: Job? = null
+    private var notifHost = ""
+    private var notifPort = 0
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -53,8 +62,23 @@ class StreamingService : Service() {
                     write = { prefs.edit().putString("client_id", it).apply() },
                 )
                 engine.start(host, port, selections)
+                // Guided filter tuning (server --filter) also speaks through the notification, so the
+                // instruction and countdown are visible with the app in the background.
+                tuneWatch?.cancel()
+                tuneWatch = MainScope().launch {
+                    engine.tune.collect { ui ->
+                        val text = when (val ph = ui?.phase) {
+                            is TunePhase.Lead -> "Tuning filters: pick up the phone and move it (${ph.secondsLeft})"
+                            is TunePhase.Capture -> "Tuning filters: keep moving the phone - ${ph.secondsLeft} s"
+                            TunePhase.Waiting -> "Tuning filters: done - you can put the phone down"
+                            else -> "→ $notifHost:$notifPort"
+                        }
+                        getSystemService(NotificationManager::class.java)?.notify(NOTIF_ID, buildNotification(text))
+                    }
+                }
             }
             ACTION_STOP -> {
+                tuneWatch?.cancel()
                 StreamHolder.engine(this).stop()
                 releaseLocks()
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -66,6 +90,7 @@ class StreamingService : Service() {
     }
 
     override fun onDestroy() {
+        tuneWatch?.cancel()
         StreamHolder.engine(this).stop()
         releaseLocks()
     }
@@ -110,21 +135,27 @@ class StreamingService : Service() {
                 )
             }
         }
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Streaming sensors")
-            .setContentText("→ $host:$port")
-            .setSmallIcon(android.R.drawable.stat_sys_upload)
-            .setOngoing(true)
-            .setContentIntent(openAppIntent())
-            // Stop straight from the notification, without opening the app.
-            .addAction(android.R.drawable.ic_media_pause, "Stop", stopIntent())
-            .build()
+        notifHost = host
+        notifPort = port
+        val notification = buildNotification("→ $host:$port")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             startForeground(NOTIF_ID, notification)
         }
     }
+
+    private fun buildNotification(text: String): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Streaming sensors")
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(openAppIntent())
+            // Stop straight from the notification, without opening the app.
+            .addAction(android.R.drawable.ic_media_pause, "Stop", stopIntent())
+            .build()
 
     /** Tapping the ongoing notification returns to the running app (reuses the existing task/instance,
      *  like tapping a launcher icon) rather than starting a fresh one. */

@@ -30,6 +30,9 @@ class WsControlClient {
         fun onFailure(t: Throwable)
         /** Filter settings pushed by the laptop ({"type":"filters","configs":{...}}). */
         fun onFilters(msg: JSONObject) {}
+        /** Guided filter tuning (server --filter): a capture prompt, and what was tuned. */
+        fun onTunePrompt(msg: JSONObject) {}
+        fun onTuneResult(msg: JSONObject) {}
     }
 
     private var client: OkHttpClient? = null
@@ -65,6 +68,8 @@ class WsControlClient {
                     "configure" -> listener.onConfigure(msg)
                     "resend" -> listener.onResend(msg)
                     "filters" -> listener.onFilters(msg)
+                    "tune_prompt" -> listener.onTunePrompt(msg)
+                    "tune_result" -> listener.onTuneResult(msg)
                     "heartbeat_ack" -> {
                         val t0 = pendingPings.remove(msg.optInt("seq", -1))
                         if (t0 != null) listener.onRtt((SystemClock.elapsedRealtime() - t0).toFloat())
@@ -85,6 +90,11 @@ class WsControlClient {
                 listener.onFailure(t)
             }
         })
+    }
+
+    /** Any control message (guided tuning replies). */
+    fun sendJson(obj: JSONObject) {
+        ws?.send(obj.toString())
     }
 
     fun sendHeartbeat(seq: Int) {
