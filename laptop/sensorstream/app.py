@@ -433,11 +433,14 @@ async def run(args: argparse.Namespace) -> None:
         n = 0
         while True:
             await asyncio.sleep(0.25)
-            await reconciler.tick(time.monotonic_ns())
-            n += 1
-            if n % 8 == 0:  # ~every 2s
-                for dev, upto in reconciler.acks():
-                    await control.send_backfill_ack(dev, upto)
+            try:
+                await reconciler.tick(time.monotonic_ns())
+                n += 1
+                if n % 8 == 0:  # ~every 2s
+                    for dev, upto in reconciler.acks():
+                        await control.send_backfill_ack(dev, upto)
+            except Exception as exc:  # one bad tick (e.g. a phone vanishing) must not stop the server
+                print(f"   (backfill tick skipped: {exc!r})")
 
     async def insights_task() -> None:
         while True:

@@ -184,8 +184,11 @@ class ControlServer:
         s = self._sessions.get(device_id)
         if s is None:
             return False
-        await _send(s.ws, {"type": p.MSG_RESEND, "device_id": device_id,
-                           "handle": handle, "from": from_seq, "to": to_seq})
+        try:
+            await _send(s.ws, {"type": p.MSG_RESEND, "device_id": device_id,
+                               "handle": handle, "from": from_seq, "to": to_seq})
+        except Exception:
+            return False  # phone vanished mid-request; its session is torn down separately
         return True
 
     async def send_backfill_ack(self, device_id: int, upto: list) -> bool:
@@ -193,6 +196,9 @@ class ControlServer:
         s = self._sessions.get(device_id)
         if s is None:
             return False
-        await _send(s.ws, {"type": p.MSG_BACKFILL_ACK, "device_id": device_id,
-                           "upto": [{"handle": h, "seq": seq} for (h, seq) in upto]})
+        try:
+            await _send(s.ws, {"type": p.MSG_BACKFILL_ACK, "device_id": device_id,
+                               "upto": [{"handle": h, "seq": seq} for (h, seq) in upto]})
+        except Exception:
+            return False  # a vanished phone must never take the server down
         return True

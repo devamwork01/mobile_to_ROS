@@ -32,3 +32,21 @@ def test_send_filters_survives_a_broken_socket():
     ok = FakeWs()
     cs._sessions = {1: types.SimpleNamespace(ws=Broken()), 2: types.SimpleNamespace(ws=ok)}
     assert asyncio.run(cs.send_filters({})) == 1
+
+
+def _closed_ws():
+    import websockets
+
+    class Closed(FakeWs):
+        async def send(self, text):
+            raise websockets.exceptions.ConnectionClosedError(None, None)
+    return Closed()
+
+
+def test_backfill_ack_and_resend_to_a_vanished_phone_do_not_raise():
+    # QA 2026-10-02: a phone killed mid-session made send_backfill_ack raise ConnectionClosedError,
+    # which escaped the reconcile loop and took the whole server down.
+    cs = ControlServer(5005, on_event=lambda ev: None)
+    cs._sessions = {7: types.SimpleNamespace(ws=_closed_ws())}
+    assert asyncio.run(cs.send_backfill_ack(7, [(0, 100)])) is False
+    assert asyncio.run(cs.send_resend(7, 0, 5, 9)) is False
