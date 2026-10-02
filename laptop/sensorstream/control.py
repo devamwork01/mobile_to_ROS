@@ -12,6 +12,7 @@ Connection lifecycle:
     phone → heartbeat            laptop → heartbeat_ack
     phone → clock_ping           laptop → clock_pong          # NTP-like offset
     phone → stats / config_state (forwarded to the dashboard)
+    laptop → tune_prompt / tune_result; phone → tune_window / tune_request   # --filter guided tuning
 
 Every phone event is mirrored to the dashboard via ``on_event`` so the browser can
 show the sensor list, connection state and per-phone stats.
@@ -50,6 +51,7 @@ class PhoneSession:
     app_version: str = ""
     client_id: str = ""
     catalog: List[dict] = field(default_factory=list)
+    caps: List[str] = field(default_factory=list)  # optional features the phone app supports ("tune")
     active: List[int] = field(default_factory=list)
     connected_at: float = field(default_factory=time.monotonic)
     last_heartbeat: float = field(default_factory=time.monotonic)
@@ -124,6 +126,9 @@ class ControlServer:
                         self._on_event({"kind": "backfill_unavailable", "device_id": session.device_id,
                                         "handle": int(msg.get("handle", -1)),
                                         "from": int(msg.get("from", 0)), "to": int(msg.get("to", 0))})
+                elif mtype in ("tune_window", "tune_request"):
+                    if session:  # guided filter tuning (--filter): handled by the server's AutoFilter
+                        self._on_event({"kind": mtype, "device_id": session.device_id, "msg": msg})
                 # unknown types ignored (forward-compatible)
         except Exception:
             pass
@@ -143,6 +148,7 @@ class ControlServer:
             app_version=str(msg.get("app_version", "")),
             client_id=str(msg.get("client_id", "")),
             catalog=list(msg.get("sensors", []) or []),
+            caps=[str(c) for c in (msg.get("caps") or []) if isinstance(c, str)],
         )
         self._sessions[device_id] = session
         await _send(ws, {"type": p.MSG_HELLO_ACK, "device_id": device_id, "udp_port": self._udp_port})
@@ -156,6 +162,7 @@ class ControlServer:
                 "app_version": session.app_version,
                 "client_id": session.client_id,
                 "sensors": session.catalog,
+                "caps": session.caps,
             }
         )
         return session
@@ -178,6 +185,17 @@ class ControlServer:
             except Exception:
                 continue  # a phone mid-disconnect; it gets the settings again on its next hello
         return n
+
+    async def send_json(self, device_id: int, obj: dict) -> bool:
+        """Send one control message to one phone (e.g. a guided-tuning prompt or result)."""
+        s = self._sessions.get(device_id)
+        if s is None:
+            return False
+        try:
+            await _send(s.ws, obj)
+        except Exception:
+            return False  # phone vanished; its session is torn down separately
+        return True
 
     async def send_resend(self, device_id: int, handle: int, from_seq: int, to_seq: int) -> bool:
         """Ask the phone to resend a missing seq range from its on-phone recording (backfill)."""
