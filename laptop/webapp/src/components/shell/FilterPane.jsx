@@ -85,7 +85,7 @@ function Findings({ report }) {
       </table>
       {rows.map((r) => (
         <div key={r.axis} className="text-[11px] text-muted num">
-          <span className="font-semibold" style={{ color: AXIS[r.axis] }}>{r.axis}</span> notches {r.notches} · σ {r.sigma} ({r.gain})
+          <span className="font-semibold" style={{ color: AXIS[r.axis] }}>{r.axis}</span> notches {r.notches} · {r.what} {r.sigma} ({r.gain})
         </div>
       ))}
     </div>

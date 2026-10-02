@@ -7,9 +7,17 @@ describe("findings rows", () => {
   it("formats each axis", () => {
     const rows = findingsRows({ axes: [axis(), axis({ order: 2 }), axis({ notches: [{ hz: 8, q: 10, prominence: 35.2 }, { hz: 12.5, q: 10, prominence: 11 }] })] });
     expect(rows.map((r) => r.axis)).toEqual(["X", "Y", "Z"]);
-    expect(rows[0]).toEqual({ axis: "X", noise: "1.2e-3", lowpass: "4.8 Hz · 4th", delay: "87 ms", notches: "–", sigma: "0.0140 → 0.00310", gain: "4.5×" });
+    expect(rows[0]).toEqual({ axis: "X", noise: "1.2e-3", lowpass: "4.8 Hz · 4th", delay: "87 ms", notches: "–", sigma: "0.0140 → 0.00310", gain: "4.5×", what: "σ" });
     expect(rows[1].lowpass).toBe("4.8 Hz · 2nd");
     expect(rows[2].notches).toBe("8 Hz ×35, 12.5 Hz ×11");
+  });
+
+  it("prefers the measured noise over the motion sigma", () => {
+    const [r] = findingsRows({ axes: [axis({ noise_raw: 0.0101, noise_filtered: 0.0021 })] });
+    expect(r.sigma).toBe("0.0101 → 0.00210");
+    expect(r.gain).toBe("4.8×");
+    expect(r.what).toBe("noise");
+    expect(findingsRows({ axes: [axis()] })[0].what).toBe("σ");
   });
 
   it("copes with missing parts", () => {
