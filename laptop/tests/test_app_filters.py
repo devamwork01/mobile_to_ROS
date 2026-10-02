@@ -59,3 +59,30 @@ def test_on_change_fires_only_after_successful_changes():
     handle_filter_command({"cmd": "filter_clear", "key": "1:Acc"}, bank, FakeInsights(None), [].append, on_change)
     handle_filter_command({"cmd": "filter_suggest", "key": "1:Acc", "handle": 3}, bank, FakeInsights(None), [].append, on_change)
     assert calls == [1, 1]
+
+
+def _spectra():
+    import numpy as np
+    f = np.linspace(0.5, 50, 100)
+    flat = np.full_like(f, 1e-6)
+    peak = np.where(f < 20, 1e-5, 1e-6)       # Z: real content up to 20 Hz ...
+    peak[np.argmin(abs(f - 8))] = 1e-3          # ... plus a vibration line at 8 Hz
+    return f, flat, peak
+
+
+def test_suggest_returns_combined_and_per_axis():
+    f, flat, peak = _spectra()
+    sent = []
+    handle_filter_command({"cmd": "filter_suggest", "key": "1:Acc", "handle": 3}, FilterBank(),
+                          FakeInsights((f, (flat + flat + peak) / 3, 100.0, [flat, flat, peak])), sent.append)
+    m = sent[-1]
+    assert m["kind"] == "filter_suggestion" and len(m["axes"]) == 3
+    assert m["axes"][2]["notches"] and not m["axes"][0]["notches"]
+
+
+def test_suggest_with_fewer_than_three_axes_has_no_per_axis():
+    f, flat, _ = _spectra()
+    sent = []
+    handle_filter_command({"cmd": "filter_suggest", "key": "6:P", "handle": 4}, FilterBank(),
+                          FakeInsights((f, flat, 12.5, [flat])), sent.append)
+    assert sent[-1]["kind"] == "filter_suggestion" and sent[-1]["axes"] is None

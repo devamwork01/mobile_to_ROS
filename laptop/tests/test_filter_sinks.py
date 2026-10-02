@@ -49,6 +49,7 @@ def test_suggest_source_spectrum():
     s = InsightsSink(clock=clk)
     for i in range(1000):
         s.on_datagram(dg(i), ("x", 0), 0)
-    f, psd, fs = s.suggest(3)
+    f, psd, fs, per = s.suggest(3)
+    assert len(per) >= 1
     assert abs(fs - 100.0) < 1 and len(f) == len(psd) and f[-1] <= 50.0
     assert s.suggest(99) is None

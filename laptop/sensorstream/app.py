@@ -123,8 +123,11 @@ def handle_filter_command(msg: dict, bank, insights, broadcast, on_change=None) 
             broadcast({"kind": "filter_error", "key": key, "message": "Not enough live data yet to suggest a filter.",
                        "running": key in bank.configs})
         else:
-            f, psd, fs = src
-            broadcast({"kind": "filter_suggestion", "key": key, "config": suggest_filter(f, psd, fs)})
+            f, psd, fs = src[:3]
+            per = src[3] if len(src) > 3 else []
+            # Per-axis suggestions (each axis from its own spectrum) only for 3-axis sensors.
+            axes = [suggest_filter(f, p, fs) for p in per] if len(per) == 3 else None
+            broadcast({"kind": "filter_suggestion", "key": key, "config": suggest_filter(f, psd, fs), "axes": axes})
         return True
     return False
 

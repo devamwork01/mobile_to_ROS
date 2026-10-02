@@ -143,7 +143,8 @@ class InsightsSink(OutputSink):
         return out
 
     def suggest(self, handle: int):
-        """Mean raw PSD across axes over the live window, as input for filters.suggest()."""
+        """(f, mean raw PSD across axes, fs, [PSD per axis]) over the live window, as input for
+        filters.suggest(): the mean for an all-axes filter, one per axis for per-axis filters."""
         ring = self._rings.get(handle)
         if ring is None:
             return None
@@ -153,10 +154,11 @@ class InsightsSink(OutputSink):
         fs = an.rate_stats(t)["rate_hz"]
         if not fs:
             return None
-        acc, f = None, None
+        acc, f, per = None, None, []
         for i in range(v.shape[1]):
             ff, pp = an.welch_psd(v[:, i], fs)
             if ff.size == 0:
                 return None
             f, acc = ff, (pp if acc is None else acc + pp)
-        return f, acc / v.shape[1], fs
+            per.append(pp)
+        return f, acc / v.shape[1], fs, per
