@@ -18,7 +18,7 @@ from typing import Callable, Dict, List, Optional
 import numpy as np
 
 from . import analysis as an
-from .filters import frequency_response, suggest_details
+from .filters import _smooth, frequency_response, pick_notches, suggest_details
 
 UNITS = {1: "m/s^2", 4: "rad/s", 2: "uT"}
 GENERIC = {1: "Acceleration", 4: "Angular Velocity", 2: "Magnetic Field"}  # dashboard names (signals.js)
@@ -38,7 +38,7 @@ def _integrate(f: np.ndarray, y: np.ndarray) -> float:
     return float(np.sum((y[1:] + y[:-1]) * np.diff(f)) / 2.0)
 
 
-def axis_findings(f, psd, fs: float, config: dict, details: dict) -> dict:
+def axis_findings(f, psd, fs: float, config: dict, details: dict, noise: Optional[float] = None) -> dict:
     f = np.asarray(f, dtype=np.float64)
     p = np.asarray(psd, dtype=np.float64)
     m = (f > 0) & np.isfinite(p)
@@ -46,6 +46,12 @@ def axis_findings(f, psd, fs: float, config: dict, details: dict) -> dict:
     h2 = frequency_response(config, fs, f) ** 2 if f.size else np.array([])
     lp = config.get("lowpass")
     floor = details.get("floor")
+    nraw = nfilt = None
+    if noise:
+        grid = np.linspace(0.0, fs / 2.0, 2049)[1:]
+        h2g = frequency_response(config, fs, grid) ** 2
+        nraw = math.sqrt(noise * fs / 2.0)
+        nfilt = math.sqrt(float(np.sum(noise * h2g) * (grid[1] - grid[0])))
     return {
         "noise_density": math.sqrt(floor) if floor and floor > 0 else None,
         "cutoff_hz": lp["hz"] if lp else None,
@@ -55,10 +61,13 @@ def axis_findings(f, psd, fs: float, config: dict, details: dict) -> dict:
                     for n, pr in zip(config.get("notches") or [], details.get("prominence") or [])],
         "sigma_raw": math.sqrt(max(_integrate(f, p), 0.0)),
         "sigma_filtered": math.sqrt(max(_integrate(f, p * h2), 0.0)),
+        "noise_raw": nraw,
+        "noise_filtered": nfilt,
     }
 
 
-def sensor_report(key: str, handle, type_: int, fs: float, f, per, configs, details, at: str) -> dict:
+def sensor_report(key: str, handle, type_: int, fs: float, f, per, configs, details, at: str,
+                  noise=None, noise_source: Optional[str] = None) -> dict:
     return {
         "key": key,
         "name": key.split(":", 1)[1] if ":" in key else key,
@@ -67,7 +76,9 @@ def sensor_report(key: str, handle, type_: int, fs: float, f, per, configs, deta
         "unit": UNITS.get(type_),
         "fs": round(float(fs), 2),
         "at": at,
-        "axes": [axis_findings(f, per[i], fs, configs[i], details[i]) for i in range(len(configs))],
+        "noise_source": noise_source,
+        "axes": [axis_findings(f, per[i], fs, configs[i], details[i], noise=noise[i] if noise else None)
+                 for i in range(len(configs))],
     }
 
 
@@ -77,13 +88,18 @@ def _g(x, fmt: str) -> str:
 
 def format_report(rec: dict) -> str:
     name = str(rec.get("name", "")).encode("ascii", "replace").decode()
-    lines: List[str] = [f"[filter] {GENERIC.get(rec.get('type'), 'Sensor')} ({name}) @ {rec['fs']:.1f} Hz",
-                        "   axis  noise/rtHz   cutoff   order  delay    notches              sigma raw -> filtered"]
+    noisy = all(a.get("noise_raw") for a in rec["axes"])
+    last = "noise sd raw -> filtered" if noisy else "sigma raw -> filtered"
+    lines = [f"[filter] {GENERIC.get(rec.get('type'), 'Sensor')} ({name}) @ {rec['fs']:.1f} Hz",
+             f"   axis  noise/rtHz   cutoff   order  delay    notches              {last}"]
     for ax, a in zip(AXIS, rec["axes"]):
         notches = ", ".join(f"{n['hz']:g} Hz (x{n['prominence']:.0f})" for n in a["notches"]) or "-"
+        before, after = (a["noise_raw"], a["noise_filtered"]) if noisy else (a["sigma_raw"], a["sigma_filtered"])
         lines.append(f"   {ax:<4}  {_g(a['noise_density'], '.2e'):<11}  {_g(a['cutoff_hz'], '.2f'):<7}  "
                      f"{_g(a['order'], 'd'):<5}  {a['delay_ms']:>4.0f} ms  {notches:<20} "
-                     f"{a['sigma_raw']:.4g} -> {a['sigma_filtered']:.4g}")
+                     f"{before:.4g} -> {after:.4g}")
+    if noisy and gain_text(rec):
+        lines.append(f"   ({gain_text(rec)}; noise measured from the {rec.get('noise_source') or 'capture'})")
     return "\n".join(lines)
 
 
@@ -109,6 +125,60 @@ def spectra(t, v):
         f = ff
         per.append(pp)
     return f, fs, per
+
+
+STILL_MIN_S = 2.0       # a still window needs this much clean data to measure the noise
+CUTOFF_POWER = 0.99     # the low-pass keeps this share of the motion's power above the noise
+
+
+def still_problem(t) -> Optional[str]:
+    t = np.asarray(t, dtype=np.int64)
+    if t.size < 2 or (t[-1] - t[0]) / 1e9 < STILL_MIN_S:
+        return "still window too short"
+    if int(np.diff(t).max()) > 1_000_000_000:
+        return "gap in the still window"
+    return None
+
+
+def noise_level(t, v) -> Optional[List[float]]:
+    """Per-axis noise PSD level (units^2/Hz) from a still window, or None if the window is unusable."""
+    if still_problem(t) is not None or np.asarray(v).shape[1] < 3:
+        return None
+    f, fs, per = spectra(t, v)
+    band = (np.asarray(f) >= 1.0) & (np.asarray(f) <= 0.4 * fs)
+    if not band.any():
+        return None
+    # Mean, not median: a 2-3 s window is ~1 Welch segment, whose median under-reads white noise by
+    # ~30 % (ln 2); a still phone has no lines for the mean to be pulled up by.
+    return [float(np.mean(np.asarray(p)[band])) for p in per]
+
+
+def motion_cutoff(f, psd, noise: float, fs: float):
+    """Low-pass where the motion's power (above the measured noise) is 99 % accumulated; notches as
+    suggest(). details["moved"] is False when nothing stands out of the noise (phone not moved)."""
+    f = np.asarray(f, dtype=np.float64)
+    p = np.asarray(psd, dtype=np.float64)
+    band = (f > 0) & (f <= 0.45 * fs) & np.isfinite(p)
+    f, p = f[band], p[band]
+    if f.size < 8:
+        cfg, det = suggest_details(f, p, fs)
+        return cfg, {**det, "moved": True}
+    sm = _smooth(f, p)
+    excess = np.where(sm > 2.0 * noise, sm - noise, 0.0)
+    total = float(excess.sum())
+    moved = total > 0.0
+    cutoff = float(f[min(int(np.searchsorted(np.cumsum(excess), CUTOFF_POWER * total)), f.size - 1)]) if moved else 0.5
+    cutoff = min(max(cutoff, 0.5), math.floor(0.43 * fs * 100) / 100)
+    notches, prom = pick_notches(f, p, sm, cutoff)
+    return ({"lowpass": {"hz": round(cutoff, 2), "order": 4}, "notches": notches},
+            {"floor": noise, "prominence": prom, "moved": moved})
+
+
+def gain_text(rec: dict) -> str:
+    """'noise 4.8x lower' (mean over axes) when the report knows the noise, else ''."""
+    g = [a["noise_raw"] / a["noise_filtered"] for a in rec.get("axes", [])
+         if a.get("noise_raw") and a.get("noise_filtered")]
+    return f"noise {sum(g) / len(g):.1f}x lower" if g else ""
 
 
 def _cfg_text(c: dict) -> str:
