@@ -102,16 +102,6 @@ def test_short_or_gappy_windows_are_reported():
     assert not g.bank.configs
 
 
-def test_attempted_sensors_are_not_silently_tuned_later():
-    g = G()
-    g.stream([0, 2], 0, 2.5)
-    g.af.tick()
-    g.window(g.prompts()[0]["id"], 0.0, 1.0)            # too short -> ok:false
-    g.stream([0, 2], 2.5, 70)
-    g.af.tick()
-    assert not g.bank.configs and len(g.prompts()) == 1
-
-
 def test_later_sensor_gets_its_own_attention_prompt_after_the_pending_one():
     g = G()
     g.stream([0, 2], 0, 2.5)
@@ -203,3 +193,60 @@ def test_reconnect_drops_a_pending_prompt():
     g.af.on_phone_connected("SM-S938B", "16", ["tune"])
     g.af.on_tune_window({"type": "tune_window", "id": pid, "windows": []})
     assert [m for m in g.phone if m["type"] == "tune_result"] == []
+
+
+def test_malformed_windows_never_raise_and_still_answer():
+    # review I1: "windows": 5 and Infinity times raised out of the control handler (link dropped)
+    for bad in (5, [{"handle": 0, "from_ns": float("inf"), "to_ns": 1}], None):
+        g = G()
+        g.stream([0, 2], 0, 2.5)
+        g.af.tick()
+        g.af.on_tune_window({"type": "tune_window", "id": g.prompts()[0]["id"], "windows": bad})
+        res = [m for m in g.phone if m["type"] == "tune_result"][-1]
+        assert all(s["ok"] is False for s in res["sensors"])
+
+
+def test_a_report_write_failure_still_answers_the_phone(tmp_path):
+    # review I1: an unwritable filter_report.json raised after the filter was set; no tune_result
+    g = G()
+    g.af._reports = ReportStore(str(tmp_path))      # a directory: the atomic replace fails
+    g.stream([0, 2], 0, 2.5)
+    g.af.tick()
+    pid = g.prompts()[0]["id"]
+    g.stream([0, 2], 2.5, 13)
+    res = g.window(pid, 3.0, 15.4)
+    assert [s["ok"] for s in res["sensors"]] == [True, True]
+    assert any("report" in m.lower() and "not written" in m.lower() for m in g.printed)
+
+
+def test_failed_capture_is_explained_and_falls_back_at_60s():
+    # review I2: a failed capture left the sensor unfiltered for good, without a word on the console
+    g = G()
+    g.stream([0, 2], 0, 2.5)
+    g.af.tick()
+    g.window(g.prompts()[0]["id"], 0.0, 1.0)            # too short -> ok:false
+    assert any("capture received" in m for m in g.printed)
+    assert any("Acc" in m and "not enough data in the capture" in m for m in g.printed)
+    g.stream([0, 2], 2.5, 59)
+    g.af.tick()
+    assert set(g.bank.configs) == {"1:Acc", "4:Gyro"} and len(g.prompts()) == 1
+
+
+def test_connect_prompt_waits_for_every_streaming_sensor():
+    # review M1: gyro starting 1 s after accel gave two captures back to back
+    g = G()
+    g.stream([0], 0, 1.0)
+    g.stream([0, 2], 1.0, 1.5)                          # accel run 2.5 s, gyro run 1.5 s
+    g.af.tick()
+    assert g.prompts() == []
+    g.stream([0, 2], 2.5, 1.0)
+    g.af.tick()
+    assert [s["handle"] for s in g.prompts()[0]["sensors"]] == [0, 2]
+
+
+def test_old_phone_waiting_notice_is_meaningful():
+    # review I3: every non-guided app printed "still waiting - None" at 40 s
+    g = G(caps=())
+    g.stream([0, 2], 0, 45)
+    g.af.tick()
+    assert not [m for m in g.printed if "None" in m]

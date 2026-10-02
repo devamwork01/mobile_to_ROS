@@ -47,3 +47,9 @@ def test_summary_groups_equal_axes():
     assert summary([a, a, z]) == "X/Y LP 0.5 Hz | Z LP 5 Hz + notch 8 Hz"
     assert summary([z, z, z]) == "X/Y/Z LP 5 Hz + notch 8 Hz"
     assert summary([{"lowpass": None, "notches": [{"hz": 8.0, "q": 10.0}]}] * 3) == "X/Y/Z notch 8 Hz"
+
+
+def test_summary_rounds_to_three_figures():
+    # device check: "17.2814 Hz" on the phone
+    c = {"lowpass": {"hz": 17.28140625, "order": 4}, "notches": [{"hz": 8.0078125, "q": 10.0}]}
+    assert summary([c, c, c]) == "X/Y/Z LP 17.3 Hz + notch 8.01 Hz"

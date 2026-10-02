@@ -115,8 +115,8 @@ def _cfg_text(c: dict) -> str:
     parts = []
     lp = c.get("lowpass")
     if lp:
-        parts.append(f"LP {lp['hz']:g} Hz")
-    parts += [f"notch {n['hz']:g} Hz" for n in c.get("notches") or []]
+        parts.append(f"LP {lp['hz']:.3g} Hz")
+    parts += [f"notch {n['hz']:.3g} Hz" for n in c.get("notches") or []]
     return " + ".join(parts) or "none"
 
 
@@ -189,13 +189,14 @@ class RunTracker:
 
 RUN_S = 10.0  # seconds of one unbroken run before a sensor is tuned (= the insights window)
 RATE_AGREE = 0.05  # the spectrum's rate and FilterBank's must agree this well before tuning
-WAIT_NOTICE_S = 40.0  # a sensor streaming this long without being tuned gets one "still waiting" line
+WAIT_NOTICE_EXTRA_S = 30.0  # a sensor this long past its tuning time gets one "still waiting" line
 # Guided tuning (a phone with the "tune" capability): prompt, phone-marked capture, result.
 GUIDE_MIN_RUN_S = 2.0   # a sensor is in the prompt once it has streamed this long
 FALLBACK_S = 60.0       # silent tuning once a phone has connected (old app, abandoned capture)
 LEAD_S, SETTLE_S, CAPTURE_S = 3, 0.5, 10
 PROMPT_SLACK_S = 20.0   # a prompt without a capture this long after its end is abandoned
 STREAMING_S = 2.0       # a sensor seen within this many seconds is streaming
+CONNECT_WAIT_S = 5.0    # the connect prompt waits for every streaming sensor, at most this long
 
 
 class ReportStore:
@@ -333,8 +334,11 @@ class AutoFilter:
             self._pending = None
             self._print("[filter] guided tuning: no capture from the phone - those sensors tune automatically at 60 s")
             return
-        streaming = [h for h in self._types
-                     if now - self._seen.get(h, -1e18) < STREAMING_S and self._runs.run_seconds(h) >= GUIDE_MIN_RUN_S]
+        live = [h for h in self._types if now - self._seen.get(h, -1e18) < STREAMING_S]
+        streaming = [h for h in live if self._runs.run_seconds(h) >= GUIDE_MIN_RUN_S]
+        if (not self._retune and not self._prompted and len(streaming) < len(live)
+                and max((self._runs.run_seconds(h) for h in streaming), default=0.0) < CONNECT_WAIT_S):
+            return  # one connect capture for every sensor: wait (briefly) for the late starters
         if self._retune:
             handles, reason = streaming, "retune"
         else:
@@ -368,26 +372,36 @@ class AutoFilter:
             self._abandoned.update(p["handles"])
             self._print("[filter] guided tuning cancelled on the phone - those sensors tune automatically at 60 s")
             return
+        raw = msg.get("windows")
         windows = {}
-        for w in msg.get("windows") or []:
+        for w in raw if isinstance(raw, list) else []:
             try:
                 windows[int(w["handle"])] = (int(w["from_ns"]), int(w["to_ns"]))
-            except (TypeError, ValueError, KeyError):
+            except (TypeError, ValueError, KeyError, OverflowError):
                 continue
+        self._print(f"[filter] guided tuning: capture received ({len(windows)} of {len(p['handles'])} sensors)")
         results = []
         for h in p["handles"]:
             ty, cfgs = self._types.get(h), None
-            if h not in windows:
-                why = "no capture from the phone"
-            else:
-                t, v = self._insights.samples_between(h, *windows[h])
-                why = capture_problem(t)
-                if why is None and v.shape[1] < 3:
-                    why = "not a 3-axis sensor"
-                if why is None:
-                    f, fs, per = spectra(t, v)
-                    why, cfgs, _ = self._apply(h, ty, f, fs, per)
-            self._attempted.add(h)
+            try:
+                if h not in windows:
+                    why = "no capture from the phone"
+                else:
+                    t, v = self._insights.samples_between(h, *windows[h])
+                    why = capture_problem(t)
+                    if why is None and v.shape[1] < 3:
+                        why = "not a 3-axis sensor"
+                    if why is None:
+                        f, fs, per = spectra(t, v)
+                        why, cfgs, _ = self._apply(h, ty, f, fs, per)
+            except Exception as exc:  # never let one sensor break the answer (or the phone's link)
+                why = f"could not be tuned ({exc.__class__.__name__})"
+            if why is None:
+                self._attempted.add(h)
+            else:  # explained here and on the phone; tuned automatically at 60 s unless Re-tune comes first
+                self._abandoned.add(h)
+                self._print(f"[filter] {self._name(h)}: not tuned - {why} (Re-tune on the phone, or automatic at 60 s)"
+                            .encode("ascii", "replace").decode())
             results.append({"handle": h, "name": self._name(h), "ok": why is None,
                             "summary": summary(cfgs) if cfgs else None, "message": why})
         self._send({"type": "tune_result", "id": p["id"], "sensors": results})
@@ -423,21 +437,25 @@ class AutoFilter:
         if self._on_change:
             self._on_change()
         rec = sensor_report(key, h, ty, fs, f, per, cfgs, [d for _, d in found], self._now())
-        self._reports.add(rec, persist=True)
+        try:
+            self._reports.add(rec, persist=True)
+        except OSError as exc:  # the filter runs; only the report file is missing
+            self._print(f"[filter] report not written ({exc.__class__.__name__}: {exc})".encode("ascii", "replace").decode())
         self._broadcast({"kind": "filter_report", "key": key, "report": rec})
         self._print(format_report(rec))
         return None, cfgs, False
 
     def _notice_waiting(self) -> None:
-        """One line per sensor that has streamed WAIT_NOTICE_S without being tuned, saying why."""
+        """One line per sensor 30 s past its tuning time (10 s, or 60 s once a phone said hello) and still untuned, saying why."""
         for h, ty in self._types.items():
             if h in self._tuned or h in self._failed or h in self._noticed:
                 continue
             first, last = self._span.get(h, (0, 0))
-            if (last - first) / 1e9 < WAIT_NOTICE_S:
+            wait = FALLBACK_S if self._phone else RUN_S
+            if (last - first) / 1e9 < wait + WAIT_NOTICE_EXTRA_S:
                 continue
             self._noticed.add(h)
-            why = (self._why.get(h) if self._runs.run_seconds(h) >= RUN_S
-                   else "no unbroken 10 s run of data yet (gaps or irregular timestamps)")
+            why = (self._why.get(h, "not tuned yet") if self._runs.run_seconds(h) >= wait
+                   else f"no unbroken {wait:.0f} s run of data yet (gaps or irregular timestamps)")
             key = self._bank.key_of(h) or f"{ty}:{GENERIC[ty]}"
             self._print(f"[filter] {key}: still waiting - {why}".encode("ascii", "replace").decode())

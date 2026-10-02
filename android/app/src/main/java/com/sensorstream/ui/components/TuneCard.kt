@@ -44,7 +44,11 @@ fun TuneCard(vm: StreamViewModel, compact: Boolean, modifier: Modifier = Modifie
                 }
                 TunePhase.Waiting -> {
                     Text("Done — you can put the phone down", color = c.fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Working out the filters…", color = c.faint, fontSize = 12.sp)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Working out the filters…", color = c.faint, fontSize = 12.sp)
+                        // No answer can come (server restarted, another phone took over): never trap the card.
+                        Text("Dismiss", color = c.muted, fontSize = 13.sp, modifier = Modifier.clickable { vm.dismissTune() })
+                    }
                 }
                 is TunePhase.Result -> {
                     ph.sensors.forEach { r ->

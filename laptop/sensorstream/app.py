@@ -309,14 +309,16 @@ async def run(args: argparse.Namespace) -> None:
         elif kind == "backfill":
             reconciler.on_backfill(ev["device_id"], ev["handle"], ev["frames"])
             return   # raw frames are not browser-bound
-        elif kind == "tune_window":
+        elif kind in ("tune_window", "tune_request"):
             if autofilter is not None:
-                autofilter.on_tune_window(ev.get("msg") or {})
+                try:  # runs inside the phone's control socket: never let it drop the link
+                    if kind == "tune_window":
+                        autofilter.on_tune_window(ev.get("msg") or {})
+                    else:
+                        autofilter.on_tune_request()
+                except Exception as exc:
+                    print(f"[filter] guided tuning: {kind} failed: {exc!r}")
             return   # not browser-bound
-        elif kind == "tune_request":
-            if autofilter is not None:
-                autofilter.on_tune_request()
-            return
         elif kind == "phone_disconnected" and phone_now["id"] == ev.get("device_id"):
             phone_now["id"] = None
         elif kind == "backfill_unavailable":
