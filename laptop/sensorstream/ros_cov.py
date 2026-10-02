@@ -41,10 +41,10 @@ def _std3(s: dict) -> Optional[List[float]]:
     return out
 
 
-def find_covariance(log_dir: str, model: str) -> Dict[int, dict]:
-    """{sensor_type: {"var": [vx, vy, vz], "report": id}} from the newest usable Still report per type."""
+def _still_reports(log_dir: str, model: str) -> List[dict]:
+    """Still test-run reports of this phone model, newest first (unreadable / foreign ones skipped)."""
     if not model:
-        return {}
+        return []
     reports = []
     for path in glob.glob(os.path.join(log_dir, "*.report.json")):
         try:
@@ -59,8 +59,13 @@ def find_covariance(log_dir: str, model: str) -> Dict[int, dict]:
             continue
         reports.append(r)
     reports.sort(key=lambda r: r["created"] if isinstance(r.get("created"), str) else "", reverse=True)
+    return reports
+
+
+def find_covariance(log_dir: str, model: str) -> Dict[int, dict]:
+    """{sensor_type: {"var": [vx, vy, vz], "report": id}} from the newest usable Still report per type."""
     out: Dict[int, dict] = {}
-    for r in reports:
+    for r in _still_reports(log_dir, model):
         sensors = r.get("sensors")
         sensors = [s for s in sensors if isinstance(s, dict)] if isinstance(sensors, list) else []
         sensors.sort(key=lambda s: s["samples"] if _number(s.get("samples")) else 0, reverse=True)
@@ -71,6 +76,35 @@ def find_covariance(log_dir: str, model: str) -> Dict[int, dict]:
             std = _std3(s)
             if std is not None:
                 out[t] = {"var": [x * x for x in std], "report": r.get("id")}
+    return out
+
+
+def _nd3(s: dict) -> Optional[List[float]]:
+    a = s.get("axes")
+    if not isinstance(a, dict):
+        return None
+    out = []
+    for name in ("x", "y", "z"):
+        ax = a.get(name)
+        x = ax.get("noise_density") if isinstance(ax, dict) else None
+        if not _number(x) or x <= 0:
+            return None
+        out.append(float(x) * float(x))
+    return out
+
+
+def find_noise(log_dir: str, model: str) -> Dict[int, List[float]]:
+    """{sensor_type: [noise PSD level x, y, z]} from the newest Still report per type (for --filter)."""
+    out: Dict[int, List[float]] = {}
+    for r in _still_reports(log_dir, model):
+        sensors = r.get("sensors")
+        for s in (sensors if isinstance(sensors, list) else []):
+            t = s.get("type") if isinstance(s, dict) else None
+            if type(t) is not int or t not in COV_TYPES or t in out or s.get("insufficient"):
+                continue
+            n = _nd3(s)
+            if n is not None:
+                out[t] = n
     return out
 
 
