@@ -61,9 +61,37 @@ def _num(x) -> Optional[float]:
     return x if math.isfinite(x) else None
 
 
+AXIS_NAMES = ("X", "Y", "Z")
+
+
+def _plain(cfg) -> dict:
+    return {"lowpass": (cfg or {}).get("lowpass") or None, "notches": list((cfg or {}).get("notches") or [])}
+
+
+def normalise(config: dict) -> dict:
+    """Stored/sent shape. A per-axis config keeps `axes` and mirrors axis X at the top level, so
+    readers that predate per-axis filters still see a sensible (X) filter."""
+    axes = config.get("axes") if isinstance(config, dict) else None
+    if isinstance(axes, list) and axes:
+        ax = [_plain(a) for a in axes]
+        return {**ax[0], "axes": ax}
+    return _plain(config)
+
+
 def validate(config, fs: float) -> Tuple[bool, str]:
     if not isinstance(config, dict):
         return False, "Invalid filter configuration."
+    axes = config.get("axes")
+    if axes is not None:
+        # Per-axis: every axis must be usable, or the whole filter is refused (never half-applied).
+        if not isinstance(axes, list) or len(axes) != 3:
+            return False, "Per-axis filters need X, Y and Z settings."
+        for name, ax in zip(AXIS_NAMES, axes):
+            ok, msg = (validate(ax, fs) if isinstance(ax, dict) and "axes" not in ax
+                       else (False, "Invalid filter configuration."))
+            if not ok:
+                return False, f"{name}: {msg}"
+        return True, "ok"
     nyq = 0.45 * fs
     lp = config.get("lowpass")
     notches = config.get("notches") or []
@@ -99,14 +127,16 @@ class FilterChain:
         self.config = config
         self.fs = float(fs)
         self.n_axes = int(n_axes)
-        self._sec = sections(config, fs)
-        self._z = [[[0.0, 0.0] for _ in self._sec] for _ in range(self.n_axes)]
+        axes = config.get("axes")
+        # One section list per axis: a per-axis config filters each axis with its own settings.
+        self._secs = [sections(axes[a] if axes else config, fs) for a in range(self.n_axes)]
+        self._z = [[[0.0, 0.0] for _ in self._secs[a]] for a in range(self.n_axes)]
         self._primed = [False] * self.n_axes
 
     def _prime(self, a: int, x: float) -> None:
         """Start axis `a` in steady state for input x, as if it had been x forever. A zeroed state
         would turn the first sample (e.g. 9.8 m/s^2 of gravity) into a step that rings broadband."""
-        for i, (b0, b1, b2, a1, a2) in enumerate(self._sec):
+        for i, (b0, b1, b2, a1, a2) in enumerate(self._secs[a]):
             y = x * (b0 + b1 + b2) / (1.0 + a1 + a2)
             z2 = b2 * x - a2 * y
             self._z[a][i] = [b1 * x - a1 * y + z2, z2]
@@ -123,7 +153,7 @@ class FilterChain:
                 self._prime(a, x)
                 self._primed[a] = True
             z = self._z[a]
-            for i, (b0, b1, b2, a1, a2) in enumerate(self._sec):
+            for i, (b0, b1, b2, a1, a2) in enumerate(self._secs[a]):
                 zi = z[i]
                 y = b0 * x + zi[0]
                 zi[0] = b1 * x - a1 * y + zi[1]
@@ -320,7 +350,7 @@ class FilterBank:
         ok, msg = validate(config, fs) if fs else (_shape_ok(config), "Invalid filter configuration.")
         if not ok:
             return False, msg
-        self.configs[key] = {"lowpass": config.get("lowpass") or None, "notches": list(config.get("notches") or [])}
+        self.configs[key] = normalise(config)
         for h, k in list(self._key_of.items()):
             if k == key:
                 self._chains.pop(h, None)
