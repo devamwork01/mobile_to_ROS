@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -57,6 +58,12 @@ fun FilteredSignalsCard(vm: StreamViewModel, modifier: Modifier = Modifier) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             SectionHeader("Filtered Signals")
             Text("set on the server", color = c.faint, fontSize = 11.sp, modifier = Modifier.padding(start = 8.dp))
+            val canRetune by vm.tuneAvailable.collectAsState()
+            if (canRetune) {
+                Spacer(Modifier.weight(1f))
+                Text("Re-tune", color = c.accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clickable { vm.retuneFilters() })
+            }
         }
         SsCard(Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
