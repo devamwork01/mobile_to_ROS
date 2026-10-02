@@ -213,6 +213,7 @@ Tweak the cutoff (slider), order (2/4) and notches, then **Apply**.
   response (dashed).
 - Settings are per sensor, shared by every open dashboard and saved in `filters.json`
   (`--filters-file` to move it). **The `.ssbin` recording stays raw** (filtered values only appear as extra CSV columns), so you can always re-filter differently.
+- **Per axis**: tick *Per axis* in the filter editor to give X, Y and Z their own filter (e.g. a lower cutoff on X/Y and a notch only on Z). *Suggest from spectrum* then fills each axis from its own spectrum, and the Spectrum view draws one response curve per axis. Per-axis filters run everywhere the filtered signal goes (ROS 2, CSV, the phone).
 - Orientation quaternions and on-change sensors (light, proximity, steps) aren't filtered.
 
 <img src="docs/images/dashboard-filter.jpg" alt="Spectrum of a Galaxy S25 Ultra accelerometer with a 5 Hz low-pass: raw (faint), filtered (bold) and the filter response (dashed)" width="600">
