@@ -1,11 +1,11 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 import Panel, { IconBtn, LiveValues, StatusBadge, Segmented, NotStreaming } from "./Panel.jsx";
 import { layout, WINDOWS } from "../../lib/layout.js";
 import { seriesSpec } from "./seriesSpec.js";
 import InsightFooter from "./InsightFooter.jsx";
 import FilterEditor from "./FilterEditor.jsx";
-import { useFilterConfig, useFilterSuggestion, useFilterError, useFilterErrorRunning, useInsightStats } from "../../telemetry/insights.js";
-import { FILTERABLE, filterBadge } from "../../lib/filterConfig.js";
+import { useFilterConfig, useFilterSuggestion, useFilterSuggestionAxes, useFilterError, useFilterErrorRunning, useInsightStats } from "../../telemetry/insights.js";
+import { FILTERABLE, filterBadge, filterSummary } from "../../lib/filterConfig.js";
 
 const SensorGraph = lazy(() => import("./SensorGraph.jsx"));
 // Server-computed (full-rate) spectrum; shares the uPlot chunk with SensorGraph.
@@ -30,6 +30,10 @@ export default function SensorGraphPanel({ pin, row, state, maximized }) {
   const badge = filterBadge(fcfgSet, ferror, frunning);
   const fcfg = fcfgSet && (!ferror || frunning) ? fcfgSet : null; // only treat it as filtered while it actually runs
   const suggestion = useFilterSuggestion(row.key);
+  const suggestionAxes = useFilterSuggestionAxes(row.key);
+  const [editTab, setEditTab] = useState(null); // axis tab open in a per-axis editor, else null
+  const onTab = useCallback((t) => setEditTab(t), []);
+  const shownSuggestion = editTab != null && suggestionAxes ? suggestionAxes[editTab] : suggestion;
   const fs = useInsightStats(row.handle)?.rate_hz || null;
   const [editing, setEditing] = useState(false);
   const [trace, setTrace] = useState("both"); // raw | filtered | both (only with an active filter)
@@ -95,7 +99,7 @@ export default function SensorGraphPanel({ pin, row, state, maximized }) {
         <>
           <StatusBadge state={state} />
           {badge && (
-            <span title={badge.title} className={`text-[10px] px-1.5 py-0.5 rounded-md whitespace-nowrap ${badge.tone === "warn" ? "bg-warn/15 text-warn" : "bg-accent-soft text-accent"}`}>
+            <span title={fcfgSet && !ferror ? `${badge.title}: ${filterSummary(fcfgSet)}` : badge.title} className={`text-[10px] px-1.5 py-0.5 rounded-md whitespace-nowrap ${badge.tone === "warn" ? "bg-warn/15 text-warn" : "bg-accent-soft text-accent"}`}>
               {badge.label}
             </span>
           )}
@@ -116,14 +120,14 @@ export default function SensorGraphPanel({ pin, row, state, maximized }) {
       ) : (
         <Suspense fallback={<div className="h-full grid place-items-center text-xs text-faint">Loading graph…</div>}>
           {spectrum ? (
-            <SpectrumGraph handle={row.handle} labels={spec.labels} filter={fcfg || null} fs={fs} suggestion={editing ? suggestion || null : null} />
+            <SpectrumGraph handle={row.handle} labels={spec.labels} filter={fcfg || null} fs={fs} suggestion={editing ? shownSuggestion || null : null} />
           ) : (
             <SensorGraph handle={row.handle} kind={row.kind} window={pin.window} paused={pin.paused} show={show} filtered={!!fcfg} trace={trace} />
           )}
         </Suspense>
       )}
     </Panel>
-    {editing && <FilterEditor row={row} fs={fs} onClose={() => setEditing(false)} />}
+    {editing && <FilterEditor row={row} fs={fs} onClose={() => setEditing(false)} onTab={onTab} />}
     </>
   );
 }
