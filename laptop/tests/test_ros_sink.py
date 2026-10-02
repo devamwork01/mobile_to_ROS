@@ -88,9 +88,9 @@ def test_magnetic_field_maps_to_magnetic_field_msg(ros_env):
 
     assert len(received) == 1
     msg = received[0]
-    assert msg.magnetic_field.x == pytest.approx(28.0)
-    assert msg.magnetic_field.y == pytest.approx(-5.0)
-    assert msg.magnetic_field.z == pytest.approx(-40.0)
+    assert msg.magnetic_field.x == pytest.approx(28.0e-6)    # tesla (the phone sends microtesla)
+    assert msg.magnetic_field.y == pytest.approx(-5.0e-6)
+    assert msg.magnetic_field.z == pytest.approx(-40.0e-6)
 
 
 def test_rotation_vector_with_explicit_w_maps_to_quaternion(ros_env):
@@ -158,6 +158,7 @@ def test_no_filter_means_no_filtered_topic_traffic(ros_env):
 
 def test_combined_imu_data_raw_and_data(ros_env):
     sink, node = ros_env
+    sink.set_covariance({1: {"var": [0.01, 0.04, 0.09], "report": "r"}})  # tilt known -> orientation filled
     dg = p.Datagram(device_id=1, records=[
         p.Record(1, 0, 0, 1_000_000, 3, [0.0, 0.0, 9.8]),
         p.Record(11, 1, 0, 1_000_000, 3, [0.0, 0.0, 0.6, 0.8, 0.1]),
@@ -169,6 +170,16 @@ def test_combined_imu_data_raw_and_data(ros_env):
     data = _collect(node, "/phone/imu/data", Imu, lambda: sink.on_datagram(dg, ("x", 0), 0))
     assert data and data[0].orientation.w == pytest.approx(0.8)
     assert data[0].orientation_covariance[8] == pytest.approx(0.01)   # heading accuracy 0.1 rad
+
+
+def test_orientation_covariance_unknown_without_a_still_run(ros_env):
+    sink, node = ros_env
+    dg = p.Datagram(device_id=1, records=[
+        p.Record(1, 0, 0, 1_000_000, 3, [0.0, 0.0, 9.8]),
+        p.Record(11, 1, 0, 1_000_000, 3, [0.0, 0.0, 0.6, 0.8, 0.1]),
+        p.Record(4, 2, 0, 2_000_000, 3, [0.1, 0.2, 0.3])])
+    data = _collect(node, "/phone/imu/data", Imu, lambda: sink.on_datagram(dg, ("x", 0), 0))
+    assert data and list(data[0].orientation_covariance) == [0.0] * 9   # unknown, never "exact"
 
 
 def test_covariance_is_published(ros_env):

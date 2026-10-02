@@ -58,7 +58,8 @@ def test_existing_topics_carry_covariance():
     gyr = by["/phone/gyroscope"]
     assert gyr.cov["angular_velocity"] == ros_cov.UNKNOWN          # no gyro report
     assert gyr.cov["linear_acceleration"] == ros_cov.NOT_PROVIDED
-    assert by["/phone/magnetic_field"].cov["magnetic_field"] == pytest.approx(ros_cov.diag([1.0, 2.0, 3.0]))
+    # var in uT^2 from the report -> T^2 on the wire
+    assert by["/phone/magnetic_field"].cov["magnetic_field"] == pytest.approx(ros_cov.diag([1e-12, 2e-12, 3e-12]), rel=1e-9, abs=0)
 
 
 def test_combined_imu_topics_and_their_covariance():
@@ -132,3 +133,41 @@ def test_on_change_records_do_not_seed_the_clock():
     hour = 3_600_000
     out = pl.plan(dg(rec(19, 0, [5.0]), rec(1, hour, [0.0, 0.0, 9.8])), R0, None, NOW, R0)
     assert [o.stamp_ns for o in out if o.topic == "/phone/accelerometer"] == [NOW]
+
+
+def test_magnetometer_is_published_in_tesla():
+    # Linux check: sensor_msgs/MagneticField is tesla; Android reports microtesla
+    pl = RosPlanner()
+    out = pl.plan(dg(rec(2, 0, [28.0, -5.0, -40.0])), R0, {(2, 0): [27.0, -4.0, -41.0]}, NOW, R0)
+    by = {o.topic: o for o in out}
+    assert by["/phone/magnetic_field"].vals == pytest.approx([28e-6, -5e-6, -40e-6], rel=1e-12, abs=0)
+    assert by["/phone/magnetic_field_filtered"].vals == pytest.approx([27e-6, -4e-6, -41e-6], rel=1e-12, abs=0)
+
+
+def test_ros_clock_read_jitter_does_not_reach_stamps():
+    # Linux check: ROS time and the monotonic clock are read one after the other per datagram, so
+    # their difference wobbles by ~1 us; stamps must still follow the phone's spacing exactly
+    pl = RosPlanner()
+    stamps = []
+    for k, (late_ms, wobble_ns) in enumerate([(1, 0), (9, -1115), (2, -471), (15, -2000), (1, -42)]):
+        recv = R0 + k * 2 * MS + late_ms * MS
+        out = pl.plan(dg(rec(1, k * 2, [0.0, 0.0, 9.8], seq=k)), recv, None, NOW + (recv - R0) + wobble_ns, recv)
+        stamps.append(out[0].stamp_ns)
+    assert [b - a for a, b in zip(stamps, stamps[1:])] == [2 * MS] * 4
+
+
+def test_ros_clock_step_is_followed():
+    # a real change of ROS time against the monotonic clock (NTP step, > 1 ms) is taken at once
+    pl = RosPlanner()
+    a = pl.plan(dg(rec(1, 0, [0.0, 0.0, 9.8])), R0, None, NOW, R0)[0]
+    b = pl.plan(dg(rec(1, 2, [0.0, 0.0, 9.8], seq=1)), R0 + 2 * MS, None, NOW + 2 * MS + 5 * MS, R0 + 2 * MS)[0]
+    assert b.stamp_ns - a.stamp_ns == 7 * MS
+
+
+def test_a_slow_first_clock_read_is_corrected():
+    # ROS time is read before the monotonic clock, so a slow read makes the difference too small;
+    # a first read delayed 500 us must not leave every later stamp 500 us early
+    pl = RosPlanner()
+    pl.plan(dg(rec(1, 0, [0.0, 0.0, 9.8])), R0, None, NOW, R0 + 500_000)
+    b = pl.plan(dg(rec(1, 2, [0.0, 0.0, 9.8], seq=1)), R0 + 2 * MS, None, NOW + 2 * MS, R0 + 2 * MS)[0]
+    assert b.stamp_ns == NOW + 2 * MS

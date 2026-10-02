@@ -237,7 +237,7 @@ With a ROS 2 environment sourced, `--ros` publishes decoded sensors as standard 
 |---|---|---|
 | `/phone/accelerometer` | `sensor_msgs/Imu` | accelerometer |
 | `/phone/gyroscope` | `sensor_msgs/Imu` | gyroscope |
-| `/phone/magnetic_field` | `sensor_msgs/MagneticField` | magnetometer |
+| `/phone/magnetic_field` | `sensor_msgs/MagneticField` | magnetometer, in **tesla** as the message defines (Android reports microtesla; converted) |
 | `/phone/orientation` | `geometry_msgs/QuaternionStamped` | rotation vector |
 | `/phone/imu/data_raw` | `sensor_msgs/Imu` | gyroscope + accelerometer, no orientation (input for `imu_filter_madgwick`) |
 | `/phone/imu/data` | `sensor_msgs/Imu` | the same + orientation from the rotation vector (for `robot_localization`) |
