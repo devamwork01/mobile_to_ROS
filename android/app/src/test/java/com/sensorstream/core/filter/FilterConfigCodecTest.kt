@@ -38,7 +38,10 @@ class FilterConfigCodecTest {
         val back = FilterConfigCodec.decode(FilterConfigCodec.encode(mapOf("1:acc" to cfg)))["1:acc"]!!
         assertEquals(cfg, back)
         assertEquals(1, back.axes!![2].notches.size)
-        assertEquals("X/Y LP 0.5 Hz · 4th · Z LP 5 Hz · 4th + notch 8 Hz", FilterConfigCodec.summary(back))
+        assertEquals("X/Y LP 0.5 Hz · 4th | Z LP 5 Hz · 4th + notch 8 Hz", FilterConfigCodec.summary(back))
+        // grouped only when identical: 0.51 and 0.54 Hz both display as "0.5" but stay separate groups
+        val near = FilterConfig(0.51, 4, axes = listOf(FilterConfig(0.51, 4), FilterConfig(0.54, 4), FilterConfig(0.51, 4)))
+        assertEquals("X/Z LP 0.5 Hz · 4th | Y LP 0.5 Hz · 4th", FilterConfigCodec.summary(near))
         // a malformed axes list makes the whole entry invalid (skipped), never half a filter
         val bad = org.json.JSONObject("""{"1:acc":{"lowpass":{"hz":5,"order":4},"notches":[],"axes":[{"lowpass":{"hz":5,"order":4},"notches":[]}]}}""")
         assertTrue(FilterConfigCodec.parseConfigs(bad).isEmpty())

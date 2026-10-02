@@ -6,7 +6,7 @@ import { AXIS } from "../../telemetry/signals.js";
 import {
   useFilterConfig, useFilterSuggestion, useFilterSuggestionAxes, useFilterError, clearFilterSuggestion, clearFilterError,
 } from "../../telemetry/insights.js";
-import { validateConfig, configToDraft, draftToConfig, setPerAxis, AXIS_NAMES, MAX_NOTCHES } from "../../lib/filterConfig.js";
+import { validateConfig, configToDraft, draftToConfig, setPerAxis, applySuggestion, AXIS_NAMES, MAX_NOTCHES } from "../../lib/filterConfig.js";
 
 // Low-pass + notches for one filter: the whole sensor, or one axis when filtering per axis.
 function AxisFields({ value, onChange, nyq }) {
@@ -64,9 +64,7 @@ export default function FilterEditor({ row, fs, onClose, onTab }) {
   const canPerAxis = row.kind === "vector";
   useEffect(() => {
     if (!suggestion) return;
-    setDraft((d) => (d.perAxis && suggestionAxes
-      ? configToDraft({ ...suggestionAxes[0], axes: suggestionAxes })
-      : { ...configToDraft(suggestion), perAxis: false, axes: null }));
+    setDraft((d) => applySuggestion(d, suggestion, suggestionAxes));
   }, [suggestion, suggestionAxes]);
   useEffect(() => { onTab?.(draft.perAxis ? tab : null); }, [draft.perAxis, tab, onTab]);
   useEffect(() => () => onTab?.(null), [onTab]);

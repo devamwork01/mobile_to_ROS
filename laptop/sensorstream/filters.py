@@ -300,7 +300,7 @@ class FilterBank:
         for k, v in raw.items():  # a hand-edited file must never stop the server from starting
             try:
                 if isinstance(k, str) and _shape_ok(v):
-                    out[k] = v
+                    out[k] = normalise(v)  # top level mirrors X, junk keys dropped (as set() stores)
             except Exception:
                 continue
         return out

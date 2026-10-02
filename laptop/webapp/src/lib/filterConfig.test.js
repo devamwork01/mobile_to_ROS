@@ -70,3 +70,31 @@ describe("per-axis filters", () => {
     expect(filterSummary(null)).toBe("");
   });
 });
+
+import { applySuggestion } from "./filterConfig.js";
+
+describe("applying a suggestion in the editor", () => {
+  const S = { lowpass: { hz: 6, order: 4 }, notches: [] };
+  const SZ = { lowpass: { hz: 20, order: 4 }, notches: [{ hz: 8, q: 10 }] };
+  it("per axis on + per-axis suggestion fills each tab", () => {
+    const d = setPerAxis(emptyDraft(), true);
+    expect(draftToConfig(applySuggestion(d, S, [S, S, SZ])).axes[2]).toEqual(SZ);
+  });
+  it("per axis on without a per-axis suggestion stays per axis, all tabs get the combined one", () => {
+    // Review: it used to switch per-axis off silently.
+    const d = setPerAxis(emptyDraft(), true);
+    const out = applySuggestion(d, S, null);
+    expect(out.perAxis).toBe(true);
+    expect(draftToConfig(out).axes).toEqual([S, S, S]);
+  });
+  it("per axis off uses the combined suggestion", () => {
+    expect(draftToConfig(applySuggestion(emptyDraft(), S, [S, S, SZ]))).toEqual(S);
+  });
+});
+
+describe("per-axis summary only groups truly identical filters", () => {
+  it("different orders are not grouped and the 2nd order is shown", () => {
+    const o2 = { lowpass: { hz: 5, order: 2 }, notches: [] }, o4 = { lowpass: { hz: 5, order: 4 }, notches: [] };
+    expect(filterSummary({ axes: [o2, o4, o4] })).toBe("X LP 5 (2nd) · Y/Z LP 5");
+  });
+});

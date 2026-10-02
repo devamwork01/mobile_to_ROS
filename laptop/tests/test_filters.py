@@ -159,3 +159,14 @@ def test_bank_stores_and_snapshots_per_axis():
     ok, _ = b.set("1:acc", PER)
     assert ok and b.snapshot()["configs"]["1:acc"]["axes"][2] == AZ
     assert b.snapshot()["configs"]["1:acc"]["lowpass"] == AX["lowpass"]
+
+
+def test_loaded_filters_are_normalised(tmp_path):
+    # Review: a hand-edited filters.json with a broken top level next to valid axes ran on the
+    # laptop but was silently dropped by the phone (which parses the top level too).
+    import json as _json
+    p = tmp_path / "filters.json"
+    p.write_text(_json.dumps({"1:acc": {"lowpass": None, "notches": [{"hz": 8}], "axes": [AX, AX, AZ]}}))
+    cfg = fl.FilterBank(str(p)).configs["1:acc"]
+    assert cfg == fl.normalise({"axes": [AX, AX, AZ]})
+    assert cfg["lowpass"] == AX["lowpass"] and cfg["notches"] == []

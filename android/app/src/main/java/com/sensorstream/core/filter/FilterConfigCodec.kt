@@ -56,12 +56,13 @@ object FilterConfigCodec {
 
     private fun hz(x: Double) = if (x == Math.floor(x)) String.format(java.util.Locale.US, "%.0f", x) else String.format(java.util.Locale.US, "%.1f", x)
 
-    /** e.g. "LP 5 Hz · 4th + notch 8 Hz"; per-axis: "X/Y LP 0.5 Hz · 4th · Z LP 5 Hz · 4th + notch 8 Hz". */
+    /** e.g. "LP 5 Hz · 4th + notch 8 Hz"; per-axis: "X/Y LP 0.5 Hz · 4th | Z LP 5 Hz · 4th + notch 8 Hz"
+     *  (axes grouped only when their filters are identical, not merely displayed alike). */
     fun summary(cfg: FilterConfig): String {
         val axes = cfg.axes ?: return summaryOne(cfg)
-        val groups = LinkedHashMap<String, MutableList<Char>>()
-        axes.forEachIndexed { i, ax -> groups.getOrPut(summaryOne(ax)) { ArrayList() }.add("XYZ"[i]) }
-        return groups.entries.joinToString(" · ") { (text, names) -> names.joinToString("/") + " " + text }
+        val groups = LinkedHashMap<FilterConfig, MutableList<Char>>()
+        axes.forEachIndexed { i, ax -> groups.getOrPut(ax) { ArrayList() }.add("XYZ"[i]) }
+        return groups.entries.joinToString(" | ") { (ax, names) -> names.joinToString("/") + " " + summaryOne(ax) }
     }
 
     private fun summaryOne(cfg: FilterConfig): String {

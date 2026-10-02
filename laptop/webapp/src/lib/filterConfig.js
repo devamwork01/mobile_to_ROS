@@ -83,8 +83,18 @@ export function setPerAxis(d, on) {
   return { ...d, ...copy(x), perAxis: false, axes: null };
 }
 
+// A server suggestion applied to the editor draft: per axis on -> each tab from its own axis's
+// suggestion, or (no per-axis suggestion) the combined one in every tab; off -> the combined one.
+export function applySuggestion(d, combined, axes) {
+  if (d.perAxis) {
+    const per = axes && axes.length === 3 ? axes : [combined, combined, combined];
+    return configToDraft({ ...per[0], axes: per });
+  }
+  return { ...configToDraft(combined), perAxis: false, axes: null };
+}
+
 const summaryOne = (cfg) =>
-  [cfg?.lowpass ? `LP ${+cfg.lowpass.hz}` : null, (cfg?.notches || []).length ? `notch ${cfg.notches.map((n) => +n.hz).join(", ")}` : null]
+  [cfg?.lowpass ? `LP ${+cfg.lowpass.hz}${cfg.lowpass.order === 2 ? " (2nd)" : ""}` : null, (cfg?.notches || []).length ? `notch ${cfg.notches.map((n) => +n.hz).join(", ")}` : null]
     .filter(Boolean)
     .join(" + ");
 
@@ -92,12 +102,15 @@ const summaryOne = (cfg) =>
 export function filterSummary(cfg) {
   if (!cfg) return "";
   if (!cfg.axes) return summaryOne(cfg);
+  // Group axes only when their filters are identical (not merely displayed alike).
   const groups = new Map();
   cfg.axes.forEach((ax, i) => {
-    const t = summaryOne(ax);
-    groups.set(t, [...(groups.get(t) || []), AXIS_NAMES[i]]);
+    const k = JSON.stringify(plainConfig(plainDraft(ax)));
+    const g = groups.get(k) || { text: summaryOne(ax), names: [] };
+    g.names.push(AXIS_NAMES[i]);
+    groups.set(k, g);
   });
-  return [...groups].map(([t, names]) => `${names.join("/")} ${t}`).join(" · ");
+  return [...groups.values()].map((g) => `${g.names.join("/")} ${g.text}`).join(" · ");
 }
 
 // What the panel header says about its filter. The server can refuse a config, or be unable to

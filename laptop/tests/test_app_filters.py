@@ -86,3 +86,12 @@ def test_suggest_with_fewer_than_three_axes_has_no_per_axis():
     handle_filter_command({"cmd": "filter_suggest", "key": "6:P", "handle": 4}, FilterBank(),
                           FakeInsights((f, flat, 12.5, [flat])), sent.append)
     assert sent[-1]["kind"] == "filter_suggestion" and sent[-1]["axes"] is None
+
+
+def test_suggest_per_axis_for_six_value_sensors_uses_first_three():
+    # Review: uncalibrated sensors (6 values, 4 stored columns) got no per-axis suggestion.
+    f, flat, peak = _spectra()
+    sent = []
+    handle_filter_command({"cmd": "filter_suggest", "key": "16:GU", "handle": 5}, FilterBank(),
+                          FakeInsights((f, flat, 100.0, [flat, flat, peak, flat])), sent.append)
+    assert len(sent[-1]["axes"]) == 3 and sent[-1]["axes"][2]["notches"]
