@@ -75,3 +75,16 @@ def test_client_survives_device_id_change():
     tr.set_device_client(2, "same-client")              # reconnect: new device_id, same client
     asyncio.run(tr.tick(now_ns=2 * S + 1))
     assert sent == [(2, 0, 1, 1)]                        # requested from the NEW device_id
+
+
+def test_backfilled_frames_are_stamped_with_their_arrival_time():
+    # QA 2026-10-02: backfill was appended to the recording with t_recv=0, i.e. hours before the
+    # session started on the monotonic clock live frames use.
+    got = []
+    tr = Reconciler(GapTracker(grace_ns=S), send_resend=lambda *a: None,
+                    on_backfilled=lambda dg, t: got.append(t), clock=lambda: 42 * S)
+    tr.set_device_client(1, "client-1")
+    tr.on_live(1, _dg(0, 0, 100, 0.0), t_recv_ns=40 * S)
+    tr.on_live(1, _dg(0, 2, 300, 2.0), t_recv_ns=41 * S)
+    tr.on_backfill(1, 0, [p.encode_frame_b64(p.encode_datagram(_dg(0, 1, 200, 1.0)))])
+    assert got == [42 * S]

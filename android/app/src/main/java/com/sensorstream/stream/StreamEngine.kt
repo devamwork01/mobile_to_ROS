@@ -1,5 +1,6 @@
 package com.sensorstream.stream
 
+import com.sensorstream.codec.BinaryPacketCodec
 import com.sensorstream.core.RttMedian
 import com.sensorstream.core.filter.FilterSettings
 import android.content.Context
@@ -220,7 +221,11 @@ class StreamEngine(context: Context) {
                 if (from < 0 || to < from) return
                 // Serve from the on-phone ring off the WS callback thread; recorder is @Synchronized.
                 scope?.launch(Dispatchers.IO) {
-                    val frames = rec.readRawRange(handle, from, to)  // List<ByteArray>, sorted by seq
+                    // The ring outlives reconnects, so its datagrams carry the device id of the session
+                    // they were recorded in; restamp them with this session's id or the server files
+                    // the recovered samples under a device that no longer exists.
+                    val id = controller.deviceId
+                    val frames = rec.readRawRange(handle, from, to).map { BinaryPacketCodec.withDeviceId(it, id) }
                     if (frames.isEmpty()) {
                         control.sendBackfillUnavailable(controller.deviceId, clientId, handle, from, to)
                         return@launch
