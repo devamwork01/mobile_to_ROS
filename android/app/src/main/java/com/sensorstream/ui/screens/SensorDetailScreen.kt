@@ -52,6 +52,7 @@ import com.sensorstream.ui.theme.SsType
 import com.sensorstream.ui.viz.EnvironmentalHero
 import com.sensorstream.ui.viz.MiniSignalGraph
 import com.sensorstream.ui.viz.Phone3DView
+import com.sensorstream.ui.viz.OrientationSource
 import com.sensorstream.ui.viz.Projection
 import com.sensorstream.ui.viz.Vec3
 import com.sensorstream.vm.StreamViewModel
@@ -87,6 +88,9 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
     val axisColors = listOf(c.axisX, c.axisY, c.axisZ)
     val isVector = sig.category == SensorCategory.MOTION || sig.category == SensorCategory.MAGNETIC
     val isOrientation = sig.category == SensorCategory.ORIENTATION
+    // An orientation sensor shows its own attitude (game / geomagnetic rotation, legacy angles);
+    // every other screen draws the device orientation from the rotation vector.
+    val attitude = (if (isOrientation) OrientationSource.rotationVector(type, values) else null) ?: orientation
     val isEnv = sig.category == SensorCategory.ENVIRONMENT || sig.category == SensorCategory.PROXIMITY
     val sensorVec = if (isVector && values != null && values.size >= 3) Vec3(values[0], values[1], values[2]) else null
 
@@ -136,7 +140,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             )
         } else {
             Phone3DView(
-                rotationVector = { orientation },
+                rotationVector = { attitude },
                 sensorVector = sensorVec,
                 sensorVectorColor = c.accent,
                 showAxes = if (isOrientation) showBody else true,
@@ -160,7 +164,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
                 ToggleChip("Quaternion", quatMode) { quatMode = true }
             }
             if (!quatMode) {
-                val rmat = Projection.rotationVectorToMatrix(orientation ?: floatArrayOf(0f, 0f, 0f))
+                val rmat = Projection.rotationVectorToMatrix(attitude ?: floatArrayOf(0f, 0f, 0f))
                 val (roll, pitch, yaw) = Projection.eulerDeg(rmat)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(SsDims.gap)) {
                     AngleTile("Roll", Fmt.signed(roll, 1), c.axisX, Modifier.weight(1f))
@@ -170,7 +174,7 @@ fun SensorDetailScreen(vm: StreamViewModel, nav: AppNav, handle: Int) {
             } else {
                 SsCard(Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        val q = Projection.quatFromRotationVector(orientation ?: floatArrayOf(0f, 0f, 0f))
+                        val q = Projection.quatFromRotationVector(attitude ?: floatArrayOf(0f, 0f, 0f))
                         SignalValue("X", Fmt.signed(q[0], 4), "", c.axisX)
                         SignalValue("Y", Fmt.signed(q[1], 4), "", c.axisY)
                         SignalValue("Z", Fmt.signed(q[2], 4), "", c.axisZ)
