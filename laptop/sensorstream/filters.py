@@ -341,6 +341,9 @@ class FilterBank:
             self._key_of[int(handle)] = key
             self._chains.pop(int(handle), None)
 
+    def key_of(self, handle: int) -> Optional[str]:
+        return self._key_of.get(int(handle))
+
     def _type_from_key(self, key: str) -> Optional[int]:
         try:
             return int(key.split(":", 1)[0])

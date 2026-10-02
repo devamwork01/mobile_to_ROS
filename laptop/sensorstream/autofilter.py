@@ -8,13 +8,15 @@ filter (integrated from the spectrum and the filter's frequency response).
 
 from __future__ import annotations
 
+import json
 import math
+import os
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 
-from .filters import frequency_response
+from .filters import frequency_response, suggest_details
 
 UNITS = {1: "m/s^2", 4: "rad/s", 2: "uT"}
 GENERIC = {1: "Acceleration", 4: "Angular Velocity", 2: "Magnetic Field"}  # dashboard names (signals.js)
@@ -130,3 +132,114 @@ class RunTracker:
     def run_seconds(self, handle: int) -> float:
         s = self._s.get(handle)
         return 0.0 if s is None else (s[1] - s[0]) / 1e9
+
+
+RUN_S = 10.0  # seconds of one unbroken run before a sensor is tuned (= the insights window)
+
+
+class ReportStore:
+    """Latest spectrum findings per sensor key. `records` (applied and merely suggested) are replayed
+    to dashboards that connect later; `applied` ones are written to filter_report.json."""
+
+    def __init__(self, path: Optional[str]) -> None:
+        self.path = path
+        self.records: Dict[str, dict] = {}
+        self.device: Optional[dict] = None
+        self.applied: Dict[str, dict] = self._load()
+
+    def _load(self) -> Dict[str, dict]:
+        if not self.path:
+            return {}
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                doc = json.load(fh)
+        except (OSError, ValueError):
+            return {}
+        sensors = doc.get("sensors") if isinstance(doc, dict) else None
+        if not isinstance(sensors, dict):
+            return {}
+        return {k: v for k, v in sensors.items() if isinstance(v, dict)}
+
+    def add(self, record: dict, persist: bool) -> None:
+        self.records[record["key"]] = record
+        if persist:
+            self.applied[record["key"]] = record
+            self._write()
+
+    def messages(self) -> List[dict]:
+        return [{"kind": "filter_report", "key": k, "report": r} for k, r in self.records.items()]
+
+    def _write(self) -> None:
+        if not self.path:
+            return
+        d = os.path.dirname(self.path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        tmp = self.path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"updated": now_iso(), "device": self.device, "sensors": self.applied}, fh, indent=2)
+        os.replace(tmp, self.path)
+
+
+class AutoFilter:
+    """Tunes each streaming accelerometer / gyroscope / magnetometer once per phone connection, as
+    soon as its current unbroken run is 10 s old: one filter per axis from that axis's spectrum,
+    applied through FilterBank (overwriting a saved filter) exactly like a dashboard Apply."""
+
+    def __init__(self, bank, insights, reports: ReportStore, broadcast: Callable[[dict], None],
+                 on_change: Optional[Callable[[], None]] = None, print_fn: Callable[[str], None] = print,
+                 now: Callable[[], str] = now_iso) -> None:
+        self._bank, self._insights, self._reports = bank, insights, reports
+        self._broadcast, self._on_change, self._print, self._now = broadcast, on_change, print_fn, now
+        self._runs = RunTracker()
+        self._types: Dict[int, int] = {}
+        self._tuned: set = set()
+        self._failed: set = set()
+
+    def on_datagram(self, dg) -> None:
+        for r in dg.records:
+            if r.sensor_type in AUTO_TYPES:
+                self._types[r.sensor_handle] = r.sensor_type
+                self._runs.observe(r.sensor_handle, r.t_sensor_ns)
+
+    def on_phone_connected(self, model: Optional[str] = None, android: Optional[str] = None) -> None:
+        """A (re)connect re-tunes everything from fresh data."""
+        self._tuned.clear()
+        self._failed.clear()
+        self._runs.reset()
+        self._types.clear()
+        self._reports.device = {"model": model, "android": android} if model else None
+
+    def tick(self) -> int:
+        n = 0
+        for h, ty in list(self._types.items()):
+            if h in self._tuned or h in self._failed or self._runs.run_seconds(h) < RUN_S:
+                continue
+            if self._tune(h, ty):
+                n += 1
+        return n
+
+    def _tune(self, h: int, ty: int) -> bool:
+        src = self._insights.suggest(h)
+        if src is None or len(src) < 4 or len(src[3]) < 3:
+            return False  # not enough live data yet: retried on the next tick
+        f, _, fs, per = src
+        per = list(per)[:3]
+        found = [suggest_details(f, p, fs) for p in per]
+        cfgs = [c for c, _ in found]
+        key = self._bank.key_of(h) or f"{ty}:{GENERIC[ty]}"
+        ok, why = self._bank.set(key, {**cfgs[0], "axes": cfgs}, handle=h)
+        if not ok:
+            self._failed.add(h)
+            self._print(f"[filter] {key}: not applied - {why}".encode("ascii", "replace").decode())
+            self._broadcast({"kind": "filter_error", "key": key, "message": why, "running": key in self._bank.configs})
+            return False
+        self._tuned.add(h)
+        self._broadcast(self._bank.snapshot())
+        if self._on_change:
+            self._on_change()
+        rec = sensor_report(key, h, ty, fs, f, per, cfgs, [d for _, d in found], self._now())
+        self._reports.add(rec, persist=True)
+        self._broadcast({"kind": "filter_report", "key": key, "report": rec})
+        self._print(format_report(rec))
+        return True
