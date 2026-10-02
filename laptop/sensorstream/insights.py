@@ -63,6 +63,16 @@ class _Ring:
         self.n = min(self.n + 1, RING_CAP)
         self.last_seen = now
 
+    def _sorted(self, filtered: bool = False):
+        """All held samples, time-sorted, true duplicates (same seq and t) removed."""
+        idx = (self.head - self.n + np.arange(self.n)) % RING_CAP
+        t, seq = self.t[idx], self.seq[idx]
+        v = (self.vf if filtered else self.v)[idx, : self.k]
+        _, first = np.unique(np.stack([seq, t], axis=1), axis=0, return_index=True)
+        t, v = t[first], v[first]
+        order = np.argsort(t, kind="stable")
+        return t[order], v[order]
+
     def window(self, seconds: float, filtered: bool = False):
         """Samples of the last `seconds` (by sensor time), time-sorted, true duplicates removed.
 
@@ -70,16 +80,17 @@ class _Ring:
         counter (sensor re-toggled, reconnect), and those samples are new data."""
         if self.n == 0:
             return np.array([], dtype=np.int64), np.empty((0, self.k))
-        idx = (self.head - self.n + np.arange(self.n)) % RING_CAP
-        t, seq = self.t[idx], self.seq[idx]
-        v = (self.vf if filtered else self.v)[idx, : self.k]
-        _, first = np.unique(np.stack([seq, t], axis=1), axis=0, return_index=True)
-        t, v = t[first], v[first]
-        order = np.argsort(t, kind="stable")
-        t, v = t[order], v[order]
+        t, v = self._sorted(filtered)
         keep = t >= t[-1] - int(seconds * 1e9)
         return t[keep], v[keep]
 
+    def between(self, from_ns: int, to_ns: int):
+        """Samples with from_ns < t <= to_ns (a guided-tuning capture window)."""
+        if self.n == 0:
+            return np.array([], dtype=np.int64), np.empty((0, self.k))
+        t, v = self._sorted()
+        keep = (t > from_ns) & (t <= to_ns)
+        return t[keep], v[keep]
 
 class InsightsSink(OutputSink):
     def __init__(self, clock: Callable[[], float] = time.monotonic, window_s: float = 10.0):
@@ -106,6 +117,12 @@ class InsightsSink(OutputSink):
     def ring_size(self, handle: int) -> int:
         ring = self._rings.get(handle)
         return ring.n if ring else 0
+
+    def samples_between(self, handle: int, from_ns: int, to_ns: int):
+        ring = self._rings.get(handle)
+        if ring is None:
+            return np.array([], dtype=np.int64), np.empty((0, MAX_VALUES))
+        return ring.between(from_ns, to_ns)
 
     def tick(self) -> List[dict]:
         now = self._clock()

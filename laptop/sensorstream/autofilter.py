@@ -16,6 +16,7 @@ from typing import Callable, Dict, List, Optional
 
 import numpy as np
 
+from . import analysis as an
 from .filters import frequency_response, suggest_details
 
 UNITS = {1: "m/s^2", 4: "rad/s", 2: "uT"}
@@ -83,6 +84,47 @@ def format_report(rec: dict) -> str:
                      f"{_g(a['order'], 'd'):<5}  {a['delay_ms']:>4.0f} ms  {notches:<20} "
                      f"{a['sigma_raw']:.4g} -> {a['sigma_filtered']:.4g}")
     return "\n".join(lines)
+
+
+CAPTURE_MIN_S = 9.0  # a guided capture needs this much data (the phone marks 10 s)
+
+
+def capture_problem(t) -> Optional[str]:
+    """Why a capture window cannot be tuned from, or None if it can."""
+    t = np.asarray(t, dtype=np.int64)
+    if t.size < 2 or (t[-1] - t[0]) / 1e9 < CAPTURE_MIN_S:
+        return "not enough data in the capture"
+    if int(np.diff(t).max()) > 1_000_000_000:
+        return "data gap during the capture"
+    return None
+
+
+def spectra(t, v):
+    """(f, fs, [psd_x, psd_y, psd_z]) of a capture: the same Welch PSDs the live suggestion uses."""
+    fs = an.rate_stats(t)["rate_hz"]
+    f, per = None, []
+    for i in range(3):
+        ff, pp = an.welch_psd(np.asarray(v)[:, i], fs)
+        f = ff
+        per.append(pp)
+    return f, fs, per
+
+
+def _cfg_text(c: dict) -> str:
+    parts = []
+    lp = c.get("lowpass")
+    if lp:
+        parts.append(f"LP {lp['hz']:g} Hz")
+    parts += [f"notch {n['hz']:g} Hz" for n in c.get("notches") or []]
+    return " + ".join(parts) or "none"
+
+
+def summary(cfgs) -> str:
+    """Per-axis config text, axes with the same filter grouped: 'X/Y LP 0.5 Hz | Z LP 5 Hz + notch 8 Hz'."""
+    groups: Dict[str, List[str]] = {}
+    for ax, c in zip(AXIS, cfgs):
+        groups.setdefault(_cfg_text(c), []).append(ax)
+    return " | ".join(f"{'/'.join(axes)} {text}" for text, axes in groups.items())
 
 
 GAP_NS = 1_000_000_000      # a pause longer than this starts a new run
