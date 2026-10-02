@@ -89,15 +89,17 @@ GAP_NS = 1_000_000_000      # a pause longer than this starts a new run
 RATE_CHANGE = 0.05          # the short-term interval moving this far from the run's mean...
 RATE_SUSTAIN = 20           # ...for this many samples in a row is a new sampling rate: a new run
 _FAST = 0.2                 # EWMA weight of the short-term interval
+HOLE = 3.0                  # an interval > 3x the run's mean is lost samples (a hole), not a new rate...
 
 
 class RunTracker:
     """Per handle, when its current unbroken run of samples started (sensor time). A gap > 1 s, or
     the sample interval moving > 5 % from the run's rate for 20 samples in a row, starts a new run.
+    A single hole of lost samples (Wi-Fi) is not a rate change; 20 holes in a row are (a big slowdown).
     The run is what --filter waits on: 10 s of one run is 10 s of clean, single-rate data."""
 
     def __init__(self) -> None:
-        # handle -> [start, last, n_intervals, mean_interval, fast_interval, off_count]
+        # handle -> [start, last, n_intervals, mean_interval, fast_interval, off_count, hole_count]
         self._s: Dict[int, list] = {}
 
     def reset(self) -> None:
@@ -106,15 +108,23 @@ class RunTracker:
     def observe(self, handle: int, t_ns: int) -> None:
         s = self._s.get(handle)
         if s is None:
-            self._s[handle] = [t_ns, t_ns, 0, 0.0, 0.0, 0]
+            self._s[handle] = [t_ns, t_ns, 0, 0.0, 0.0, 0, 0]
             return
-        start, last, n, mean, fast, off = s
+        start, last, n, mean, fast, off, holes = s
         dt = t_ns - last
         if dt <= 0:          # duplicate or reordered sample
             return
         if dt > GAP_NS:
-            self._s[handle] = [t_ns, t_ns, 0, 0.0, 0.0, 0]
+            self._s[handle] = [t_ns, t_ns, 0, 0.0, 0.0, 0, 0]
             return
+        if n > 0 and dt > HOLE * mean:
+            holes += 1
+            if holes >= RATE_SUSTAIN:
+                self._s[handle] = [t_ns, t_ns, 0, 0.0, 0.0, 0, 0]
+            else:
+                self._s[handle] = [start, t_ns, n, mean, fast, off, holes]
+            return
+        holes = 0
         if n == 0:
             mean = fast = float(dt)
         else:
@@ -122,12 +132,12 @@ class RunTracker:
             if abs(fast - mean) > RATE_CHANGE * mean:
                 off += 1
                 if off >= RATE_SUSTAIN:
-                    self._s[handle] = [t_ns, t_ns, 0, 0.0, 0.0, 0]
+                    self._s[handle] = [t_ns, t_ns, 0, 0.0, 0.0, 0, 0]
                     return
             else:
                 off = 0
                 mean += (dt - mean) / (n + 1)
-        self._s[handle] = [start, t_ns, n + 1, mean, fast, off]
+        self._s[handle] = [start, t_ns, n + 1, mean, fast, off, holes]
 
     def run_seconds(self, handle: int) -> float:
         s = self._s.get(handle)
@@ -136,6 +146,7 @@ class RunTracker:
 
 RUN_S = 10.0  # seconds of one unbroken run before a sensor is tuned (= the insights window)
 RATE_AGREE = 0.05  # the spectrum's rate and FilterBank's must agree this well before tuning
+WAIT_NOTICE_S = 40.0  # a sensor streaming this long without being tuned gets one "still waiting" line
 
 
 class ReportStore:
@@ -196,12 +207,17 @@ class AutoFilter:
         self._types: Dict[int, int] = {}
         self._tuned: set = set()
         self._failed: set = set()
+        self._span: Dict[int, list] = {}   # handle -> [first, last] sensor time seen this connection
+        self._why: Dict[int, str] = {}     # handle -> why the last tuning attempt waited
+        self._noticed: set = set()
 
     def on_datagram(self, dg) -> None:
         for r in dg.records:
             if r.sensor_type in AUTO_TYPES:
                 self._types[r.sensor_handle] = r.sensor_type
                 self._runs.observe(r.sensor_handle, r.t_sensor_ns)
+                sp = self._span.setdefault(r.sensor_handle, [r.t_sensor_ns, r.t_sensor_ns])
+                sp[1] = max(sp[1], r.t_sensor_ns)
 
     def on_phone_connected(self, model: Optional[str] = None, android: Optional[str] = None) -> None:
         """A (re)connect re-tunes everything from fresh data."""
@@ -209,6 +225,9 @@ class AutoFilter:
         self._failed.clear()
         self._runs.reset()
         self._types.clear()
+        self._span.clear()
+        self._why.clear()
+        self._noticed.clear()
         self._reports.device = {"model": model, "android": android} if model else None
 
     def tick(self) -> int:
@@ -218,15 +237,32 @@ class AutoFilter:
                 continue
             if self._tune(h, ty):
                 n += 1
+        self._notice_waiting()
         return n
+
+    def _notice_waiting(self) -> None:
+        """One line per sensor that has streamed WAIT_NOTICE_S without being tuned, saying why."""
+        for h, ty in self._types.items():
+            if h in self._tuned or h in self._failed or h in self._noticed:
+                continue
+            first, last = self._span.get(h, (0, 0))
+            if (last - first) / 1e9 < WAIT_NOTICE_S:
+                continue
+            self._noticed.add(h)
+            why = (self._why.get(h) if self._runs.run_seconds(h) >= RUN_S
+                   else "no unbroken 10 s run of data yet (gaps or irregular timestamps)")
+            key = self._bank.key_of(h) or f"{ty}:{GENERIC[ty]}"
+            self._print(f"[filter] {key}: still waiting - {why}".encode("ascii", "replace").decode())
 
     def _tune(self, h: int, ty: int) -> bool:
         src = self._insights.suggest(h)
         if src is None or len(src) < 4 or len(src[3]) < 3:
-            return False  # not enough live data yet: retried on the next tick
+            self._why[h] = "not enough live data yet"
+            return False  # retried on the next tick
         f, _, fs, per = src
         bank_fs = self._bank.fs(h)
         if bank_fs and abs(bank_fs - fs) > RATE_AGREE * bank_fs:
+            self._why[h] = f"the rate estimates disagree (spectrum {fs:.1f} Hz, filter {bank_fs:.1f} Hz)"
             return False  # the two rate estimates disagree (still settling): retried on the next tick
         per = list(per)[:3]
         found = [suggest_details(f, p, fs) for p in per]

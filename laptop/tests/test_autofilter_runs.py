@@ -63,3 +63,21 @@ def test_reset_forgets_everything():
     feed(rt, 1, 0, 12, 100)
     rt.reset()
     assert rt.run_seconds(1) == 0.0
+
+
+def test_lost_packet_bursts_do_not_restart_the_run():
+    # review M1: one Wi-Fi stall dropping ~18 samples (155 ms) restarted the run through the rate rule
+    rt = RunTracker()
+    t, period = 0, int(S / 116.5)
+    for k in range(int(30 * 116.5)):
+        if k % 580 not in range(560, 580):   # every ~5 s, 20 samples never arrive
+            rt.observe(1, t)
+        t += period
+    assert rt.run_seconds(1) > 29.5
+
+
+def test_a_large_sustained_rate_drop_still_starts_a_new_run():
+    rt = RunTracker()
+    feed(rt, 1, 0, 5, 100)
+    feed(rt, 1, 5, 6, 20)        # 5x slower: every interval looks like a hole, but it lasts
+    assert 4.0 < rt.run_seconds(1) < 6.0

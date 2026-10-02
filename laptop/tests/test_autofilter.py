@@ -214,3 +214,44 @@ def test_waits_while_the_filter_rate_and_the_spectrum_rate_disagree(tmp_path):
         t += S // 100
         h.bank.process(p.Datagram(device_id=1, records=[p.Record(1, 0, k, t, 3, [0.0, 0.0, 9.8])]))
     assert h.af.tick() == 1
+
+
+def test_a_phone_clock_reset_never_tunes_from_the_previous_session():
+    # review I1: the insights ring kept the old session's samples (higher sensor times) after a
+    # reboot, so the 10 s window and the tuned filter came from the previous phone session
+    from sensorstream.insights import InsightsSink
+    ins = InsightsSink(clock=lambda: 0.0)
+    sent, printed = [], []
+    bank = FilterBank()
+    bank.set_catalog(CATALOG)
+    af = AutoFilter(bank, ins, ReportStore(None), sent.append, print_fn=printed.append, now=lambda: "x")
+    rng = np.random.default_rng(5)
+
+    def feed(t0_s, secs, line_hz=None, seq0=0):
+        n = int(secs * FS)
+        for k in range(n):
+            t = int((t0_s + k / FS) * S)
+            z = rng.normal(0, 0.01) + (np.sin(2 * np.pi * line_hz * k / FS) if line_hz else 0.0)
+            dg = p.Datagram(device_id=1, records=[p.Record(1, 0, seq0 + k, t, 3, [rng.normal(0, 0.01), rng.normal(0, 0.01), 9.8 + z])])
+            ins.on_datagram(dg, None, 0)
+            af.on_datagram(dg)
+
+    feed(5000, 60, line_hz=20.0)          # old session: phone up for 5000 s, a strong 20 Hz line on Z
+    af.on_phone_connected("SM-S938B", "16")
+    feed(100, 12)                          # rebooted phone: clock starts low, quiet data
+    assert af.tick() == 1
+    z = bank.configs[ACC]["axes"][2]
+    assert z["notches"] == []              # nothing from the old 20 Hz line
+
+
+def test_says_once_why_a_sensor_is_still_waiting(tmp_path):
+    # review M1: --filter could wait forever without a word
+    h = Harness(tmp_path, insights=FakeInsights(ok=False))
+    h.stream(0, 1, 0, 25)
+    h.af.tick()
+    assert not [m for m in h.printed if "still waiting" in m]
+    h.stream(0, 1, 25, 20)
+    h.af.tick()
+    h.af.tick()
+    waits = [m for m in h.printed if "still waiting" in m]
+    assert len(waits) == 1 and ACC in waits[0] and "not enough live data" in waits[0]

@@ -20,10 +20,11 @@ RING_CAP = 30000   # 60 s at 500 Hz
 MAX_VALUES = 4
 SUB_TTL_S = 10.0
 STALE_S = 2.0
+CLOCK_BACK_NS = 1_000_000_000  # a sample this far before the newest one means the sensor clock restarted
 
 
 class _Ring:
-    __slots__ = ("type", "t", "seq", "v", "vf", "has_f", "k", "head", "n", "last_seen")
+    __slots__ = ("type", "t", "seq", "v", "vf", "has_f", "k", "head", "n", "last_seen", "newest")
 
     def __init__(self, type_: int):
         self.type = type_
@@ -36,8 +37,16 @@ class _Ring:
         self.head = 0
         self.n = 0
         self.last_seen = 0.0
+        self.newest = None  # largest sensor time held
 
     def push(self, t_ns: int, seq: int, values, now: float, fvals=None) -> None:
+        if self.newest is not None and t_ns < self.newest - CLOCK_BACK_NS:
+            # The sensor clock went back (phone rebooted, or another phone on these handles): the
+            # held samples belong to another session and would dominate every window - start afresh.
+            self.head = self.n = 0
+            self.has_f = False
+            self.newest = None
+        self.newest = t_ns if self.newest is None else max(self.newest, t_ns)
         i = self.head
         self.t[i] = t_ns
         self.seq[i] = seq

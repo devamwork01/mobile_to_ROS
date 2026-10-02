@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icons } from "../../icons.js";
 import { sendCommand } from "../../telemetry/store.js";
 import { AXIS } from "../../telemetry/signals.js";
@@ -6,7 +6,7 @@ import {
   useFilterConfig, useFilterSuggestion, useFilterSuggestionAxes, useFilterError, useFilterReport, useInsightStats,
   clearFilterSuggestion, clearFilterError,
 } from "../../telemetry/insights.js";
-import { validateConfig, configToDraft, draftToConfig, setPerAxis, applySuggestion, AXIS_NAMES, MAX_NOTCHES } from "../../lib/filterConfig.js";
+import { validateConfig, configToDraft, draftToConfig, setPerAxis, applySuggestion, followServer, AXIS_NAMES, MAX_NOTCHES } from "../../lib/filterConfig.js";
 import { useFilterPane, closeFilterPane, setFilterPaneTab } from "../../lib/filterPane.js";
 import { findingsRows } from "../../lib/filterFindings.js";
 
@@ -105,11 +105,23 @@ function PaneBody({ row }) {
   const error = useFilterError(row.key);
   const [draft, setDraft] = useState(() => configToDraft(active));
   const [tab, setTab] = useState(0);
+  const [dirty, setDirty] = useState(false); // edited here since it last matched the server
+  const [stale, setStale] = useState(false); // the server's filter changed while edited here
   const canPerAxis = row.kind === "vector";
   useEffect(() => {
     if (!suggestion) return;
     setDraft((d) => applySuggestion(d, suggestion, suggestionAxes));
+    setDirty(true);
   }, [suggestion, suggestionAxes]);
+  const seen = useRef(active);
+  useEffect(() => {
+    if (seen.current === active) return; // first render: the draft was seeded from it
+    seen.current = active;
+    const r = followServer(draft, active, dirty);
+    setDraft(r.draft);
+    setStale(r.stale);
+  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps -- react to server changes only
+  const reload = () => { setDraft(configToDraft(active)); setDirty(false); setStale(false); };
   useEffect(() => { setFilterPaneTab(draft.perAxis ? tab : null); }, [draft.perAxis, tab]);
   useEffect(() => () => setFilterPaneTab(null), []);
   // Leaving this sensor drops a pending suggestion; errors stay so the panel can show why a filter isn't running.
@@ -123,7 +135,7 @@ function PaneBody({ row }) {
   const check = validateConfig(cfg, fs);
   const nyq = fs ? 0.45 * fs : 50;
   const editing = draft.perAxis ? draft.axes[tab] : draft;
-  const onEdit = (v) => setDraft((d) => (d.perAxis ? { ...d, axes: d.axes.map((a, i) => (i === tab ? v : a)) } : { ...d, ...v }));
+  const onEdit = (v) => { setDirty(true); setDraft((d) => (d.perAxis ? { ...d, axes: d.axes.map((a, i) => (i === tab ? v : a)) } : { ...d, ...v })); };
 
   return (
     <aside className="w-[360px] shrink-0 border-l border-line bg-surface overflow-y-auto p-4 flex flex-col gap-3 max-[900px]:fixed max-[900px]:inset-0 max-[900px]:z-40 max-[900px]:w-auto">
@@ -139,7 +151,7 @@ function PaneBody({ row }) {
       {canPerAxis && (
         <div className="flex items-center gap-2 text-xs">
           <label className="flex items-center gap-2">
-            <input type="checkbox" checked={draft.perAxis} onChange={(e) => setDraft((d) => setPerAxis(d, e.target.checked))} />
+            <input type="checkbox" checked={draft.perAxis} onChange={(e) => { setDirty(true); setDraft((d) => setPerAxis(d, e.target.checked)); }} />
             Per axis
           </label>
           {draft.perAxis && (
@@ -155,11 +167,17 @@ function PaneBody({ row }) {
         </div>
       )}
       <AxisFields key={draft.perAxis ? tab : "all"} value={editing} onChange={onEdit} nyq={nyq} />
+      {stale && (
+        <div className="text-[11px] text-warn flex items-center gap-2">
+          The running filter changed on the server. Apply replaces it with these settings.
+          <button className="ml-auto text-accent whitespace-nowrap" onClick={reload}>Reload</button>
+        </div>
+      )}
       {(!check.ok || error) && <div className="text-[11px] text-warn">{error || check.message}</div>}
       <div className="flex gap-2 justify-end">
-        {active && <button className="btn-ghost text-xs py-1.5" onClick={() => { clearFilterError(row.key); sendCommand({ cmd: "filter_clear", key: row.key }); }}>Clear filter</button>}
+        {active && <button className="btn-ghost text-xs py-1.5" onClick={() => { clearFilterError(row.key); setDirty(false); setStale(false); sendCommand({ cmd: "filter_clear", key: row.key }); }}>Clear filter</button>}
         <button className="btn-accent text-xs py-1.5 disabled:opacity-40" disabled={!check.ok}
-          onClick={() => { clearFilterError(row.key); sendCommand({ cmd: "filter_set", key: row.key, handle: row.handle, config: cfg }); }}>Apply</button>
+          onClick={() => { clearFilterError(row.key); setDirty(false); setStale(false); sendCommand({ cmd: "filter_set", key: row.key, handle: row.handle, config: cfg }); }}>Apply</button>
       </div>
       <Findings report={report} />
     </aside>
