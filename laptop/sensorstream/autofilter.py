@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
-from typing import List
+from typing import Dict, List
 
 import numpy as np
 
@@ -81,3 +81,52 @@ def format_report(rec: dict) -> str:
                      f"{_g(a['order'], 'd'):<5}  {a['delay_ms']:>4.0f} ms  {notches:<20} "
                      f"{a['sigma_raw']:.4g} -> {a['sigma_filtered']:.4g}")
     return "\n".join(lines)
+
+
+GAP_NS = 1_000_000_000      # a pause longer than this starts a new run
+RATE_CHANGE = 0.05          # the short-term interval moving this far from the run's mean...
+RATE_SUSTAIN = 20           # ...for this many samples in a row is a new sampling rate: a new run
+_FAST = 0.2                 # EWMA weight of the short-term interval
+
+
+class RunTracker:
+    """Per handle, when its current unbroken run of samples started (sensor time). A gap > 1 s, or
+    the sample interval moving > 5 % from the run's rate for 20 samples in a row, starts a new run.
+    The run is what --filter waits on: 10 s of one run is 10 s of clean, single-rate data."""
+
+    def __init__(self) -> None:
+        # handle -> [start, last, n_intervals, mean_interval, fast_interval, off_count]
+        self._s: Dict[int, list] = {}
+
+    def reset(self) -> None:
+        self._s.clear()
+
+    def observe(self, handle: int, t_ns: int) -> None:
+        s = self._s.get(handle)
+        if s is None:
+            self._s[handle] = [t_ns, t_ns, 0, 0.0, 0.0, 0]
+            return
+        start, last, n, mean, fast, off = s
+        dt = t_ns - last
+        if dt <= 0:          # duplicate or reordered sample
+            return
+        if dt > GAP_NS:
+            self._s[handle] = [t_ns, t_ns, 0, 0.0, 0.0, 0]
+            return
+        if n == 0:
+            mean = fast = float(dt)
+        else:
+            fast += _FAST * (dt - fast)
+            if abs(fast - mean) > RATE_CHANGE * mean:
+                off += 1
+                if off >= RATE_SUSTAIN:
+                    self._s[handle] = [t_ns, t_ns, 0, 0.0, 0.0, 0]
+                    return
+            else:
+                off = 0
+                mean += (dt - mean) / (n + 1)
+        self._s[handle] = [start, t_ns, n + 1, mean, fast, off]
+
+    def run_seconds(self, handle: int) -> float:
+        s = self._s.get(handle)
+        return 0.0 if s is None else (s[1] - s[0]) / 1e9
