@@ -1,6 +1,8 @@
+import { useRef } from "react";
 import { Icons } from "../../icons.js";
 import { useSignal } from "../../telemetry/store.js";
 import { AXIS } from "../../telemetry/signals.js";
+import { liveText, slotChars } from "../../lib/liveValues.js";
 
 const COLORS = [AXIS.X, AXIS.Y, AXIS.Z, "#b57edc"];
 
@@ -39,15 +41,18 @@ export function Segmented({ options, value, onChange }) {
 // Latest X/Y/Z (or qx..qw) in the header, re-rendered at the store's ~10 Hz card rate.
 export function LiveValues({ handle, kind }) {
   const rec = useSignal(handle);
+  const width = useRef(0); // grow-only slot width (ch): values changing sign/digits never resize the header
   if (kind === "scalar") return null;
   const v = rec?.v || [];
   const n = kind === "orientation" ? 4 : 3;
   const d = kind === "orientation" ? 3 : 2;
+  const texts = Array.from({ length: n }, (_, i) => liveText(v[i], d));
+  width.current = slotChars(width.current, texts);
   return (
     <span className="num text-[11px] flex gap-2 ml-1 whitespace-nowrap">
-      {Array.from({ length: n }, (_, i) => (
-        <span key={i} style={{ color: COLORS[i] }}>
-          {v[i] != null ? v[i].toFixed(d) : "—"}
+      {texts.map((t, i) => (
+        <span key={i} className="inline-block text-right" style={{ color: COLORS[i], minWidth: `${width.current}ch` }}>
+          {t}
         </span>
       ))}
     </span>
