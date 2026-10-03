@@ -349,3 +349,32 @@ def test_no_motion_is_refused():
     res = g.window(pid, 3.0, 13.4)
     assert {s["message"] for s in res["sensors"]} == {"the phone didn't move during the capture - Re-tune and move it"}
     assert not g.bank.configs
+
+
+
+def test_silent_tuning_waits_for_motion_with_report_noise():
+    # idle robot at the 60 s fallback: no filter until something moves (was 0.5 Hz on every axis)
+    Nn = 2 * 0.01 ** 2 / FS
+    g = guided_with({1: [Nn] * 3, 4: [Nn] * 3})
+    g.af._guided = False                                    # old app: silent tuning at 60 s
+    g.stream([0, 2], 0, 61)
+    g.af.tick()
+    assert not g.bank.configs
+    g.stream_motion([0, 2], 61, 11, motion_rows(1100))
+    g.af.tick()
+    assert set(g.bank.configs) == {"1:Acc", "4:Gyro"}
+
+
+def test_keep_reaches_the_tuning():
+    Nn = 2 * 0.01 ** 2 / FS
+    cut = {}
+    for keep in (0.99, 0.90):
+        g = guided_with({1: [Nn] * 3, 4: [Nn] * 3})
+        g.af._keep = keep
+        g.stream([0, 2], 0, 2.5)
+        g.af.tick()
+        pid = g.prompts()[0]["id"]
+        g.stream_motion([0, 2], 2.5, 11, motion_rows(1100, hz=20.0))
+        g.window(pid, 3.0, 13.4)
+        cut[keep] = g.bank.configs["1:Acc"]["axes"][0]["lowpass"]["hz"]
+    assert cut[0.90] < cut[0.99]

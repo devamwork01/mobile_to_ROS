@@ -109,6 +109,7 @@ npm test           # unit tests (Vitest): history buffer, layout store, pin reso
 | `--ros` | off | Publish decoded sensors to ROS 2 topics (requires a sourced ROS 2 environment) |
 | `--ros-stamp` | `sensor` | ROS stamps: `sensor` = phone measurement time mapped to ROS time; `receive` = laptop arrival time |
 | `--filter` | off | Automatic per-axis filters for accelerometer / gyroscope / magnetometer, tuned from a guided 10 s capture on the phone (app v0.1.13+) — see [Filtering](#filtering--let-the-spectrum-choose-the-filter) |
+| `--filter-keep` | `0.99` | `--filter`: share of the motion's power each low-pass keeps (0.5–0.999). Lower = lower cutoffs, more noise removed, fastest motion smoothed (e.g. `0.95` for a slow robot) |
 | `--filters-file` | `./filters.json` | Where the running filters are saved |
 | `--filter-report` | next to `--filters-file` | Where `--filter` writes `filter_report.json` |
 | `--record` | off | Record the session from start (to `--log-dir`, default `./recordings`) |
@@ -254,13 +255,17 @@ No phone at hand? `python -m sensorstream.app --selftest --filter` tunes the syn
   may still block it). With the app in the background, the streaming notification shows the
   instruction and countdown. A reconnect (even after a Wi-Fi blip) tunes again from fresh data.
 - **Noise is measured, not guessed:** the cutoff goes where your motion sinks into the sensor's real
-  noise, keeping 99 % of the motion's power. The noise comes from a **Still test run** for your phone
+  noise, keeping 99 % of the motion's power (`--filter-keep 0.95` keeps 95 %: lower cutoffs and more
+  noise removed, at the cost of the fastest movements). The noise comes from a **Still test run** for your phone
   model if you have one (Test run → Still, once); otherwise from 3 s of the phone lying still at the
   start of the capture. The report shows the noise before → after (e.g. `noise 4.8x lower`). A
   capture where the phone didn't move is refused ("Re-tune and move it") rather than giving a filter
   that would smear real motion.
 - **Only the capture counts:** the phone marks the 10 s window with the sensors' own timestamps,
   starting 0.5 s after the buzz, so the vibration never enters the analysed data.
+- **Axes that didn't move** (e.g. a robot driving straight never rotates about X) get the lightest filter
+  of the axes that did — never a 0.5 Hz filter with ~0.8 s of lag. A sensor where nothing moved at all
+  is left unfiltered until there is motion to tune from.
 - **It replaces saved filters** for those sensors (in `filters.json`). To keep hand-tuned filters,
   run without `--filter` — saved filters keep running either way.
 - **Fallbacks:** with an older phone app, or when a capture never arrives, is cancelled or fails (see

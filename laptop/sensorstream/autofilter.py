@@ -204,7 +204,7 @@ def noise_level(t, v) -> Optional[List[float]]:
     return out
 
 
-def motion_cutoff(f, psd, noise: float, fs: float):
+def motion_cutoff(f, psd, noise: float, fs: float, keep: float = CUTOFF_POWER):
     """Low-pass where the motion's power (above the measured noise) is 99 % accumulated; notches as
     suggest(). details["moved"] is False when nothing stands out of the noise (phone not moved)."""
     f = np.asarray(f, dtype=np.float64)
@@ -224,11 +224,25 @@ def motion_cutoff(f, psd, noise: float, fs: float):
     # Moved = the motion carries at least MOVE_POWER x the sensor's whole noise power; a stray bin
     # above 2x (noise alone, 1/f drift) is not motion. Real motion is ~10^3x above this.
     moved = total * float(f[1] - f[0]) >= MOVE_POWER * noise * fs / 2.0
-    cutoff = float(f[min(int(np.searchsorted(np.cumsum(excess), CUTOFF_POWER * total)), f.size - 1)]) if moved else 0.5
+    cutoff = float(f[min(int(np.searchsorted(np.cumsum(excess), keep * total)), f.size - 1)]) if moved else 0.5
     cutoff = min(max(cutoff, 0.5), math.floor(0.43 * fs * 100) / 100)
     notches, prom = pick_notches(f, p, sm, cutoff)
     return ({"lowpass": {"hz": round(cutoff, 2), "order": 4}, "notches": notches},
             {"floor": noise, "prominence": prom, "moved": moved})
+
+
+def fill_idle_axes(found):
+    """Per-axis (config, details) from motion_cutoff: an axis that did not move takes the lightest
+    (highest-cutoff) filter of the axes that did, never a 0.5 Hz / ~0.8 s-lag filter just because it
+    sat still. None when no axis moved (then nothing is tuned until there is motion)."""
+    moved = [(c, d) for c, d in found if d.get("moved")]
+    if not moved:
+        return None
+    light = max((c for c, _ in moved), key=lambda c: (c.get("lowpass") or {}).get("hz", 0.0))
+    return [(c, d) if d.get("moved") else ({"lowpass": dict(light["lowpass"]) if light.get("lowpass") else None,
+                                            "notches": [dict(n) for n in light.get("notches") or []]},
+                                           {**d, "idle": True})
+            for c, d in found]
 
 
 def gain_text(rec: dict) -> str:
@@ -380,11 +394,13 @@ class AutoFilter:
                  on_change: Optional[Callable[[], None]] = None, print_fn: Callable[[str], None] = print,
                  now: Callable[[], str] = now_iso, send_phone: Optional[Callable[[dict], None]] = None,
                  clock: Callable[[], float] = time.monotonic,
-                 still_noise: Optional[Callable[[str], Dict[int, List[float]]]] = None) -> None:
+                 still_noise: Optional[Callable[[str], Dict[int, List[float]]]] = None,
+                 keep: float = CUTOFF_POWER) -> None:
         self._bank, self._insights, self._reports = bank, insights, reports
         self._broadcast, self._on_change, self._print, self._now = broadcast, on_change, print_fn, now
         self._send_phone, self._clock = send_phone, clock
         self._still_noise = still_noise   # model -> {type: [noise PSD level x, y, z]} (Still reports)
+        self._keep = keep                 # --filter-keep: share of the motion's power the low-pass keeps
         self._model: Optional[str] = None
         self._last_rec: Optional[dict] = None
         self._runs = RunTracker()
@@ -573,9 +589,11 @@ class AutoFilter:
         if bank_fs and abs(bank_fs - fs) > RATE_AGREE * bank_fs:
             return f"the rate estimates disagree (spectrum {fs:.1f} Hz, filter {bank_fs:.1f} Hz)", None, False
         if noise:
-            found = [motion_cutoff(f, p, n, fs) for p, n in zip(per, noise)]
-            if require_motion and not any(d.get("moved") for _, d in found):
-                return "the phone didn't move during the capture - Re-tune and move it", None, False
+            filled = fill_idle_axes([motion_cutoff(f, p, n, fs, keep=self._keep) for p, n in zip(per, noise)])
+            if filled is None:  # nothing moved: a guided capture asks again; silent tuning waits for motion
+                return ("the phone didn't move during the capture - Re-tune and move it" if require_motion
+                        else "no motion yet to tune from"), None, False
+            found = filled
         else:
             found = [suggest_details(f, p, fs) for p in per]
         cfgs = [c for c, _ in found]

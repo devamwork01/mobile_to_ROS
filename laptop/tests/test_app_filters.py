@@ -147,3 +147,14 @@ def test_phone_sender_targets_the_current_phone():
         await asyncio.sleep(0)
     asyncio.run(go())
     assert ctl.sent == [(7, {"type": "tune_prompt", "id": 1})]
+
+
+
+def test_cli_filter_keep():
+    import pytest as _pytest
+    from sensorstream.app import build_parser
+    assert build_parser().parse_args([]).filter_keep == 0.99
+    assert build_parser().parse_args(["--filter-keep", "0.95"]).filter_keep == 0.95
+    for bad in ("0.3", "1.0", "x"):
+        with _pytest.raises(SystemExit):
+            build_parser().parse_args(["--filter-keep", bad])

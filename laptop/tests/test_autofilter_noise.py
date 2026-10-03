@@ -159,3 +159,25 @@ def test_real_motion_is_still_motion():
     f, fs, per = spectra(_times(1000), _rows(x), median=True)
     _, det = motion_cutoff(f, per[0], N, fs)
     assert det["moved"] is True
+
+
+
+def test_keep_setting_trades_motion_for_noise():
+    # --filter-keep: a lower share of the motion's power gives a lower cutoff (more noise removed)
+    x = band(1000, 20.0) + noise(1000)
+    f, fs, per = spectra(_times(1000), _rows(x), median=True)
+    hi, _ = motion_cutoff(f, per[0], N, fs, keep=0.99)
+    lo, _ = motion_cutoff(f, per[0], N, fs, keep=0.80)     # flat 20 Hz band: 80 % of its power ends near 16 Hz
+    assert 15.0 <= lo["lowpass"]["hz"] <= 17.0 and hi["lowpass"]["hz"] > 19.0
+
+
+def test_idle_axes_take_the_lightest_moved_filter():
+    # robot idle on two axes: never a 0.5 Hz (0.8 s lag) filter on an axis that simply didn't move
+    from sensorstream.autofilter import fill_idle_axes
+    moved = ({"lowpass": {"hz": 6.0, "order": 4}, "notches": []}, {"moved": True})
+    moved2 = ({"lowpass": {"hz": 9.0, "order": 4}, "notches": []}, {"moved": True})
+    idle = ({"lowpass": {"hz": 0.5, "order": 4}, "notches": []}, {"moved": False})
+    out = fill_idle_axes([moved, idle, moved2])
+    assert [c["lowpass"]["hz"] for c, _ in out] == [6.0, 9.0, 9.0]
+    assert out[1][1]["idle"] is True and out[0][1].get("idle") is not True
+    assert fill_idle_axes([idle, idle, idle]) is None      # nothing moved: no filter at all
