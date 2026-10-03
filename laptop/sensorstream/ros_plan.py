@@ -19,7 +19,7 @@ from .ros_mapping import ImuPairer, ros_targets
 STAMP_MODES = ("sensor", "receive")
 # Only continuously reporting sensors feed the clock: an on-change sensor (e.g. the step counter) is
 # stamped with when its value last changed, which can be an hour before it arrives.
-CLOCK_TYPES = frozenset({1, 2, 4, 11})
+CLOCK_TYPES = frozenset({1, 2, 4, 10, 11})
 UT_TO_T = 1e-6
 # ROS time and the monotonic clock are read one after the other per datagram (ROS first), so their
 # difference wobbles by ~1 us and a slow read only ever makes it smaller. It is held; it moves up when a
@@ -66,9 +66,9 @@ class RosPlanner:
         return diag(v) if v else list(UNKNOWN)
 
     def _sensor_cov(self, kind: str) -> Dict[str, List[float]]:
-        if kind == "imu_accel":
+        if kind in ("imu_accel", "imu_linacc"):
             return {"orientation": list(NOT_PROVIDED), "angular_velocity": list(NOT_PROVIDED),
-                    "linear_acceleration": self._measured(1)}
+                    "linear_acceleration": self._measured(1 if kind == "imu_accel" else 10)}
         if kind == "imu_gyro":
             return {"orientation": list(NOT_PROVIDED), "angular_velocity": self._measured(4),
                     "linear_acceleration": list(NOT_PROVIDED)}

@@ -15,8 +15,9 @@ from collections import deque
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
-ACCEL, MAG, GYRO, ROTVEC = 1, 2, 4, 11
+ACCEL, MAG, GYRO, LINACC, ROTVEC = 1, 2, 4, 10, 11
 _VECTOR = {ACCEL: ("/phone/accelerometer", "imu_accel"), GYRO: ("/phone/gyroscope", "imu_gyro"),
+           LINACC: ("/phone/linear_acceleration", "imu_linacc"),  # gravity removed (Android's fusion)
            MAG: ("/phone/magnetic_field", "mag")}
 
 Target = Tuple[str, str, List[float]]

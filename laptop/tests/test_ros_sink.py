@@ -209,3 +209,13 @@ def test_sensor_stamps_follow_phone_spacing(ros_env):
         rclpy.spin_once(node, timeout_sec=0.05)
     node.destroy_subscription(sub)
     assert [b - a for a, b in zip(stamps, stamps[1:])] == [2_000_000] * 4
+
+
+def test_linear_acceleration_is_published(ros_env):
+    sink, node = ros_env
+    dg = p.Datagram(device_id=1, records=[p.Record(10, 5, 0, 123, 3, [0.1, -0.2, 0.3])])
+    got = _collect(node, "/phone/linear_acceleration", Imu, lambda: sink.on_datagram(dg, ("x", 0), 0))
+    assert len(got) == 1
+    m = got[0]
+    assert (m.linear_acceleration.x, m.linear_acceleration.y, m.linear_acceleration.z) == pytest.approx((0.1, -0.2, 0.3))
+    assert m.orientation_covariance[0] == -1.0 and m.angular_velocity_covariance[0] == -1.0

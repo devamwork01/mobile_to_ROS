@@ -122,3 +122,10 @@ def test_find_noise_from_still_reports(tmp_path):
     n = ros_cov.find_noise(str(tmp_path), "SM-S938B")
     assert n[1] == pytest.approx([6.4e-7] * 3) and n[4] == pytest.approx([1e-8] * 3) and 2 not in n
     assert ros_cov.find_noise(str(tmp_path), "other") == {} and ros_cov.find_noise(str(tmp_path), "") == {}
+
+
+def test_linear_acceleration_covariance_from_still_reports(tmp_path):
+    report(tmp_path, "r1", "2026-10-02T10:00:00+00:00", [sensor(10, 0.1, 0.2, 0.3), sensor(1)])
+    cov = ros_cov.find_covariance(str(tmp_path), "SM-S938B")
+    assert cov[10]["var"] == pytest.approx([0.01, 0.04, 0.09])
+    assert "linear accel from r1" in ros_cov.describe(cov, "SM-S938B")

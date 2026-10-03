@@ -192,3 +192,16 @@ def test_a_real_backward_clock_step_is_followed_on_the_second_read():
     # Stamps never go backwards, so they creep (+1 ns) until real time catches up, then resume.
     sp = _spacings(RosPlanner(), [0, 0, -5 * MS, -5 * MS, -5 * MS, -5 * MS, -5 * MS])
     assert sp == [2 * MS, 2 * MS, 1, 1, MS - 2, 2 * MS]
+
+
+def test_linear_acceleration_topic_stamp_and_covariance():
+    pl = RosPlanner()
+    pl.set_covariance({10: {"var": [0.01, 0.04, 0.09], "report": "r"}, 1: {"var": [1.0, 1.0, 1.0], "report": "r"}})
+    out = pl.plan(dg(rec(10, 0, [0.1, 0.2, 0.3])), R0, None, NOW, R0)
+    [o] = out
+    assert o.topic == "/phone/linear_acceleration" and o.kind == "imu_linacc" and o.stamp_ns == NOW
+    assert o.cov["linear_acceleration"] == pytest.approx(ros_cov.diag([0.01, 0.04, 0.09]))
+    assert o.cov["angular_velocity"] == ros_cov.NOT_PROVIDED and o.cov["orientation"] == ros_cov.NOT_PROVIDED
+    # it feeds the phone-time clock like the other continuous sensors: 2 ms later on the phone, 7 ms late
+    b = pl.plan(dg(rec(10, 2, [0.1, 0.2, 0.3], seq=1)), R0 + 9 * MS, None, NOW + 11 * MS, R0 + 11 * MS)[0]
+    assert b.stamp_ns - o.stamp_ns == 2 * MS

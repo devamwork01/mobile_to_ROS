@@ -324,6 +324,7 @@ can re-filter differently later.
 
 **Where the filtered signal goes** (only for sensors with a filter; raw outputs never change):
 - **ROS 2**: `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered`,
+  `/phone/linear_acceleration_filtered`,
   `/phone/imu/data_raw_filtered`, `/phone/imu/data_filtered` (same message types as the raw topics, full rate).
 - **Recording CSV**: extra columns `f0,f1,f2` next to `v0..v5` (empty when no filter; the `.ssbin`
   stays raw, and samples recovered by backfill are never filtered).
@@ -356,11 +357,12 @@ With a ROS 2 environment sourced, `--ros` publishes decoded sensors as standard 
 | `/phone/accelerometer` | `sensor_msgs/Imu` | accelerometer |
 | `/phone/gyroscope` | `sensor_msgs/Imu` | gyroscope |
 | `/phone/magnetic_field` | `sensor_msgs/MagneticField` | magnetometer, in **tesla** as the message defines (Android reports microtesla; converted) |
+| `/phone/linear_acceleration` | `sensor_msgs/Imu` | linear acceleration — **gravity removed** (Android's sensor fusion); only `linear_acceleration` is set, orientation / angular velocity marked "not provided" |
 | `/phone/orientation` | `geometry_msgs/QuaternionStamped` | rotation vector |
 | `/phone/imu/data_raw` | `sensor_msgs/Imu` | gyroscope + accelerometer, no orientation (input for `imu_filter_madgwick`) |
 | `/phone/imu/data` | `sensor_msgs/Imu` | the same + orientation from the rotation vector (for `robot_localization`) |
 | `/phone/imu/data_raw_filtered`, `/phone/imu/data_filtered` | same as the raw topic | while the accelerometer or gyroscope has a filter (filtered value where there is one; orientation never filtered) |
-| `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered` | same as the raw topic | the filtered signal, only while that sensor has a filter (see Filtering) |
+| `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered`, `/phone/linear_acceleration_filtered` | same as the raw topic | the filtered signal, only while that sensor has a filter (see Filtering) |
 
 ```bash
 # with ROS 2 sourced:

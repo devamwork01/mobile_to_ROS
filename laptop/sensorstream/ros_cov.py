@@ -17,7 +17,7 @@ import math
 import os
 from typing import Dict, List, Optional
 
-COV_TYPES = {1: "accel", 4: "gyro", 2: "mag"}
+COV_TYPES = {1: "accel", 4: "gyro", 2: "mag", 10: "linear accel"}
 G = 9.81
 UNKNOWN = [0.0] * 9
 NOT_PROVIDED = [-1.0] + [0.0] * 8
@@ -122,5 +122,5 @@ def orientation_cov(accel_var: Optional[List[float]], heading_acc: Optional[floa
 def describe(cov: Dict[int, dict], model: str) -> str:
     if not cov:
         return f"ROS covariance: none for {model} - run a Still test run to fill it"
-    parts = [f"{COV_TYPES[t]} from {cov[t]['report']}" for t in (1, 4, 2) if t in cov]
+    parts = [f"{COV_TYPES[t]} from {cov[t]['report']}" for t in (1, 4, 2, 10) if t in cov]
     return f"ROS covariance: {model} - " + ", ".join(parts)
