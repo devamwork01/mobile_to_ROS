@@ -145,3 +145,9 @@ def test_non_finite_samples_are_not_used():
     s = pr.on_record(r(4, 2, [0.0] * 3))[0]
     assert s.accel == [0.0, 0.0, 9.8]
     assert pr.on_record(r(4, 3, [math.inf, 0.0, 0.0])) == []
+
+
+def test_linear_acceleration_has_its_own_topic():
+    assert ros_targets(rec(10, [0.1, 0.2, 0.3])) == [("/phone/linear_acceleration", "imu_linacc", [0.1, 0.2, 0.3])]
+    out = ros_targets(rec(10, [0.1, 0.2, 0.3]), [0.05, 0.1, 0.2])
+    assert out[1] == ("/phone/linear_acceleration_filtered", "imu_linacc", [0.05, 0.1, 0.2])

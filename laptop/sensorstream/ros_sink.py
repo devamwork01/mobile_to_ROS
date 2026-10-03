@@ -40,6 +40,7 @@ class Ros2Sink(OutputSink):
             "/phone/orientation": QuaternionStamped,
             "/phone/accelerometer_filtered": Imu, "/phone/gyroscope_filtered": Imu,
             "/phone/magnetic_field_filtered": MagneticField,
+            "/phone/linear_acceleration": Imu, "/phone/linear_acceleration_filtered": Imu,
             **{t: Imu for t in IMU_TOPICS},
         }
         self._pubs = {t: self._node.create_publisher(m, t, qos_profile_sensor_data) for t, m in types.items()}
@@ -69,7 +70,7 @@ class Ros2Sink(OutputSink):
                 msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z = s.accel
                 if s.quat is not None:
                     msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w = s.quat
-            elif o.kind == "imu_accel":
+            elif o.kind in ("imu_accel", "imu_linacc"):
                 msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z = o.vals
             else:
                 msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z = o.vals
