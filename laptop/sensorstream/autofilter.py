@@ -116,12 +116,39 @@ def capture_problem(t) -> Optional[str]:
     return None
 
 
-def spectra(t, v):
-    """(f, fs, [psd_x, psd_y, psd_z]) of a capture: the same Welch PSDs the live suggestion uses."""
+LN2 = math.log(2.0)
+
+
+def _welch_median(x, fs: float):
+    """Welch PSD (Hann, 50 % overlap) averaged with the median over segments, so a tap that lands in
+    a couple of segments barely counts; / ln 2 keeps it unbiased for noise (median of an exponential
+    is ln 2 x its mean). With fewer than 3 segments the mean is used."""
+    x = np.asarray(x, dtype=np.float64)
+    x = x[np.isfinite(x)]
+    n = x.size
+    if n < 16 or not fs or fs <= 0:
+        return np.array([]), np.array([])
+    seg = min(n, 2 ** int(math.floor(math.log2(max(fs * 4.0, 16.0)))))
+    step = max(1, seg // 2)
+    win = np.hanning(seg)
+    scale = fs * float((win ** 2).sum())
+    rows = np.array([np.abs(np.fft.rfft((x[s:s + seg] - x[s:s + seg].mean()) * win)) ** 2 / scale
+                     for s in range(0, n - seg + 1, step)])
+    psd = np.median(rows, axis=0) / LN2 if len(rows) >= 3 else rows.mean(axis=0)
+    if seg % 2 == 0:
+        psd[1:-1] *= 2.0
+    else:
+        psd[1:] *= 2.0
+    return np.fft.rfftfreq(seg, 1.0 / fs), psd
+
+
+def spectra(t, v, median: bool = False):
+    """(f, fs, [psd_x, psd_y, psd_z]) of a capture: the live suggestion's Welch PSDs, or (median=True)
+    median-averaged ones that shrug off brief handling bursts."""
     fs = an.rate_stats(t)["rate_hz"]
     f, per = None, []
     for i in range(3):
-        ff, pp = an.welch_psd(np.asarray(v)[:, i], fs)
+        ff, pp = (_welch_median if median else an.welch_psd)(np.asarray(v)[:, i], fs)
         f = ff
         per.append(pp)
     return f, fs, per
@@ -129,6 +156,7 @@ def spectra(t, v):
 
 STILL_MIN_S = 2.0       # a still window needs this much clean data to measure the noise
 CUTOFF_POWER = 0.99     # the low-pass keeps this share of the motion's power above the noise
+MOVE_POWER = 3.0        # motion power (above the noise) must reach this x the noise power to count
 
 
 def still_problem(t) -> Optional[str]:
@@ -140,17 +168,40 @@ def still_problem(t) -> Optional[str]:
     return None
 
 
+NOISE_BLOCK_S = 0.5     # the still window is measured in blocks; the median block ignores a bump
+
+
 def noise_level(t, v) -> Optional[List[float]]:
-    """Per-axis noise PSD level (units^2/Hz) from a still window, or None if the window is unusable."""
+    """Per-axis noise PSD level (units^2/Hz) from a still window, or None if the window is unusable.
+
+    The window is cut into ~0.5 s blocks (at least 16 samples); each block's mean PSD over
+    [1 Hz, 0.4 fs] is a noise estimate, and the median block wins - the phone being set down, or a
+    knock, spoils one or two blocks, not the answer."""
     if still_problem(t) is not None or np.asarray(v).shape[1] < 3:
         return None
-    f, fs, per = spectra(t, v)
-    band = (np.asarray(f) >= 1.0) & (np.asarray(f) <= 0.4 * fs)
-    if not band.any():
+    t = np.asarray(t, dtype=np.int64)
+    v = np.asarray(v, dtype=np.float64)
+    fs = an.rate_stats(t)["rate_hz"]
+    if not fs:
         return None
-    # Mean, not median: a 2-3 s window is ~1 Welch segment, whose median under-reads white noise by
-    # ~30 % (ln 2); a still phone has no lines for the mean to be pulled up by.
-    return [float(np.mean(np.asarray(p)[band])) for p in per]
+    blk = max(16, int(round(NOISE_BLOCK_S * fs)))
+    if t.size < 3 * blk:
+        return None
+    out = []
+    for i in range(3):
+        levels = []
+        for s0 in range(0, t.size - blk + 1, blk):
+            f, p = an.welch_psd(v[s0:s0 + blk, i], fs)
+            band = (f >= 1.0) & (f <= 0.4 * fs)
+            if band.any():
+                levels.append(float(np.mean(p[band])))
+        if len(levels) < 3:
+            return None
+        lv = float(np.median(levels))
+        if not math.isfinite(lv) or lv <= 0.0:
+            return None  # a constant (quantised) reading says nothing about the noise
+        out.append(lv)
+    return out
 
 
 def motion_cutoff(f, psd, noise: float, fs: float):
@@ -164,9 +215,15 @@ def motion_cutoff(f, psd, noise: float, fs: float):
         cfg, det = suggest_details(f, p, fs)
         return cfg, {**det, "moved": True}
     sm = _smooth(f, p)
-    excess = np.where(sm > 2.0 * noise, sm - noise, 0.0)
+    # Handling bursts (taps, grip) add a flat floor across the band; measure the motion above
+    # whichever is higher - the sensor noise or that floor - so bursts can't drag the cutoff up.
+    hi = f >= 0.7 * (0.45 * fs)
+    floor = max(noise, float(np.median(p[hi])) if hi.any() else noise)
+    excess = np.where(sm > 2.0 * floor, sm - floor, 0.0)
     total = float(excess.sum())
-    moved = total > 0.0
+    # Moved = the motion carries at least MOVE_POWER x the sensor's whole noise power; a stray bin
+    # above 2x (noise alone, 1/f drift) is not motion. Real motion is ~10^3x above this.
+    moved = total * float(f[1] - f[0]) >= MOVE_POWER * noise * fs / 2.0
     cutoff = float(f[min(int(np.searchsorted(np.cumsum(excess), CUTOFF_POWER * total)), f.size - 1)]) if moved else 0.5
     cutoff = min(max(cutoff, 0.5), math.floor(0.43 * fs * 100) / 100)
     notches, prom = pick_notches(f, p, sm, cutoff)
@@ -481,7 +538,7 @@ class AutoFilter:
                     if why is None and v.shape[1] < 3:
                         why = "not a 3-axis sensor"
                     if why is None:
-                        f, fs, per = spectra(t, v)
+                        f, fs, per = spectra(t, v, median=noise is not None)
                         why, cfgs, _ = self._apply(h, ty, f, fs, per, noise=noise, source=source, require_motion=True)
             except Exception as exc:  # never let one sensor break the answer (or the phone's link)
                 why = f"could not be tuned ({exc.__class__.__name__})"

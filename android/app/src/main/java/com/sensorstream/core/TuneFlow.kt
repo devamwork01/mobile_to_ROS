@@ -47,7 +47,7 @@ class TuneFlow(val prompt: TunePrompt, private val startMs: Long) {
     private val timeline: List<Pair<Long, TuneAction>> = buildList {
         if (prompt.attention) add(0L to TuneAction.Vibrate(Buzz.ATTENTION))
         if (prompt.stillMs > 0) {
-            add(prompt.leadMs to TuneAction.MarkStillStart)
+            add(prompt.leadMs + SETTLE_MS to TuneAction.MarkStillStart)  // the phone was just set down
             add(stillEnd to TuneAction.MarkStillEnd)
         }
         add(stillEnd to TuneAction.Vibrate(Buzz.START))

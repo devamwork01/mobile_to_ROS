@@ -49,7 +49,8 @@ class TuneFlowTest {
     @Test fun `still phase - marks, then the buzz, then the motion capture`() {
         val p = TunePrompt(6, "connect", false, 3000, 10000, sensors, stillMs = 3000)
         val f = TuneFlow(p, 0)
-        assertEquals(listOf<TuneAction>(TuneAction.MarkStillStart), f.step(3000))
+        assertEquals(emptyList<TuneAction>(), f.step(3000))          // settling: the phone was just put down
+        assertEquals(listOf<TuneAction>(TuneAction.MarkStillStart), f.step(3500))
         assertEquals(listOf(TuneAction.MarkStillEnd, TuneAction.Vibrate(Buzz.START)), f.step(6000))
         assertEquals(listOf<TuneAction>(TuneAction.MarkStart), f.step(6500))
         assertEquals(listOf(TuneAction.MarkEnd, TuneAction.Vibrate(Buzz.DONE)), f.step(16500))
