@@ -7,6 +7,7 @@ import com.sensorstream.core.TuneFlow
 import com.sensorstream.core.TuneMessages
 import com.sensorstream.core.TunePhase
 import com.sensorstream.core.TunePrompt
+import com.sensorstream.core.TuneWindow
 import com.sensorstream.core.filter.FilterSettings
 import android.content.Context
 import android.hardware.SensorManager
@@ -92,6 +93,8 @@ class StreamEngine(context: Context) {
     @Volatile private var tuneFlow: TuneFlow? = null
     private var tuneJob: Job? = null
     private val tuneFrom = ConcurrentHashMap<Int, Long>()
+    private val tuneStillFrom = ConcurrentHashMap<Int, Long>()
+    private val tuneStillTo = ConcurrentHashMap<Int, Long>()
 
     fun latestFor(handle: Int): SensorSample? = latest[handle]
     fun hzFor(handle: Int): Float = hz[handle] ?: 0f
@@ -396,14 +399,20 @@ class StreamEngine(context: Context) {
         val flow = TuneFlow(p, SystemClock.elapsedRealtime())
         tuneFlow = flow
         tuneFrom.clear()
+        tuneStillFrom.clear()
+        tuneStillTo.clear()
         tuneJob = scope?.launch {
             while (isActive) {
                 val now = SystemClock.elapsedRealtime()
                 for (a in flow.step(now)) when (a) {
                     is TuneAction.Vibrate -> haptics.buzz(a.buzz)
+                    TuneAction.MarkStillStart -> p.sensors.forEach { tuneStillFrom[it.handle] = lastTs[it.handle] ?: 0L }
+                    TuneAction.MarkStillEnd -> p.sensors.forEach { tuneStillTo[it.handle] = lastTs[it.handle] ?: 0L }
                     TuneAction.MarkStart -> p.sensors.forEach { tuneFrom[it.handle] = lastTs[it.handle] ?: 0L }
-                    TuneAction.MarkEnd -> control.sendJson(TuneMessages.window(p.id,
-                        p.sensors.map { Triple(it.handle, tuneFrom[it.handle] ?: 0L, lastTs[it.handle] ?: 0L) }))
+                    TuneAction.MarkEnd -> control.sendJson(TuneMessages.window(p.id, p.sensors.map {
+                        TuneWindow(it.handle, tuneFrom[it.handle] ?: 0L, lastTs[it.handle] ?: 0L,
+                            tuneStillFrom[it.handle], tuneStillTo[it.handle])
+                    }))
                 }
                 if (tuneFlow === flow) _tune.value = TuneUi(p, flow.phase(now))
                 if (flow.finished) break

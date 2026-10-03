@@ -35,11 +35,16 @@ fun TuneCard(vm: StreamViewModel, compact: Boolean, modifier: Modifier = Modifie
             Text(title, color = c.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             when (val ph = t.phase) {
                 is TunePhase.Lead -> {
-                    Text("Pick up the phone and move it the way you'll use it", color = c.fg, fontSize = if (compact) 13.sp else 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (t.prompt.stillMs > 0) "Put the phone down on a table and don't touch it"
+                         else "Pick up the phone and move it the way you'll use it", color = c.fg, fontSize = if (compact) 13.sp else 16.sp, fontWeight = FontWeight.SemiBold)
                     Text("Starting in ${ph.secondsLeft}…", style = SsType.mono, color = c.muted, fontSize = if (compact) 13.sp else 22.sp)
                 }
+                is TunePhase.Still -> {
+                    Text("Keep it still — measuring the sensor noise", color = c.fg, fontSize = if (compact) 13.sp else 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text("${ph.secondsLeft} s", style = SsType.mono, color = c.fg, fontSize = if (compact) 16.sp else 40.sp, fontWeight = FontWeight.Bold)
+                }
                 is TunePhase.Capture -> {
-                    Text("Keep moving the phone", color = c.fg, fontSize = if (compact) 13.sp else 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (t.prompt.stillMs > 0) "Now pick it up and move it the way you'll use it" else "Keep moving the phone", color = c.fg, fontSize = if (compact) 13.sp else 16.sp, fontWeight = FontWeight.SemiBold)
                     Text("${ph.secondsLeft} s", style = SsType.mono, color = c.fg, fontSize = if (compact) 16.sp else 40.sp, fontWeight = FontWeight.Bold)
                 }
                 TunePhase.Waiting -> {

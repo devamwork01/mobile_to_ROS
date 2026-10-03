@@ -22,6 +22,7 @@ object TuneMessages {
             leadMs = (m.optDouble("lead_s", 3.0) * 1000).toLong(),
             captureMs = (m.optDouble("capture_s", 10.0) * 1000).toLong(),
             sensors = sensors,
+            stillMs = (m.optDouble("still_s", 0.0) * 1000).toLong(),
         )
     }
 
@@ -41,9 +42,13 @@ object TuneMessages {
         return m.optInt("id") to rs
     }
 
-    fun window(id: Int, windows: List<Triple<Int, Long, Long>>): JSONObject {
+    fun window(id: Int, windows: List<TuneWindow>): JSONObject {
         val arr = JSONArray()
-        for ((h, from, to) in windows) arr.put(JSONObject().put("handle", h).put("from_ns", from).put("to_ns", to))
+        for (w in windows) {
+            val o = JSONObject().put("handle", w.handle).put("from_ns", w.fromNs).put("to_ns", w.toNs)
+            if (w.stillFromNs != null && w.stillToNs != null) o.put("still_from_ns", w.stillFromNs).put("still_to_ns", w.stillToNs)
+            arr.put(o)
+        }
         return JSONObject().put("type", "tune_window").put("id", id).put("windows", arr)
     }
 

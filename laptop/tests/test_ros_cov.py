@@ -111,3 +111,14 @@ def test_odd_report_shapes_are_skipped(tmp_path):
         (tmp_path / f"odd{i}.report.json").write_text(json.dumps({"id": f"odd{i}", "preset": "still", **r}), encoding="utf-8")
     report(tmp_path, "ok", "2026-10-02T10:00:00+00:00", [sensor(1)])
     assert ros_cov.find_covariance(str(tmp_path), "SM-S938B")[1]["report"] == "ok"
+
+
+def test_find_noise_from_still_reports(tmp_path):
+    def s(type_, nd, samples=1000):
+        return {"type": type_, "samples": samples, "axes": {a: {"std": 0.1, "noise_density": nd} for a in "xyz"}}
+    report(tmp_path, "old", "2026-10-01T10:00:00+00:00", [s(1, 9e-3), s(4, 1e-4)])
+    report(tmp_path, "new", "2026-10-02T10:00:00+00:00", [s(1, 8e-4)])
+    report(tmp_path, "bad", "2026-10-03T10:00:00+00:00", [{"type": 2, "axes": {"x": {"noise_density": None}}}])
+    n = ros_cov.find_noise(str(tmp_path), "SM-S938B")
+    assert n[1] == pytest.approx([6.4e-7] * 3) and n[4] == pytest.approx([1e-8] * 3) and 2 not in n
+    assert ros_cov.find_noise(str(tmp_path), "other") == {} and ros_cov.find_noise(str(tmp_path), "") == {}

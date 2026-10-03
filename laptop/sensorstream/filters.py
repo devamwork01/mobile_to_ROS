@@ -188,6 +188,22 @@ def _smooth(f: np.ndarray, p: np.ndarray) -> np.ndarray:
     return out
 
 
+def pick_notches(f: np.ndarray, p: np.ndarray, sm: np.ndarray, cutoff: float):
+    """Narrow lines (> 10x the smoothed PSD) below the cutoff, >= 1 Hz apart, strongest first, up to
+    MAX_NOTCHES: ([{"hz", "q"}], [prominence]) sorted by frequency."""
+    picked: List[Tuple[dict, float]] = []
+    ratio = p / np.maximum(sm, 1e-300)
+    cand = [i for i in range(1, f.size - 1)
+            if ratio[i] > 10.0 and p[i] >= p[i - 1] and p[i] >= p[i + 1] and 0.5 <= f[i] < cutoff]
+    for i in sorted(cand, key=lambda i: -ratio[i]):
+        if all(abs(f[i] - nt["hz"]) >= 1.0 for nt, _ in picked):
+            picked.append(({"hz": round(float(f[i]), 2), "q": 10.0}, float(ratio[i])))
+        if len(picked) == MAX_NOTCHES:
+            break
+    picked.sort(key=lambda nr: nr[0]["hz"])
+    return [nt for nt, _ in picked], [r for _, r in picked]
+
+
 def suggest_details(f, psd, fs: float) -> Tuple[dict, dict]:
     """suggest()'s configuration plus what it saw: the noise floor (PSD units, the median PSD in the
     top 30 % of the band) and each chosen notch's prominence (peak PSD / smoothed PSD), in the
@@ -207,18 +223,9 @@ def suggest_details(f, psd, fs: float) -> Tuple[dict, dict]:
     # Stay a little under the 0.45*fs limit (and round down): the server's rate estimate can differ
     # slightly from the one this spectrum came from, and the suggestion must always be applicable.
     cutoff = min(max(cutoff, 0.5), math.floor(0.43 * fs * 100) / 100)
-    picked: List[Tuple[dict, float]] = []
-    ratio = p / np.maximum(sm, 1e-300)
-    cand = [i for i in range(1, f.size - 1)
-            if ratio[i] > 10.0 and p[i] >= p[i - 1] and p[i] >= p[i + 1] and 0.5 <= f[i] < cutoff]
-    for i in sorted(cand, key=lambda i: -ratio[i]):
-        if all(abs(f[i] - nt["hz"]) >= 1.0 for nt, _ in picked):
-            picked.append(({"hz": round(float(f[i]), 2), "q": 10.0}, float(ratio[i])))
-        if len(picked) == MAX_NOTCHES:
-            break
-    picked.sort(key=lambda nr: nr[0]["hz"])
-    return ({"lowpass": {"hz": cutoff, "order": 4}, "notches": [nt for nt, _ in picked]},
-            {"floor": floor, "prominence": [r for _, r in picked]})
+    notches, prom = pick_notches(f, p, sm, cutoff)
+    return ({"lowpass": {"hz": cutoff, "order": 4}, "notches": notches},
+            {"floor": floor, "prominence": prom})
 
 
 def suggest(f, psd, fs: float) -> dict:

@@ -45,4 +45,18 @@ class TuneFlowTest {
         assertTrue(Buzz.DONE.pattern.contentEquals(longArrayOf(0, 150, 150, 150)))
         assertTrue(Buzz.ATTENTION.pattern.contentEquals(longArrayOf(0, 120, 120, 120, 120, 120)))
     }
+
+    @Test fun `still phase - marks, then the buzz, then the motion capture`() {
+        val p = TunePrompt(6, "connect", false, 3000, 10000, sensors, stillMs = 3000)
+        val f = TuneFlow(p, 0)
+        assertEquals(emptyList<TuneAction>(), f.step(3000))          // settling: the phone was just put down
+        assertEquals(listOf<TuneAction>(TuneAction.MarkStillStart), f.step(3500))
+        assertEquals(listOf(TuneAction.MarkStillEnd, TuneAction.Vibrate(Buzz.START)), f.step(6000))
+        assertEquals(listOf<TuneAction>(TuneAction.MarkStart), f.step(6500))
+        assertEquals(listOf(TuneAction.MarkEnd, TuneAction.Vibrate(Buzz.DONE)), f.step(16500))
+        assertEquals(TunePhase.Lead(3), f.phase(0))
+        assertEquals(TunePhase.Still(2), f.phase(4200))
+        assertEquals(TunePhase.Capture(10), f.phase(6200))
+        assertEquals(TunePhase.Waiting, f.phase(16600))
+    }
 }

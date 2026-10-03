@@ -68,7 +68,9 @@ class StreamingService : Service() {
                 tuneWatch = MainScope().launch {
                     engine.tune.collect { ui ->
                         val text = when (val ph = ui?.phase) {
-                            is TunePhase.Lead -> "Tuning filters: pick up the phone and move it (${ph.secondsLeft})"
+                            is TunePhase.Lead -> if (ui.prompt.stillMs > 0) "Tuning filters: put the phone down (${ph.secondsLeft})"
+                                                 else "Tuning filters: pick up the phone and move it (${ph.secondsLeft})"
+                            is TunePhase.Still -> "Tuning filters: leave the phone still - ${ph.secondsLeft} s"
                             is TunePhase.Capture -> "Tuning filters: keep moving the phone - ${ph.secondsLeft} s"
                             TunePhase.Waiting -> "Tuning filters: done - you can put the phone down"
                             else -> "→ $notifHost:$notifPort"

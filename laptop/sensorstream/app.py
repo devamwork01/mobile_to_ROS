@@ -333,7 +333,9 @@ async def run(args: argparse.Namespace) -> None:
 
     if args.filter:
         autofilter = AutoFilter(filterbank, insights, filter_reports, dash.broadcast, push_filters,
-                                send_phone=make_phone_sender(control, phone_now))
+                                send_phone=make_phone_sender(control, phone_now),
+                                still_noise=lambda model: ros_cov.find_noise(args.log_dir, model),
+                                keep=args.filter_keep)
     dash.control_handler = control.handle
 
     def record_meta() -> Optional[dict]:
@@ -464,7 +466,8 @@ async def run(args: argparse.Namespace) -> None:
               "/phone/gyroscope, /phone/magnetic_field, /phone/orientation")
         print(f"               stamps: {args.ros_stamp} time")
     if args.filter:
-        print(f"   FILTER    : per-axis filters for accel/gyro/mag 10 s after each starts  (report: {report_path(args)})")
+        print(f"   FILTER    : guided per-axis filters for accel/gyro/mag, keeping {args.filter_keep:.0%} of the motion"
+              f"  (report: {report_path(args)})")
     if args.selftest:
         print("   MODE      : SELF-TEST (synthetic accelerometer)")
     if args.record:
@@ -570,6 +573,16 @@ def report_path(args) -> str:
     return os.path.join(os.path.dirname(args.filters_file) or ".", "filter_report.json")
 
 
+def _keep_share(text: str) -> float:
+    try:
+        v = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {text!r}")
+    if not 0.5 <= v <= 0.999:
+        raise argparse.ArgumentTypeError("must be between 0.5 and 0.999 (e.g. 0.95)")
+    return v
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Laptop-side sensor telemetry receiver + dashboard")
     ap.add_argument("--udp-host", default="0.0.0.0", help="telemetry bind address")
@@ -586,6 +599,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--filter", action="store_true",
                     help="auto per-axis filters for the accelerometer, gyroscope and magnetometer, tuned from "
                          "each axis's spectrum 10 s after each starts streaming (overwrites their saved filters)")
+    ap.add_argument("--filter-keep", type=_keep_share, default=0.99,
+                    help="--filter: share of the motion's power the low-pass keeps (0.5-0.999, default 0.99); "
+                         "lower = lower cutoffs, more noise removed, the fastest motion smoothed")
     ap.add_argument("--filter-report", default=None,
                     help="where --filter writes its per-axis spectrum findings (default: filter_report.json "
                          "next to --filters-file)")

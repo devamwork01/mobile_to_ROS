@@ -13,6 +13,9 @@ class TuneMessagesTest {
             "sensors":[{"handle":4,"name":"Mag"}]}""")
         val p = TuneMessages.parsePrompt(m)!!
         assertEquals(TunePrompt(4, "new_sensor", true, 3000, 10000, listOf(TuneSensor(4, "Mag"))), p)
+        assertEquals(0L, p.stillMs)
+        val q = TuneMessages.parsePrompt(JSONObject("""{"type":"tune_prompt","id":5,"still_s":3,"sensors":[{"handle":0,"name":"Acc"}]}"""))!!
+        assertEquals(3000L, q.stillMs)
     }
 
     @Test fun `rejects prompts it cannot run`() {
@@ -33,13 +36,16 @@ class TuneMessagesTest {
     }
 
     @Test fun `builds window, cancelled and request messages`() {
-        val w = TuneMessages.window(4, listOf(Triple(0, 10L, 20L), Triple(2, 11L, 21L)))
+        val w = TuneMessages.window(4, listOf(TuneWindow(0, 10L, 20L, 1L, 5L), TuneWindow(2, 11L, 21L)))
         assertEquals("tune_window", w.getString("type"))
         assertEquals(4, w.getInt("id"))
         val arr: JSONArray = w.getJSONArray("windows")
         assertEquals(0, arr.getJSONObject(0).getInt("handle"))
         assertEquals(10L, arr.getJSONObject(0).getLong("from_ns"))
         assertEquals(21L, arr.getJSONObject(1).getLong("to_ns"))
+        assertEquals(1L, arr.getJSONObject(0).getLong("still_from_ns"))
+        assertEquals(5L, arr.getJSONObject(0).getLong("still_to_ns"))
+        assertTrue(!arr.getJSONObject(1).has("still_from_ns") && !arr.getJSONObject(1).has("still_to_ns"))
         val c = TuneMessages.cancelled(4)
         assertTrue(c.getBoolean("cancelled") && c.getInt("id") == 4 && c.getString("type") == "tune_window")
         assertEquals("tune_request", TuneMessages.request().getString("type"))
