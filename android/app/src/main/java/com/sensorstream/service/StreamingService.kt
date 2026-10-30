@@ -24,7 +24,7 @@ import com.sensorstream.stream.StreamHolder
 /**
  * Foreground service that owns the streaming lifecycle. Started via [start] with
  * the connection target + selected sensors; promotes itself to a foreground
- * (dataSync) service with an ongoing notification so the OS keeps the process
+ * (connectedDevice) service with an ongoing notification so the OS keeps the process
  * alive while streaming, then drives the singleton [StreamHolder] engine.
  */
 class StreamingService : Service() {
@@ -92,9 +92,10 @@ class StreamingService : Service() {
     }
 
     /**
-     * Android 15+: a dataSync foreground service may run 6 hours per 24 h. At the limit the system
-     * calls this and kills the app unless the service stops within a few seconds, so stop cleanly
-     * (flushing the on-phone recording) and say why instead of crashing.
+     * Android 15+ calls this when a time-limited foreground service type reaches its limit, and kills
+     * the app unless the service stops within a few seconds. connectedDevice has no limit today (the
+     * reason for that type: dataSync gets 6 h a day), so this is a safety net: stop cleanly (flushing
+     * the on-phone recording) and say why instead of crashing.
      */
     override fun onTimeout(startId: Int, fgsType: Int) {
         tuneWatch?.cancel()
@@ -105,9 +106,9 @@ class StreamingService : Service() {
             TIMEOUT_NOTIF_ID,
             NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Streaming stopped")
-                .setContentText("Android limits background streaming to 6 hours a day. Open the app to start again.")
+                .setContentText("Android stopped background streaming (a system time limit). Open the app to start again.")
                 .setStyle(NotificationCompat.BigTextStyle()
-                    .bigText("Android limits background streaming to 6 hours a day. Open the app to start again."))
+                    .bigText("Android stopped background streaming (a system time limit). Open the app to start again."))
                 .setSmallIcon(android.R.drawable.stat_sys_upload)
                 .setContentIntent(openAppIntent())
                 .setAutoCancel(true)
@@ -166,7 +167,7 @@ class StreamingService : Service() {
         notifPort = port
         val notification = buildNotification("→ $host:$port")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            startForeground(NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         } else {
             startForeground(NOTIF_ID, notification)
         }

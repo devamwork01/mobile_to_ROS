@@ -1,5 +1,6 @@
 package com.sensorstream.ui.screens
 
+import com.sensorstream.core.ConnectionErrors
 import com.sensorstream.core.requestedHz
 import android.content.res.Configuration
 import android.hardware.Sensor
@@ -118,7 +119,7 @@ fun HomeScreen(vm: StreamViewModel, nav: AppNav) {
                         style = SsType.mono, color = c.fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                     )
                 }
-                state.error?.let { Text(it, color = c.err, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp)) }
+                state.error?.let { Text(ConnectionErrors.friendly(it, serverName ?: "${sel.host}:${sel.port}", sel.port), color = c.err, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp)) }
                 Text(
                     when {
                         state.connected || state.streaming -> "Manage connection ›"

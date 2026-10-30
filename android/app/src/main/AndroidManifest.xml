@@ -6,7 +6,10 @@
     <!-- Required to request sensor rates above 200 Hz on Android 12+ (normal permission). -->
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- connectedDevice: streaming to the laptop is a link to an external device over the network, with
+         no daily time limit (dataSync gets 6 h a day on Android 15+). Android 14+ also requires one
+         of a set of permissions at start; CHANGE_WIFI_MULTICAST_STATE (below, for discovery) is one. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Discovery: MulticastLock for mDNS/broadcast reception. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
@@ -52,6 +55,6 @@
         <service
             android:name=".service.StreamingService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="connectedDevice" />
     </application>
 </manifest>
