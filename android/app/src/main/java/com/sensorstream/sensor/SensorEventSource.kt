@@ -67,8 +67,10 @@ class SensorEventSource(private val sm: SensorManager) : SensorEventListener {
                 activeRegs.remove(handle)
                 if (nr == null) {
                     handleBySensor.remove(reg.sensor)
-                    seqByHandle.remove(handle)
                     accuracyByHandle.remove(handle)
+                    // seqByHandle is kept: a sensor toggled off and on again continues its sequence for
+                    // the rest of the session. Restarting at 0 would reuse seqs the laptop's recording
+                    // and the on-phone backfill ring already hold for different samples.
                 }
             }
         }
