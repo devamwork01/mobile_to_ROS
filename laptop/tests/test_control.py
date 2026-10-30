@@ -97,3 +97,39 @@ def test_control_handshake_and_dashboard_mirroring():
     assert r["session_present"] is True
 
     assert r["disconnected"]["device_id"] == r["ack"]["device_id"]
+
+
+def _run_phone(on_event, messages):
+    """Hello, then `messages`, then a heartbeat: returns (heartbeat reply, session still present)."""
+    async def run():
+        dash = DashboardServer(WEB_DIR, "127.0.0.1", 0, "127.0.0.1", 0)
+        await dash.start()
+        control = ControlServer(udp_port=5005, on_event=on_event)
+        dash.control_handler = control.handle
+        try:
+            async with websockets.connect(f"ws://127.0.0.1:{dash.ws_port}/phone") as phone:
+                await phone.send(json.dumps({"type": "hello", "model": "M", "sensors": []}))
+                device_id = json.loads(await asyncio.wait_for(phone.recv(), timeout=3))["device_id"]
+                for m in messages:
+                    await phone.send(json.dumps(m))
+                await phone.send(json.dumps({"type": "heartbeat", "seq": 1}))
+                hb = json.loads(await asyncio.wait_for(phone.recv(), timeout=3))
+                return hb, device_id in control.sessions
+        finally:
+            await dash.stop()
+    return asyncio.run(run())
+
+
+def test_a_malformed_message_does_not_drop_the_phone(capsys):
+    hb, present = _run_phone(lambda ev: None, [{"type": "active", "handles": ["not-a-handle"]}])
+    assert hb["type"] == "heartbeat_ack" and present
+    assert "active" in capsys.readouterr().out          # logged, not silently swallowed
+
+
+def test_a_failing_event_handler_does_not_drop_the_phone(capsys):
+    def on_event(ev):
+        if ev["kind"] == "phone_stats":
+            raise RuntimeError("dashboard bug")
+    hb, present = _run_phone(on_event, [{"type": "stats", "sent": 1}])
+    assert hb["type"] == "heartbeat_ack" and present
+    assert "dashboard bug" in capsys.readouterr().out

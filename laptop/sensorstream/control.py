@@ -26,6 +26,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Dict, List, Optional
 
+from websockets.exceptions import ConnectionClosed
+
 from . import protocol as p
 
 
@@ -93,49 +95,57 @@ class ControlServer:
                     continue
                 if not isinstance(msg, dict):
                     continue
-                mtype = msg.get("type")
-
-                if mtype == p.MSG_HELLO:
-                    session = await self._on_hello(ws, addr, msg)
-                elif mtype == p.MSG_HEARTBEAT:
-                    if session:
-                        session.last_heartbeat = time.monotonic()
-                    await _send(ws, {"type": p.MSG_HEARTBEAT_ACK, "seq": msg.get("seq"), "t_server_ns": time.time_ns()})
-                elif mtype == p.MSG_CLOCK_PING:
-                    # NTP-like: echo t0, add server receive/transmit stamp.
-                    await _send(ws, {"type": p.MSG_CLOCK_PONG, "t0": msg.get("t0"), "t_server_ns": time.time_ns()})
-                elif mtype == p.MSG_STATS:
-                    if session:
-                        session.last_stats = msg
-                        self._on_event({"kind": "phone_stats", "device_id": session.device_id, "stats": msg})
-                elif mtype == p.MSG_ACTIVE:
-                    if session:
-                        handles = [int(h) for h in (msg.get("handles") or [])]
-                        session.active = handles
-                        self._on_event({"kind": "active_set", "device_id": session.device_id, "handles": handles})
-                elif mtype == p.MSG_CONFIG_STATE:
-                    if session:
-                        self._on_event({"kind": "config_state", "device_id": session.device_id, "config": msg.get("config")})
-                elif mtype == p.MSG_BACKFILL:
-                    if session:
-                        self._on_event({"kind": "backfill", "device_id": session.device_id,
-                                        "handle": int(msg.get("handle", -1)),
-                                        "frames": list(msg.get("frames") or [])})
-                elif mtype == p.MSG_BACKFILL_UNAVAILABLE:
-                    if session:
-                        self._on_event({"kind": "backfill_unavailable", "device_id": session.device_id,
-                                        "handle": int(msg.get("handle", -1)),
-                                        "from": int(msg.get("from", 0)), "to": int(msg.get("to", 0))})
-                elif mtype in ("tune_window", "tune_request"):
-                    if session:  # guided filter tuning (--filter): handled by the server's AutoFilter
-                        self._on_event({"kind": mtype, "device_id": session.device_id, "msg": msg})
-                # unknown types ignored (forward-compatible)
-        except Exception:
+                try:
+                    session = await self._dispatch(ws, addr, session, msg)
+                except ConnectionClosed:
+                    raise
+                except Exception as exc:  # one bad message (or a server-side bug) must not drop the phone
+                    print(f"[control] {addr}: {msg.get('type')!r} message ignored: {exc!r}")
+        except ConnectionClosed:
             pass
+        except Exception as exc:
+            print(f"[control] {addr}: connection ended: {exc!r}")
         finally:
             if session is not None:
                 self._sessions.pop(session.device_id, None)
                 self._on_event({"kind": "phone_disconnected", "device_id": session.device_id})
+
+    async def _dispatch(self, ws, addr: str, session: Optional[PhoneSession], msg: dict) -> Optional[PhoneSession]:
+        """Handle one phone message; returns the (possibly new) session."""
+        mtype = msg.get("type")
+        if mtype == p.MSG_HELLO:
+            return await self._on_hello(ws, addr, msg)
+        if mtype == p.MSG_HEARTBEAT:
+            if session:
+                session.last_heartbeat = time.monotonic()
+            await _send(ws, {"type": p.MSG_HEARTBEAT_ACK, "seq": msg.get("seq"), "t_server_ns": time.time_ns()})
+        elif mtype == p.MSG_CLOCK_PING:
+            # NTP-like: echo t0, add server receive/transmit stamp.
+            await _send(ws, {"type": p.MSG_CLOCK_PONG, "t0": msg.get("t0"), "t_server_ns": time.time_ns()})
+        elif session is None:
+            pass  # everything below belongs to a session (sent after hello)
+        elif mtype == p.MSG_STATS:
+            session.last_stats = msg
+            self._on_event({"kind": "phone_stats", "device_id": session.device_id, "stats": msg})
+        elif mtype == p.MSG_ACTIVE:
+            handles = [int(h) for h in (msg.get("handles") or [])]
+            session.active = handles
+            self._on_event({"kind": "active_set", "device_id": session.device_id, "handles": handles})
+        elif mtype == p.MSG_CONFIG_STATE:
+            self._on_event({"kind": "config_state", "device_id": session.device_id, "config": msg.get("config")})
+        elif mtype == p.MSG_BACKFILL:
+            self._on_event({"kind": "backfill", "device_id": session.device_id,
+                            "handle": int(msg.get("handle", -1)),
+                            "frames": list(msg.get("frames") or [])})
+        elif mtype == p.MSG_BACKFILL_UNAVAILABLE:
+            self._on_event({"kind": "backfill_unavailable", "device_id": session.device_id,
+                            "handle": int(msg.get("handle", -1)),
+                            "from": int(msg.get("from", 0)), "to": int(msg.get("to", 0))})
+        elif mtype in ("tune_window", "tune_request"):
+            # guided filter tuning (--filter): handled by the server's AutoFilter
+            self._on_event({"kind": mtype, "device_id": session.device_id, "msg": msg})
+        # unknown types ignored (forward-compatible)
+        return session
 
     async def _on_hello(self, ws, addr: str, msg: dict) -> PhoneSession:
         device_id = next(self._ids) & 0xFFFFFFFF
