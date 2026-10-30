@@ -44,6 +44,24 @@ _LEGACY_WEB = os.path.abspath(os.path.join(_HERE, "..", "web"))
 WEB_DIR = _REACT_DIST if os.path.isdir(_REACT_DIST) else _LEGACY_WEB
 SELFTEST_DEVICE_ID = 0x53454C46  # "SELF"
 
+# Fire-and-forget tasks: the event loop only keeps weak references to tasks, so one nobody holds can
+# be garbage-collected mid-run, and its exception would surface (if ever) only as "Task exception
+# was never retrieved". spawn() holds each until it finishes and logs a failure.
+_background: set = set()
+
+
+def spawn(coro, what: str) -> asyncio.Task:
+    task = asyncio.get_running_loop().create_task(coro)
+    _background.add(task)
+
+    def _done(t: asyncio.Task) -> None:
+        _background.discard(t)
+        if not t.cancelled() and t.exception() is not None:
+            print(f"   ({what} failed: {t.exception()!r})")
+
+    task.add_done_callback(_done)
+    return task
+
 
 def _local_ips():
     ips = set()
@@ -266,7 +284,7 @@ async def run(args: argparse.Namespace) -> None:
 
     reconciler = Reconciler(
         tracker,
-        send_resend=lambda d, h, a, b: asyncio.create_task(control.send_resend(d, h, a, b)),
+        send_resend=lambda d, h, a, b: spawn(control.send_resend(d, h, a, b), "backfill request"),
         on_backfilled=_append_backfill,
     )
 
@@ -329,7 +347,7 @@ async def run(args: argparse.Namespace) -> None:
     control = ControlServer(udp_port, on_event=on_control_event)
 
     def push_filters() -> None:
-        asyncio.get_running_loop().create_task(control.send_filters(filterbank.configs))
+        spawn(control.send_filters(filterbank.configs), "filter push")
 
     if args.filter:
         autofilter = AutoFilter(filterbank, insights, filter_reports, dash.broadcast, push_filters,
@@ -385,7 +403,7 @@ async def run(args: argparse.Namespace) -> None:
         elif cmd == "analyse":
             rid = str(msg.get("id", ""))
             if reports.valid_id(rid) and analyses.claim(rid):
-                asyncio.get_running_loop().create_task(_analyse(rid))
+                spawn(_analyse(rid), f"analysis of {rid}")
             return
         dash.broadcast({"kind": "recording", "active": recorder.is_recording, "rows": recorder.rows})
 
@@ -562,7 +580,7 @@ def make_phone_sender(control, current: dict):
     """Fire-and-forget control message to the connected phone (guided tuning); dropped without one."""
     def send(obj: dict) -> None:
         if current.get("id") is not None:
-            asyncio.get_running_loop().create_task(control.send_json(current["id"], obj))
+            spawn(control.send_json(current["id"], obj), "guided-tuning message")
     return send
 
 
