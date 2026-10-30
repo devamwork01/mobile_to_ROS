@@ -12,8 +12,8 @@ android {
         applicationId = "com.sensorstream"
         minSdk = 24
         targetSdk = 35
-        versionCode = 16
-        versionName = "0.1.13_2"
+        versionCode = 17
+        versionName = "0.1.14"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
