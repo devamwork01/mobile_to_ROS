@@ -192,9 +192,10 @@ def query_signal(
     if not os.path.isfile(path):
         return None
 
-    # Dedup by seq (a sample can arrive both late-live and via backfill) and order by t_sensor_ns —
-    # the .ssbin may hold out-of-order / duplicated appended frames after reconciliation.
-    seen: dict = {}   # seq -> (t_sensor_ns, values); first write wins
+    # Dedup by (seq, t_sensor_ns) (a sample can arrive both late-live and via backfill) and order by
+    # t_sensor_ns — the .ssbin may hold out-of-order / duplicated appended frames after reconciliation.
+    # seq alone is not enough: the phone restarts it at 0 when a sensor is re-toggled (see reports.py).
+    seen: dict = {}   # (seq, t_sensor_ns) -> (t_sensor_ns, values); first write wins
     stype: Optional[int] = None
     ncomp = 0
     for _t_recv, data in read_frames(path):
@@ -210,8 +211,8 @@ def query_signal(
                 continue
             if end_ns is not None and t > end_ns:
                 continue
-            if r.seq not in seen:
-                seen[r.seq] = (t, r.values)
+            if (r.seq, t) not in seen:
+                seen[(r.seq, t)] = (t, r.values)
                 if stype is None:
                     stype = r.sensor_type
                     ncomp = len(r.values)
