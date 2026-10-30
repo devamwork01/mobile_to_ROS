@@ -63,15 +63,32 @@ def spawn(coro, what: str) -> asyncio.Task:
     return task
 
 
-def _local_ips():
-    ips = set()
+def order_ips(primary: Optional[str], resolved) -> list:
+    """This computer's reachable IPv4 addresses, the default-route interface first (it is what mDNS
+    advertises). Loopback (Ubuntu maps the hostname to 127.0.1.1) and link-local are dropped."""
+    def usable(ip: str) -> bool:
+        return not ip.startswith("127.") and not ip.startswith("169.254.")
+    rest = sorted({ip for ip in resolved if usable(ip)} - {primary})
+    return ([primary] if primary and usable(primary) else []) + rest
+
+
+def _primary_ip() -> Optional[str]:
+    """Source address of the default route (a UDP connect sends nothing)."""
     try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            ips.add(info[4][0])
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
+def _local_ips():
+    resolved = []
+    try:
+        resolved = [info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)]
     except OSError:
         pass
-    ips.discard("127.0.0.1")
-    return sorted(ips)
+    return order_ips(_primary_ip(), resolved)
 
 
 async def _selftest_generator(udp_port: int, hz: float) -> None:
