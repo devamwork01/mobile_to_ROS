@@ -502,7 +502,7 @@ async def run(args: argparse.Namespace) -> None:
         print(f"   discovery : mDNS + UDP beacon :{args.beacon_port}   (phone can auto-find this PC)")
     if ros_sink is not None:
         print("   ROS       : publishing /phone/imu/data_raw, /phone/imu/data, /phone/accelerometer, "
-              "/phone/gyroscope, /phone/magnetic_field, /phone/linear_acceleration, /phone/orientation")
+              "/phone/gyroscope, /phone/magnetic_field, /phone/linear_acceleration(_enu), /phone/orientation")
         print(f"               stamps: {args.ros_stamp} time")
     if args.filter:
         print(f"   FILTER    : guided per-axis filters for accel/gyro/mag, keeping {args.filter_keep:.0%} of the motion"

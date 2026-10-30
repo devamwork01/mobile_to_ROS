@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 
 from .ros_clock import ClockMapper, StampGuard
 from .ros_cov import NOT_PROVIDED, UNKNOWN, diag, orientation_cov
-from .ros_mapping import ImuPairer, ros_targets
+from .ros_mapping import EnuRotator, ImuPairer, ros_targets
 
 STAMP_MODES = ("sensor", "receive")
 # Only continuously reporting sensors feed the clock: an on-change sensor (e.g. the step counter) is
@@ -29,6 +29,7 @@ UT_TO_T = 1e-6
 # followed (bounded: the stamps stay < 1 ms late).
 ROS_READ_SLACK_NS = 10_000
 ROS_CLOCK_STEP_NS = 1_000_000
+ENU_FRAME = "phone_enu"  # world frame of the *_enu topics: x east, y north, z up
 IMU_TOPICS = ("/phone/imu/data_raw", "/phone/imu/data",
               "/phone/imu/data_raw_filtered", "/phone/imu/data_filtered")
 
@@ -40,6 +41,13 @@ class Out:
     stamp_ns: int
     vals: object
     cov: Dict[str, List[float]] = field(default_factory=dict)
+    frame: str = "phone"
+
+
+def _rotate_cov(m, cov: List[float]) -> List[float]:
+    """A 3x3 covariance (row-major) on the phone's axes -> the world's: R S R^T."""
+    rs = [[sum(m[i][k] * cov[3 * k + j] for k in range(3)) for j in range(3)] for i in range(3)]
+    return [sum(rs[i][k] * m[j][k] for k in range(3)) for i in range(3) for j in range(3)]
 
 
 class RosPlanner:
@@ -49,6 +57,7 @@ class RosPlanner:
         self.stamp = stamp
         self._clocks: Dict[int, ClockMapper] = {}
         self._pairers: Dict[int, ImuPairer] = {}
+        self._enu: Dict[int, EnuRotator] = {}
         self._guard = StampGuard()
         self._cov: Dict[int, dict] = {}
         self._ros_off: Optional[int] = None
@@ -97,6 +106,7 @@ class RosPlanner:
     def plan(self, dg, t_recv_ns: int, filtered, ros_now_ns: int, mono_now_ns: int) -> List[Out]:
         clock = self._clocks.setdefault(dg.device_id, ClockMapper())
         pairer = self._pairers.setdefault(dg.device_id, ImuPairer())
+        enu = self._enu.setdefault(dg.device_id, EnuRotator())
         for r in dg.records:
             if r.sensor_type in CLOCK_TYPES:
                 clock.observe(r.t_sensor_ns, t_recv_ns)
@@ -108,6 +118,11 @@ class RosPlanner:
                     vals = [x * UT_TO_T for x in vals]
                 out.append(Out(topic, kind, self._stamp(topic, clock, r.t_sensor_ns, ros_now_ns, mono_now_ns),
                                vals, self._sensor_cov(kind)))
+            for topic, vals, m in enu.on_record(r, fv):
+                cov = {"orientation": list(NOT_PROVIDED), "angular_velocity": list(NOT_PROVIDED),
+                       "linear_acceleration": _rotate_cov(m, self._measured(10))}
+                out.append(Out(topic, "imu_linacc", self._stamp(topic, clock, r.t_sensor_ns, ros_now_ns, mono_now_ns),
+                               vals, cov, ENU_FRAME))
             for s in pairer.on_record(r, fv):
                 suffix = "_filtered" if s.filtered else ""
                 cov = {"angular_velocity": self._measured(4), "linear_acceleration": self._measured(1)}

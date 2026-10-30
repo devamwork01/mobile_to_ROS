@@ -324,7 +324,7 @@ can re-filter differently later.
 
 **Where the filtered signal goes** (only for sensors with a filter; raw outputs never change):
 - **ROS 2**: `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered`,
-  `/phone/linear_acceleration_filtered`,
+  `/phone/linear_acceleration_filtered`, `/phone/linear_acceleration_enu_filtered`,
   `/phone/imu/data_raw_filtered`, `/phone/imu/data_filtered` (same message types as the raw topics, full rate).
 - **Recording CSV**: extra columns `f0,f1,f2` next to `v0..v5` (empty when no filter; the `.ssbin`
   stays raw, and samples recovered by backfill are never filtered).
@@ -358,11 +358,12 @@ With a ROS 2 environment sourced, `--ros` publishes decoded sensors as standard 
 | `/phone/gyroscope` | `sensor_msgs/Imu` | gyroscope |
 | `/phone/magnetic_field` | `sensor_msgs/MagneticField` | magnetometer, in **tesla** as the message defines (Android reports microtesla; converted) |
 | `/phone/linear_acceleration` | `sensor_msgs/Imu` | linear acceleration — **gravity removed** (Android's sensor fusion); only `linear_acceleration` is set, orientation / angular velocity marked "not provided" |
+| `/phone/linear_acceleration_enu` | `sensor_msgs/Imu` | the same linear acceleration rotated into the world frame (`frame_id` `phone_enu`: x east, y north, z up) with the newest rotation-vector sample - a tilted phone pushed level reads the push on x/y only. Needs **Linear Acceleration and Orientation** streaming; covariance rotated with it |
 | `/phone/orientation` | `geometry_msgs/QuaternionStamped` | rotation vector |
 | `/phone/imu/data_raw` | `sensor_msgs/Imu` | gyroscope + accelerometer, no orientation (input for `imu_filter_madgwick`) |
 | `/phone/imu/data` | `sensor_msgs/Imu` | the same + orientation from the rotation vector (for `robot_localization`) |
 | `/phone/imu/data_raw_filtered`, `/phone/imu/data_filtered` | same as the raw topic | while the accelerometer or gyroscope has a filter (filtered value where there is one; orientation never filtered) |
-| `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered`, `/phone/linear_acceleration_filtered` | same as the raw topic | the filtered signal, only while that sensor has a filter (see Filtering) |
+| `/phone/accelerometer_filtered`, `/phone/gyroscope_filtered`, `/phone/magnetic_field_filtered`, `/phone/linear_acceleration_filtered`, `/phone/linear_acceleration_enu_filtered` | same as the raw topic | the filtered signal, only while that sensor has a filter (see Filtering) |
 
 ```bash
 # with ROS 2 sourced:
@@ -387,7 +388,7 @@ Without ROS sourced, `--ros` prints a warning and the server runs normally.
   approximation, usually on the high side); if the phone gives no heading accuracy, orientation
   covariance stays 0 (unknown) rather than claiming an exact yaw. Without a Still run the covariances are 0 (ROS "unknown").
   Filtered topics carry the raw covariance (conservative).
-- **Frames**: `frame_id` is `phone`. Android's device axes (x right, y up the screen, z out of the screen)
+- **Frames**: `frame_id` is `phone` (except the `*_enu` topics: `phone_enu`, already in the world frame). Android's device axes (x right, y up the screen, z out of the screen)
   and its East-North-Up world frame match REP-103/REP-145, so no conversion is applied. "North" is
   **magnetic** north (the rotation vector uses the magnetometer): set your magnetic declination (e.g.
   `navsat_transform`'s `magnetic_declination_radians`) if you need true north. No TF is published for
