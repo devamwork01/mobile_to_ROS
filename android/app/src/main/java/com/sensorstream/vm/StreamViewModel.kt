@@ -92,11 +92,10 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // --- Servers on the network ----------------------------------------------------------------
-    // Scanned (beacons + mDNS + a ping per server) while a screen showing the list is up.
+    // Scanned (beacons + mDNS + a ping per server) while the Connection tab is open and idle.
     private val serverList = ServerList()
     private val _servers = MutableStateFlow<List<ServerList.Row>>(emptyList())
     val servers: StateFlow<List<ServerList.Row>> = _servers.asStateFlow()
-    private var scanRefs = 0
     private var scanJob: kotlinx.coroutines.Job? = null
 
     /** "host:port" of the server last connected to (marked and kept at the top of the list). */
@@ -108,22 +107,21 @@ class StreamViewModel(app: Application) : AndroidViewModel(app) {
     private val _serverName = MutableStateFlow(prefs.getString(KEY_SERVER_NAME, null))
     val serverName: StateFlow<String?> = _serverName.asStateFlow()
 
-    fun startServerScan() {
-        if (++scanRefs > 1) return
-        discovery.start(serverList)
-        scanJob = viewModelScope.launch {
-            while (true) {
-                _servers.value = serverList.rows(android.os.SystemClock.elapsedRealtime(), _lastServer.value)
-                delay(500)
+    /** Run or stop the network search (Connection tab only; see ConnectionScreen). Idempotent. */
+    fun setServerScan(on: Boolean) {
+        if (on == (scanJob != null)) return
+        if (on) {
+            discovery.start(serverList)
+            scanJob = viewModelScope.launch {
+                while (true) {
+                    _servers.value = serverList.rows(android.os.SystemClock.elapsedRealtime(), _lastServer.value)
+                    delay(500)
+                }
             }
+        } else {
+            scanJob?.cancel(); scanJob = null
+            discovery.stop()
         }
-    }
-
-    fun stopServerScan() {
-        scanRefs = maxOf(0, scanRefs - 1)
-        if (scanRefs > 0) return
-        scanJob?.cancel(); scanJob = null
-        discovery.stop()
     }
 
     fun selectServer(row: ServerList.Row) {

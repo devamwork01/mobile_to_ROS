@@ -13,6 +13,7 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 /**
@@ -33,6 +34,9 @@ class Discovery(context: Context, private val beaconPort: Int = 5006) {
     private val wifi = appCtx.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
     private val active = AtomicBoolean(false)
+    // Bumped on every start: a thread from an earlier scan exits even if a new scan started before
+    // its socket timeout let it notice the stop (otherwise a quick stop/start left two of each).
+    private val session = AtomicInteger(0)
     private var multicastLock: WifiManager.MulticastLock? = null
     private var discoveryListener: NsdManager.DiscoveryListener? = null
 
@@ -41,13 +45,14 @@ class Discovery(context: Context, private val beaconPort: Int = 5006) {
     fun start(list: ServerList) {
         if (!active.compareAndSet(false, true)) return
         servers = list
+        val my = session.incrementAndGet()
         multicastLock = wifi.createMulticastLock("sensorstream-disc").apply {
             setReferenceCounted(true)
             runCatching { acquire() }
         }
         startNsd()
-        startBeaconListener()
-        startProber()
+        startBeaconListener(my)
+        startProber(my)
     }
 
     fun stop() {
@@ -92,7 +97,9 @@ class Discovery(context: Context, private val beaconPort: Int = 5006) {
         }
     }
 
-    private fun startBeaconListener() {
+    private fun running(my: Int) = active.get() && session.get() == my
+
+    private fun startBeaconListener(my: Int) {
         thread(isDaemon = true, name = "disc-beacon") {
             var sock: DatagramSocket? = null
             try {
@@ -103,12 +110,12 @@ class Discovery(context: Context, private val beaconPort: Int = 5006) {
                     bind(InetSocketAddress(beaconPort))
                 }
                 val buf = ByteArray(2048)
-                while (active.get()) {
+                while (running(my)) {
                     val pkt = DatagramPacket(buf, buf.size)
                     try {
                         sock.receive(pkt)
                     } catch (e: Exception) {
-                        if (!active.get()) break else continue // socket timeout -> re-check active
+                        if (!running(my)) break else continue // socket timeout -> re-check active
                     }
                     val msg = runCatching { JSONObject(String(pkt.data, 0, pkt.length, Charsets.UTF_8)) }.getOrNull() ?: continue
                     val a = ServerList.announceOf(msg) ?: continue
@@ -124,7 +131,7 @@ class Discovery(context: Context, private val beaconPort: Int = 5006) {
     }
 
     /** One socket: send a ping to every known server each second, match replies by sequence. */
-    private fun startProber() {
+    private fun startProber(my: Int) {
         thread(isDaemon = true, name = "disc-ping") {
             var sock: DatagramSocket? = null
             val sent = ConcurrentHashMap<Int, Triple<String, Int, Long>>() // seq -> (host, port, t0)
@@ -133,7 +140,7 @@ class Discovery(context: Context, private val beaconPort: Int = 5006) {
                 val buf = ByteArray(512)
                 var seq = 0
                 var nextSend = 0L
-                while (active.get()) {
+                while (running(my)) {
                     val t = now()
                     if (t >= nextSend) {
                         nextSend = t + 1000
