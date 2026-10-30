@@ -339,6 +339,10 @@ async def run(args: argparse.Namespace) -> None:
             push_filters()  # the phone filters its own preview with the laptop's settings
             refresh_ros_cov(ev.get("model") or "")
             phone_now["id"] = ev["device_id"]
+            # A recording started before any phone connected (--record) learns its device + catalog now.
+            recorder.ensure_meta({"model": ev.get("model"), "android": ev.get("android"),
+                                  "app_version": ev.get("app_version"), "device_id": ev["device_id"],
+                                  "sensors": ev.get("sensors") or []})
             if autofilter is not None:  # a (re)connect re-tunes from fresh data
                 autofilter.on_phone_connected(ev.get("model"), ev.get("android"), ev.get("caps") or [])
         elif kind == "backfill":
