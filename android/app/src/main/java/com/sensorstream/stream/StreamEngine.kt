@@ -28,6 +28,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -164,7 +165,7 @@ class StreamEngine(context: Context) {
             }
             lastTs[sample.handle] = sample.timestampNs
         }
-        controller.onError = { e -> _state.value = _state.value.copy(error = e.message ?: e.toString()) }
+        controller.onError = { e -> _state.update { it.copy(error = e.message ?: e.toString()) } }
 
         connectControl()
 
@@ -188,7 +189,10 @@ class StreamEngine(context: Context) {
                     val bps = (nowBytes - lastBytes).coerceAtLeast(0L) // loop cadence is ~1s
                     lastBytes = nowBytes
                     val rs = controller.recorderStats()
-                    _state.value = _state.value.copy(
+                    // update{}: an atomic read-modify-write. A plain value = value.copy() here could
+                    // overwrite a concurrent connected = true from the WS thread (and then stop the
+                    // heartbeats, which only send while connected).
+                    _state.update { it.copy(
                         sentPackets = controller.sentPackets.get(),
                         droppedSamples = controller.droppedSamples.get(),
                         sendBps = bps,
@@ -198,7 +202,7 @@ class StreamEngine(context: Context) {
                         recFanoutDropped = controller.recorderDropped.get(),
                         recWriteErrors = rs?.writeErrors ?: 0L,
                         backfillServed = controller.backfillServed.get(),
-                    )
+                    ) }
                 } catch (c: CancellationException) {
                     throw c
                 } catch (_: Throwable) {
@@ -223,14 +227,14 @@ class StreamEngine(context: Context) {
 
     private fun connectControl() {
         val gen = ++connGen
-        _state.value = _state.value.copy(connecting = true, error = null)
+        _state.update { it.copy(connecting = true, error = null) }
         control.connect(host, controlPort, buildHello(), object : WsControlClient.Listener {
             override fun onConnected() {}
             override fun onHelloAck(deviceId: Int, udpPort: Int) {
                 if (gen != connGen) return
                 reconnectAttempts = 0
                 controller.deviceId = deviceId
-                _state.value = _state.value.copy(connecting = false, connected = true, deviceId = deviceId, udpPort = udpPort)
+                _state.update { it.copy(connecting = false, connected = true, deviceId = deviceId, udpPort = udpPort) }
                 startTelemetry(udpPort)
             }
             override fun onConfigure(msg: JSONObject) { /* laptop-driven config: reserved */ }
@@ -275,12 +279,12 @@ class StreamEngine(context: Context) {
             override fun onRtt(ms: Float) {
                 if (gen != connGen) return
                 rtt.add(ms)
-                _state.value = _state.value.copy(rttMs = rtt.value)
+                _state.update { it.copy(rttMs = rtt.value) }
             }
             override fun onClosed(reason: String?) { if (gen == connGen) onDropped() }
             override fun onFailure(t: Throwable) {
                 if (gen != connGen) return
-                _state.value = _state.value.copy(error = t.message ?: t.toString())
+                _state.update { it.copy(error = t.message ?: t.toString()) }
                 onDropped()
             }
         })
@@ -293,16 +297,17 @@ class StreamEngine(context: Context) {
         controller.disconnectSender()
         // streaming stays true — the recorder is still capturing; only network delivery paused.
         // Latency is meaningless without a link, so clear it rather than show a stale value.
-        _state.value = _state.value.copy(connected = false, rttMs = 0f).also { rtt.reset() }
+        _state.update { it.copy(connected = false, rttMs = 0f) }
+        rtt.reset()
         if (!desired) {
-            _state.value = _state.value.copy(connecting = false, streaming = false)
+            _state.update { it.copy(connecting = false, streaming = false) }
             controller.stopSession()
             return
         }
         val attempt = reconnectAttempts.coerceAtMost(4)
         reconnectAttempts += 1
         val delayMs = (500L shl attempt).coerceAtMost(8000L) // 0.5, 1, 2, 4, 8s
-        _state.value = _state.value.copy(connecting = true)
+        _state.update { it.copy(connecting = true) }
         scope?.launch {
             delay(delayMs)
             if (desired && isActive) connectControl()
@@ -314,7 +319,7 @@ class StreamEngine(context: Context) {
             repo.sensorAt(sel.handle)?.let { SensorEventSource.Reg(it, sel.handle, sel.periodUs) }
         }
         if (regs.isEmpty()) {
-            _state.value = _state.value.copy(error = "No sensors selected")
+            _state.update { it.copy(error = "No sensors selected") }
             return
         }
         // startTelemetry runs on every onHelloAck (first connect AND every reconnect). Build the
@@ -334,7 +339,7 @@ class StreamEngine(context: Context) {
             sessionStarted = true
         }
         controller.connectSender(host, udpPort)
-        _state.value = _state.value.copy(streaming = true)
+        _state.update { it.copy(streaming = true) }
         control.sendActive(regs.map { it.handle })
     }
 
@@ -449,7 +454,8 @@ class StreamEngine(context: Context) {
         recorder?.close()          // now safe: StreamEngine owns the recorder's lifecycle
         recorder = null
         sessionStarted = false
-        _state.value = _state.value.copy(connecting = false, connected = false, streaming = false, rttMs = 0f).also { rtt.reset() }
+        _state.update { it.copy(connecting = false, connected = false, streaming = false, rttMs = 0f) }
+        rtt.reset()
     }
 }
 
