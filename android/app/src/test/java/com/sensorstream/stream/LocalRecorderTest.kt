@@ -137,12 +137,16 @@ class LocalRecorderTest {
         // adopted bytes count toward the cap
         assertTrue("adopted bytesOnDisk ${rec2.stats().bytesOnDisk} vs $bytesBefore",
             rec2.stats().bytesOnDisk == bytesBefore)
-        // adopted records are readable (verbatim datagrams, deviceId from session 1)
+        // ...but are never served as backfill: session 2 restarted seq at 0, so session 1's seq 2..4
+        // are different samples, and resending them would splice old data into the laptop's recording.
+        assertTrue("adopted records must not be served", rec2.readRawRange(handle = 2, fromSeq = 2, toSeq = 4).isEmpty())
+        // session 2's own records with the same seqs are served, and only those
+        val own = (2L..4L).map { seq -> sample(handle = 2, seq = seq).also { rec2.write(it) } }
         val got = rec2.readRawRange(handle = 2, fromSeq = 2, toSeq = 4)
-        val expected = written.filter { it.seq in 2..4 }
-            .map { BinaryPacketCodec.encode(4, listOf(it), BinaryPacketCodec.FLAG_STAGE_TS) }
-        assertTrue("expected 3 adopted datagrams, got ${got.size}", got.size == 3)
+        val expected = own.map { BinaryPacketCodec.encode(99, listOf(it), BinaryPacketCodec.FLAG_STAGE_TS) }
+        assertTrue("expected 3 own datagrams, got ${got.size}", got.size == 3)
         got.forEachIndexed { i, b -> assertArrayEquals(expected[i], b) }
+        assertTrue("session 1 wrote ${written.size}", written.size == 6)
 
         // adopted segments prune under a small cap, counting their records as droppedOldest
         val rec3 = LocalRecorder(dir, deviceId = 1, maxBytes = 100, maxAgeMs = 600_000,
@@ -161,6 +165,7 @@ class LocalRecorderTest {
         rec1.write(sample(handle = 9, seq = 0))
         rec1.close()
         val before = dir.listFiles { f -> f.name.endsWith(".ssbin") }!!.map { it.name }.toSet()
+        val oldBytes = File(dir, before.single()).readBytes()
 
         // session 2 at the SAME clock: a naive salt reset to 0 would reuse seg_100_0 and truncate it.
         val rec2 = LocalRecorder(dir, deviceId = 1, maxBytes = 10_000_000, maxAgeMs = 600_000,
@@ -172,9 +177,10 @@ class LocalRecorderTest {
         // the old file survives (not truncated/overwritten) and a NEW distinct file was created
         assertTrue("old segment must survive, before=$before after=$after", after.containsAll(before))
         assertTrue("a new distinct segment must be created, before=$before after=$after", after.size > before.size)
-        // both records readable across the two sessions -> no collision/data loss
+        // no collision/data loss: the old segment is byte-for-byte intact, the new one has session 2's record
+        assertArrayEquals(oldBytes, File(dir, before.single()).readBytes())
         val got = rec2.readRawRange(handle = 9, fromSeq = 0, toSeq = 1)
-        assertTrue("expected both records after re-open, got ${got.size}", got.size == 2)
+        assertTrue("expected session 2's record, got ${got.size}", got.size == 1)
     }
 
     @Test
