@@ -219,3 +219,21 @@ def test_linear_acceleration_is_published(ros_env):
     m = got[0]
     assert (m.linear_acceleration.x, m.linear_acceleration.y, m.linear_acceleration.z) == pytest.approx((0.1, -0.2, 0.3))
     assert m.orientation_covariance[0] == -1.0 and m.angular_velocity_covariance[0] == -1.0
+
+
+def test_linear_acceleration_enu_is_published_in_the_world_frame(ros_env):
+    sink, node = ros_env
+    s = math.sin(math.radians(45))
+    rv = p.Datagram(device_id=1, records=[p.Record(11, 6, 0, 100, 3, [0.0, 0.0, s, s])])   # yaw 90 deg
+    lin = p.Datagram(device_id=1, records=[p.Record(10, 5, 0, 123, 3, [1.0, 0.0, 0.0])])
+
+    def send():
+        sink.on_datagram(rv, ("x", 0), 0)
+        sink.on_datagram(lin, ("x", 0), 0)
+
+    got = _collect(node, "/phone/linear_acceleration_enu", Imu, send)
+    assert len(got) == 1
+    m = got[0]
+    assert m.header.frame_id == "phone_enu"
+    assert (m.linear_acceleration.x, m.linear_acceleration.y, m.linear_acceleration.z) == pytest.approx((0.0, 1.0, 0.0), abs=1e-6)
+    assert m.orientation_covariance[0] == -1.0 and m.angular_velocity_covariance[0] == -1.0

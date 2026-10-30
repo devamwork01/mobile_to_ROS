@@ -32,3 +32,14 @@ def test_query_signal_dedups_and_orders(tmp_path):
     assert res["raw"] == 3
     assert res["t"] == [round((100 - 100) / 1e9, 6), round((200 - 100) / 1e9, 6), round((300 - 100) / 1e9, 6)]
     assert res["avg"][0] == [0.0, 1.0, 2.0]
+
+
+def test_query_signal_keeps_samples_after_a_seq_restart(tmp_path):
+    # The phone restarts seq at 0 when a sensor is re-toggled or streaming restarts: same seqs,
+    # later sensor times - new data, not duplicates.
+    frames = [(i, _dg(0, i, 100 + i, 0.0)) for i in range(3)]
+    frames += [(10 + i, _dg(0, i, 500 + i, 1.0)) for i in range(3)]
+    _write_ssbin(str(tmp_path / "session_r.ssbin"), frames)
+    res = recordings.query_signal(str(tmp_path), "session_r", handle=0, buckets=1000)
+    assert res["raw"] == 6
+    assert res["min"][0][0] == 0.0 and res["max"][0][-1] == 1.0  # both runs present

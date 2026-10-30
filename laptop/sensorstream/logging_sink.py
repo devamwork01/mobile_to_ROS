@@ -52,12 +52,22 @@ class Recorder:
         self._csv = open(self.path_base + ".csv", "w", encoding="utf-8", newline="")
         self._csv.write(CSV_HEADER)
         if meta is not None:
-            with open(self.path_base + ".meta.json", "w", encoding="utf-8") as fh:
-                json.dump(meta, fh, indent=2)
+            self._write_meta(meta)
         self.rows = 0
         self.frames = 0
         self.started_at = time.monotonic()
         return self.path_base
+
+    def _write_meta(self, meta: dict) -> None:
+        with open(self.path_base + ".meta.json", "w", encoding="utf-8") as fh:
+            json.dump(meta, fh, indent=2)
+
+    def ensure_meta(self, meta: Optional[dict]) -> None:
+        """Give the current recording its .meta.json if it has none yet: a recording started before
+        any phone connected (--record at startup) learns the device + catalog when one does."""
+        if self.path_base is None or meta is None or os.path.exists(self.path_base + ".meta.json"):
+            return
+        self._write_meta(meta)
 
     def on_datagram(self, dg: p.Datagram, t_recv_ns: int, filtered=None) -> None:
         if self._bin is None:

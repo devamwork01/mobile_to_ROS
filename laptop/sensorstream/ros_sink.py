@@ -22,7 +22,6 @@ from .protocol import Datagram
 from .ros_plan import IMU_TOPICS, Out, RosPlanner
 from .sinks import OutputSink
 
-FRAME_ID = "phone"
 
 
 class Ros2Sink(OutputSink):
@@ -41,6 +40,7 @@ class Ros2Sink(OutputSink):
             "/phone/accelerometer_filtered": Imu, "/phone/gyroscope_filtered": Imu,
             "/phone/magnetic_field_filtered": MagneticField,
             "/phone/linear_acceleration": Imu, "/phone/linear_acceleration_filtered": Imu,
+            "/phone/linear_acceleration_enu": Imu, "/phone/linear_acceleration_enu_filtered": Imu,
             **{t: Imu for t in IMU_TOPICS},
         }
         self._pubs = {t: self._node.create_publisher(m, t, qos_profile_sensor_data) for t, m in types.items()}
@@ -78,7 +78,7 @@ class Ros2Sink(OutputSink):
             msg.angular_velocity_covariance = o.cov["angular_velocity"]
             msg.linear_acceleration_covariance = o.cov["linear_acceleration"]
         msg.header.stamp = Time(sec=o.stamp_ns // 1_000_000_000, nanosec=o.stamp_ns % 1_000_000_000)
-        msg.header.frame_id = FRAME_ID
+        msg.header.frame_id = o.frame
         return msg
 
     def close(self) -> None:

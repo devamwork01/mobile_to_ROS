@@ -151,3 +151,61 @@ def test_linear_acceleration_has_its_own_topic():
     assert ros_targets(rec(10, [0.1, 0.2, 0.3])) == [("/phone/linear_acceleration", "imu_linacc", [0.1, 0.2, 0.3])]
     out = ros_targets(rec(10, [0.1, 0.2, 0.3]), [0.05, 0.1, 0.2])
     assert out[1] == ("/phone/linear_acceleration_filtered", "imu_linacc", [0.05, 0.1, 0.2])
+
+
+# --- linear acceleration in the world frame (ENU) ---------------------------------------------------
+from sensorstream.ros_mapping import EnuRotator  # noqa: E402
+
+MS_ = 1_000_000
+
+
+def at(type_, t_ms, values):
+    return p.Record(type_, 3, 0, t_ms * MS_, 3, values)
+
+
+def rv_about(axis, deg):
+    """Rotation-vector record values [x, y, z, w] for a rotation of `deg` about a unit axis."""
+    s, c = math.sin(math.radians(deg) / 2), math.cos(math.radians(deg) / 2)
+    return [axis[0] * s, axis[1] * s, axis[2] * s, c]
+
+
+def test_tilted_phone_pushed_level_reads_pure_forward_in_enu():
+    # Phone pitched 30 deg about its X axis, pushed 1 m/s^2 level toward north: on the phone's own axes
+    # that is split between Y and Z (0, 0.87, -0.5); in ENU it is (0, 1, 0).
+    r = EnuRotator()
+    assert r.on_record(at(11, 0, rv_about((1, 0, 0), 30))) == []
+    [(topic, vals, rot)] = r.on_record(at(10, 1, [0.0, math.cos(math.radians(30)), -math.sin(math.radians(30))]))
+    assert topic == "/phone/linear_acceleration_enu"
+    assert vals == pytest.approx([0.0, 1.0, 0.0], abs=1e-9)
+
+
+def test_yaw_maps_phone_x_to_north():
+    r = EnuRotator()
+    r.on_record(at(11, 0, rv_about((0, 0, 1), 90)))
+    [(_, vals, _)] = r.on_record(at(10, 1, [1.0, 0.0, 0.0]))
+    assert vals == pytest.approx([0.0, 1.0, 0.0], abs=1e-9)
+
+
+def test_three_value_rotation_vector_and_unnormalised_quaternion():
+    r = EnuRotator()
+    q = rv_about((0, 0, 1), 90)
+    r.on_record(at(11, 0, q[:3]))                     # w derived, like ros_targets
+    assert r.on_record(at(10, 1, [1.0, 0.0, 0.0]))[0][1] == pytest.approx([0.0, 1.0, 0.0], abs=1e-6)
+    r.on_record(at(11, 2, [2 * x for x in q]))        # scaled: rotation is still 90 deg about Z
+    assert r.on_record(at(10, 3, [1.0, 0.0, 0.0]))[0][1] == pytest.approx([0.0, 1.0, 0.0], abs=1e-9)
+
+
+def test_needs_a_fresh_orientation():
+    r = EnuRotator()
+    assert r.on_record(at(10, 0, [1.0, 0.0, 0.0])) == []   # no orientation yet
+    r.on_record(at(11, 10, rv_about((0, 0, 1), 90)))
+    assert r.on_record(at(10, 10 + 101, [1.0, 0.0, 0.0])) == []  # > 100 ms old (rate unknown yet)
+    assert len(r.on_record(at(10, 10 + 50, [1.0, 0.0, 0.0]))) == 1
+
+
+def test_filtered_twin_is_rotated_too():
+    r = EnuRotator()
+    r.on_record(at(11, 0, rv_about((0, 0, 1), 90)))
+    out = r.on_record(at(10, 1, [1.0, 0.0, 0.0]), [0.5, 0.0, 0.0])
+    assert [t for t, _, _ in out] == ["/phone/linear_acceleration_enu", "/phone/linear_acceleration_enu_filtered"]
+    assert out[1][1] == pytest.approx([0.0, 0.5, 0.0], abs=1e-9)

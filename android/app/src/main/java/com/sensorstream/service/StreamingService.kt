@@ -91,6 +91,31 @@ class StreamingService : Service() {
         return START_REDELIVER_INTENT
     }
 
+    /**
+     * Android 15+: a dataSync foreground service may run 6 hours per 24 h. At the limit the system
+     * calls this and kills the app unless the service stops within a few seconds, so stop cleanly
+     * (flushing the on-phone recording) and say why instead of crashing.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        tuneWatch?.cancel()
+        StreamHolder.engine(this).stop()
+        releaseLocks()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        getSystemService(NotificationManager::class.java)?.notify(
+            TIMEOUT_NOTIF_ID,
+            NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("Streaming stopped")
+                .setContentText("Android limits background streaming to 6 hours a day. Open the app to start again.")
+                .setStyle(NotificationCompat.BigTextStyle()
+                    .bigText("Android limits background streaming to 6 hours a day. Open the app to start again."))
+                .setSmallIcon(android.R.drawable.stat_sys_upload)
+                .setContentIntent(openAppIntent())
+                .setAutoCancel(true)
+                .build()
+        )
+        stopSelf()
+    }
+
     override fun onDestroy() {
         tuneWatch?.cancel()
         StreamHolder.engine(this).stop()
@@ -177,6 +202,7 @@ class StreamingService : Service() {
 
     companion object {
         const val NOTIF_ID = 1
+        const val TIMEOUT_NOTIF_ID = 2
         const val CHANNEL_ID = "streaming"
         const val ACTION_START = "com.sensorstream.action.START"
         const val ACTION_STOP = "com.sensorstream.action.STOP"

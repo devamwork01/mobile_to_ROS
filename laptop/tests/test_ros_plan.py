@@ -205,3 +205,20 @@ def test_linear_acceleration_topic_stamp_and_covariance():
     # it feeds the phone-time clock like the other continuous sensors: 2 ms later on the phone, 7 ms late
     b = pl.plan(dg(rec(10, 2, [0.1, 0.2, 0.3], seq=1)), R0 + 9 * MS, None, NOW + 11 * MS, R0 + 11 * MS)[0]
     assert b.stamp_ns - o.stamp_ns == 2 * MS
+
+
+def test_linear_acceleration_enu_topic_frame_and_rotated_covariance():
+    import math as _m
+    pl = RosPlanner()
+    pl.set_covariance({10: {"var": [0.01, 0.04, 0.09], "report": "r"}})
+    s = _m.sin(_m.radians(45))
+    pl.plan(dg(rec(11, 0, [0.0, 0.0, s, s])), R0, None, NOW, R0)          # yaw 90 deg
+    out = pl.plan(dg(rec(10, 1, [1.0, 0.0, 0.0], seq=1)), R0 + MS, None, NOW + MS, R0 + MS)
+    phone = [o for o in out if o.topic == "/phone/linear_acceleration"][0]
+    [enu] = [o for o in out if o.topic == "/phone/linear_acceleration_enu"]
+    assert phone.frame == "phone" and enu.frame == "phone_enu"
+    assert enu.kind == "imu_linacc" and enu.stamp_ns == phone.stamp_ns
+    assert enu.vals == pytest.approx([0.0, 1.0, 0.0], abs=1e-9)
+    # yaw 90: the phone's x variance becomes the world's y variance (R S R^T)
+    assert enu.cov["linear_acceleration"] == pytest.approx(ros_cov.diag([0.04, 0.01, 0.09]), abs=1e-12)
+    assert enu.cov["orientation"] == ros_cov.NOT_PROVIDED and enu.cov["angular_velocity"] == ros_cov.NOT_PROVIDED

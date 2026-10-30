@@ -144,3 +144,59 @@ class ImuPairer:
             out.append(ImuSample(ts, gfilt if gfilt is not None else gyro,
                                  afilt if afilt is not None else araw, quat, head, filtered=True))
         return out
+
+
+Mat3 = List[List[float]]
+
+
+def rotation_matrix(q: Sequence[float]) -> Optional[Mat3]:
+    """Device -> world rotation from an Android rotation-vector quaternion [x, y, z, w] (the matrix
+    SensorManager.getRotationMatrixFromVector builds). Normalised first; None if degenerate."""
+    x, y, z, w = q
+    n = math.sqrt(x * x + y * y + z * z + w * w)
+    if not n > 1e-9:
+        return None
+    x, y, z, w = x / n, y / n, z / n, w / n
+    return [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+
+
+def rotate(m: Mat3, v: Sequence[float]) -> List[float]:
+    return [m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2] for i in range(3)]
+
+
+ENU_TOPIC = "/phone/linear_acceleration_enu"
+
+
+class EnuRotator:
+    """One device's linear acceleration rotated into the world frame: Android's rotation vector is
+    East-North-Up (x east, y north, z up - REP 103), so each sample is rotated by the newest fresh
+    rotation-vector sample (same freshness rule as ImuPairer). Gravity is already removed by Android;
+    this changes only which axes the values are on. Returns [(topic, values, rotation matrix)], with a
+    filtered twin when the sample was filtered."""
+
+    def __init__(self) -> None:
+        self._rv: Optional[tuple] = None    # (t, rotation matrix)
+        self._ir = _Interval()
+
+    def on_record(self, record, filtered: Optional[Sequence] = None) -> List[Tuple[str, List[float], Mat3]]:
+        t, v, ts = record.sensor_type, list(record.values), record.t_sensor_ns
+        if t == ROTVEC:
+            q = _quat(v)
+            m = rotation_matrix(q) if q is not None else None
+            if m is not None:
+                self._ir.add(ts)
+                self._rv = (ts, m)
+            return []
+        if t != LINACC:
+            return []
+        lin = _finite3(v)
+        if lin is None or self._rv is None or ts - self._rv[0] > self._ir.max_age():
+            return []
+        m = self._rv[1]
+        out = [(ENU_TOPIC, rotate(m, lin), m)]
+        fv = _finite3(filtered)
+        if fv is not None:
+            out.append((ENU_TOPIC + "_filtered", rotate(m, fv), m))
+        return out

@@ -5,6 +5,7 @@
 // Nothing here touches the backend/protocol — it only consumes what the server already broadcasts.
 import { useSyncExternalStore } from "react";
 import { onInsightsMessage } from "./insights.js";
+import { isCurrentPhone } from "../lib/phoneSession.js";
 
 const params = new URLSearchParams(location.search);
 // ?ws= overrides; otherwise the port injected by the server that served the page (8081 under Vite dev).
@@ -17,7 +18,7 @@ let meta = {
   debug: {},
   recording: { active: false, rows: 0 },
   catalog: [], // [{handle, name, type, units, ...}] from the phone control channel
-  device: null, // { model, android } | null
+  device: null, // { model, android, id } | null
   active: [], // [{handle, type}] sensors currently streaming
 };
 const metaListeners = new Set();
@@ -106,11 +107,11 @@ let lastDataTs = 0;
 let lastHeal = 0;
 let everHadDevice = false; // only self-heal a real phone session (not --selftest, which has no device)
 
-// Self-heal the device banner: the server replays a device/catalog snapshot to every
-// NEW dashboard connection, but a long-lived socket can miss a phone_connected
-// broadcast if the phone drops and reconnects during a socket blip (common when the
-// screen locks). If a device was seen, data is clearly still flowing, yet the device
-// is now unknown, drop the socket so the fresh connection gets the snapshot again.
+// Self-heal the device banner (safety net): the server replays a device/catalog snapshot to
+// every NEW dashboard connection. If a device was seen, data is clearly still flowing, yet the
+// device is now unknown, drop the socket so the fresh connection gets the snapshot again. (The
+// usual cause - the old session's late phone_disconnected after a phone reconnect - is now
+// ignored in onmessage; see lib/phoneSession.js.)
 setInterval(() => {
   if (ws && ws.readyState === 1 && everHadDevice && !meta.device && Date.now() - lastDataTs < 2000 && Date.now() - lastHeal > 6000) {
     lastHeal = Date.now();
@@ -166,7 +167,7 @@ function connect() {
         break;
       case "phone_connected":
         everHadDevice = true;
-        setMeta({ catalog: m.sensors || [], device: { model: m.model, android: m.android } });
+        setMeta({ catalog: m.sensors || [], device: { model: m.model, android: m.android, id: m.device_id } });
         break;
       case "active_set":
         applyActiveSet(m.handles || []);
@@ -183,6 +184,8 @@ function connect() {
         onInsightsMessage(m);
         break;
       case "phone_disconnected":
+        // A late disconnect of the session the phone already replaced must not blank the new one.
+        if (!isCurrentPhone(meta.device?.id, m.device_id)) break;
         setMeta({ catalog: [], device: null });
         clearActive();
         break;

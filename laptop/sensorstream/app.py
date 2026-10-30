@@ -44,16 +44,51 @@ _LEGACY_WEB = os.path.abspath(os.path.join(_HERE, "..", "web"))
 WEB_DIR = _REACT_DIST if os.path.isdir(_REACT_DIST) else _LEGACY_WEB
 SELFTEST_DEVICE_ID = 0x53454C46  # "SELF"
 
+# Fire-and-forget tasks: the event loop only keeps weak references to tasks, so one nobody holds can
+# be garbage-collected mid-run, and its exception would surface (if ever) only as "Task exception
+# was never retrieved". spawn() holds each until it finishes and logs a failure.
+_background: set = set()
+
+
+def spawn(coro, what: str) -> asyncio.Task:
+    task = asyncio.get_running_loop().create_task(coro)
+    _background.add(task)
+
+    def _done(t: asyncio.Task) -> None:
+        _background.discard(t)
+        if not t.cancelled() and t.exception() is not None:
+            print(f"   ({what} failed: {t.exception()!r})")
+
+    task.add_done_callback(_done)
+    return task
+
+
+def order_ips(primary: Optional[str], resolved) -> list:
+    """This computer's reachable IPv4 addresses, the default-route interface first (it is what mDNS
+    advertises). Loopback (Ubuntu maps the hostname to 127.0.1.1) and link-local are dropped."""
+    def usable(ip: str) -> bool:
+        return not ip.startswith("127.") and not ip.startswith("169.254.")
+    rest = sorted({ip for ip in resolved if usable(ip)} - {primary})
+    return ([primary] if primary and usable(primary) else []) + rest
+
+
+def _primary_ip() -> Optional[str]:
+    """Source address of the default route (a UDP connect sends nothing)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
 
 def _local_ips():
-    ips = set()
+    resolved = []
     try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            ips.add(info[4][0])
+        resolved = [info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)]
     except OSError:
         pass
-    ips.discard("127.0.0.1")
-    return sorted(ips)
+    return order_ips(_primary_ip(), resolved)
 
 
 async def _selftest_generator(udp_port: int, hz: float) -> None:
@@ -266,7 +301,7 @@ async def run(args: argparse.Namespace) -> None:
 
     reconciler = Reconciler(
         tracker,
-        send_resend=lambda d, h, a, b: asyncio.create_task(control.send_resend(d, h, a, b)),
+        send_resend=lambda d, h, a, b: spawn(control.send_resend(d, h, a, b), "backfill request"),
         on_backfilled=_append_backfill,
     )
 
@@ -304,6 +339,10 @@ async def run(args: argparse.Namespace) -> None:
             push_filters()  # the phone filters its own preview with the laptop's settings
             refresh_ros_cov(ev.get("model") or "")
             phone_now["id"] = ev["device_id"]
+            # A recording started before any phone connected (--record) learns its device + catalog now.
+            recorder.ensure_meta({"model": ev.get("model"), "android": ev.get("android"),
+                                  "app_version": ev.get("app_version"), "device_id": ev["device_id"],
+                                  "sensors": ev.get("sensors") or []})
             if autofilter is not None:  # a (re)connect re-tunes from fresh data
                 autofilter.on_phone_connected(ev.get("model"), ev.get("android"), ev.get("caps") or [])
         elif kind == "backfill":
@@ -329,7 +368,7 @@ async def run(args: argparse.Namespace) -> None:
     control = ControlServer(udp_port, on_event=on_control_event)
 
     def push_filters() -> None:
-        asyncio.get_running_loop().create_task(control.send_filters(filterbank.configs))
+        spawn(control.send_filters(filterbank.configs), "filter push")
 
     if args.filter:
         autofilter = AutoFilter(filterbank, insights, filter_reports, dash.broadcast, push_filters,
@@ -385,7 +424,7 @@ async def run(args: argparse.Namespace) -> None:
         elif cmd == "analyse":
             rid = str(msg.get("id", ""))
             if reports.valid_id(rid) and analyses.claim(rid):
-                asyncio.get_running_loop().create_task(_analyse(rid))
+                spawn(_analyse(rid), f"analysis of {rid}")
             return
         dash.broadcast({"kind": "recording", "active": recorder.is_recording, "rows": recorder.rows})
 
@@ -463,7 +502,7 @@ async def run(args: argparse.Namespace) -> None:
         print(f"   discovery : mDNS + UDP beacon :{args.beacon_port}   (phone can auto-find this PC)")
     if ros_sink is not None:
         print("   ROS       : publishing /phone/imu/data_raw, /phone/imu/data, /phone/accelerometer, "
-              "/phone/gyroscope, /phone/magnetic_field, /phone/linear_acceleration, /phone/orientation")
+              "/phone/gyroscope, /phone/magnetic_field, /phone/linear_acceleration(_enu), /phone/orientation")
         print(f"               stamps: {args.ros_stamp} time")
     if args.filter:
         print(f"   FILTER    : guided per-axis filters for accel/gyro/mag, keeping {args.filter_keep:.0%} of the motion"
@@ -562,7 +601,7 @@ def make_phone_sender(control, current: dict):
     """Fire-and-forget control message to the connected phone (guided tuning); dropped without one."""
     def send(obj: dict) -> None:
         if current.get("id") is not None:
-            asyncio.get_running_loop().create_task(control.send_json(current["id"], obj))
+            spawn(control.send_json(current["id"], obj), "guided-tuning message")
     return send
 
 

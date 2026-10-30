@@ -17,8 +17,9 @@ import java.nio.ByteOrder
  * Lifecycle: construct ONCE per streaming session and keep it across WS reconnects (a fresh
  * instance per reconnect would orphan the previous instance's segment files — uncounted and never
  * pruned — growing storage without bound). On construction it ADOPTS any pre-existing seg_*.ssbin
- * in [dir] (from earlier reconnects this session, or a prior process) into [segments] + the
- * (handle,seq) index, so they count toward the cap, get pruned, and can be served by readRawRange.
+ * in [dir] (from an earlier streaming session, or a prior process) into [segments] + the
+ * (handle,seq) index, so they count toward the cap and get pruned (they are kept for export but never
+ * served as backfill: see [readRawRange]).
  *
  * Thread-safety: write() runs on the single IO drain coroutine, but stats() is polled from the
  * heartbeat coroutine (another thread) and close() runs on the stop() caller's thread. The public
@@ -48,7 +49,8 @@ class LocalRecorder(
         private const val MIN_DATAGRAM = BinaryPacketCodec.HEADER_SIZE + BinaryPacketCodec.REC_FIXED_SIZE // 30
     }
 
-    private class Segment(val file: File, val startMs: Long) {
+    /** [own] = written by this instance (this streaming session); false for adopted segments. */
+    private class Segment(val file: File, val startMs: Long, val own: Boolean) {
         // Non-null only for the writable current segment; adopted/closed segments carry null.
         var out: BufferedOutputStream? = null
         var bytes = 0L
@@ -116,15 +118,22 @@ class LocalRecorder(
         return Stats(recorded, totalBytes(), oldestAge, droppedOldest, writeErrors, lastError)
     }
 
+    /**
+     * Backfill: this session's datagrams for [handle] with seq in [fromSeq]..[toSeq]. Adopted segments
+     * are never served: they come from an earlier session (or process), whose per-sensor seq counted
+     * from 0 too, so the same seq is a different sample and would be spliced into the laptop's
+     * recording as new data.
+     */
     @Synchronized
     fun readRawRange(handle: Int, fromSeq: Long, toSeq: Long): List<ByteArray> {
         current?.out?.flush() // ensure current segment's bytes are on disk before reading
         val out = ArrayList<Pair<Long, ByteArray>>()
         for (seg in segments) {
-            val entries = seg.index[handle] ?: continue
-            for ((seq, offset, len) in entries) {
-                if (seq < fromSeq || seq > toSeq) continue
-                java.io.RandomAccessFile(seg.file, "r").use { raf ->
+            if (!seg.own) continue
+            val wanted = seg.index[handle]?.filter { (seq, _, _) -> seq in fromSeq..toSeq } ?: continue
+            if (wanted.isEmpty()) continue
+            java.io.RandomAccessFile(seg.file, "r").use { raf ->  // once per segment, not per record
+                for ((seq, offset, len) in wanted) {
                     raf.seek(offset)
                     val buf = ByteArray(len)
                     raf.readFully(buf)
@@ -145,7 +154,7 @@ class LocalRecorder(
         // salt with a monotonic counter: a constant/coarse clock can otherwise produce the
         // same filename across rotations, causing a later segment's FileOutputStream to
         // truncate a still-referenced earlier segment's file. Also advanced past adopted salts.
-        val seg = Segment(File(dir, "seg_${ts}_${segmentSeq++}.ssbin"), ts)
+        val seg = Segment(File(dir, "seg_${ts}_${segmentSeq++}.ssbin"), ts, own = true)
         seg.out = BufferedOutputStream(FileOutputStream(seg.file))
         seg.out!!.write(MAGIC)
         seg.bytes = MAGIC.size.toLong()
@@ -187,7 +196,7 @@ class LocalRecorder(
         val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
         if (bytes.size < MAGIC.size) return null
         for (i in MAGIC.indices) if (bytes[i] != MAGIC[i]) return null // not our file
-        val seg = Segment(file, startMs) // out stays null: adopted segments are read-only
+        val seg = Segment(file, startMs, own = false) // out stays null: adopted segments are read-only
         val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
         var pos = MAGIC.size
         while (pos + FRAME_HEADER <= bytes.size) {
