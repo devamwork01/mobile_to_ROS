@@ -14,6 +14,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 from . import protocol as p
 from .backfill import GapTracker
 
+# A request with no (complete) reply after this long is asked again: the reply or the request was
+# lost (link dropped mid-request), or the phone answered only part of it.
+RETRY_NS = 10_000_000_000
+
 
 class Reconciler:
     def __init__(self, tracker: GapTracker,
@@ -26,11 +30,16 @@ class Reconciler:
         self._on_backfilled = on_backfilled
         self._dev2client: Dict[int, str] = {}
         self._client2dev: Dict[str, int] = {}
-        self._inflight: set = set()   # (client_id, handle, from, to) requested, awaiting reply
+        # (client_id, handle, from, to) -> receive-clock time it was requested, awaiting reply
+        self._inflight: Dict[Tuple[str, int, int, int], int] = {}
 
     def set_device_client(self, device_id: int, client_id: str) -> None:
         self._dev2client[device_id] = client_id
         if client_id:
+            if self._client2dev.get(client_id, device_id) != device_id:
+                # Reconnected as a new device id: requests sent to the old session will never be
+                # answered, so ask the new one straight away.
+                self._inflight = {k: t for k, t in self._inflight.items() if k[0] != client_id}
             self._client2dev[client_id] = device_id   # latest device_id for this client
 
     def client_for(self, device_id: int) -> Optional[str]:
@@ -49,14 +58,16 @@ class Reconciler:
             self._t.observe(cid, r.sensor_handle, r.seq, t_recv_ns)
 
     async def tick(self, now_ns: int) -> None:
+        self._inflight = {k: t for k, t in self._inflight.items() if now_ns - t < RETRY_NS}
         for (cid, handle, a, b) in self._t.due_ranges(now_ns):
-            key = (cid, handle, a, b)
-            if key in self._inflight:
+            # Skip a range overlapping a pending request: after one chunk of a chunked reply the
+            # rest of the range is still missing but already on its way.
+            if any(k[0] == cid and k[1] == handle and k[2] <= b and a <= k[3] for k in self._inflight):
                 continue
             dev = self._client2dev.get(cid)
             if dev is None:
                 continue
-            self._inflight.add(key)
+            self._inflight[(cid, handle, a, b)] = now_ns
             self._send_resend(dev, handle, a, b)
 
     def on_backfill(self, device_id: int, handle: int, frames_b64: List[str]) -> None:
@@ -73,14 +84,14 @@ class Reconciler:
         self._t.resolve(cid, handle, got)
         got_set = set(got)
         self._inflight = {
-            k for k in self._inflight
+            k: t for k, t in self._inflight.items()
             if not (k[0] == cid and k[1] == handle and set(range(k[2], k[3] + 1)) <= got_set)
         }
 
     def on_unavailable(self, device_id: int, handle: int, from_seq: int, to_seq: int) -> None:
         cid = self._client(device_id)
         self._t.mark_permanent(cid, handle, from_seq, to_seq)
-        self._inflight.discard((cid, handle, from_seq, to_seq))
+        self._inflight.pop((cid, handle, from_seq, to_seq), None)
 
     def acks(self) -> List[Tuple[int, List[Tuple[int, int]]]]:
         out: List[Tuple[int, List[Tuple[int, int]]]] = []

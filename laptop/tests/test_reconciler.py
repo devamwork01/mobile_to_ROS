@@ -88,3 +88,48 @@ def test_backfilled_frames_are_stamped_with_their_arrival_time():
     tr.on_live(1, _dg(0, 2, 300, 2.0), t_recv_ns=41 * S)
     tr.on_backfill(1, 0, [p.encode_frame_b64(p.encode_datagram(_dg(0, 1, 200, 1.0)))])
     assert got == [42 * S]
+
+
+def _gap_tracker(sent):
+    tr = Reconciler(GapTracker(grace_ns=S),
+                    send_resend=lambda d, h, a, b: sent.append((d, h, a, b)),
+                    on_backfilled=lambda dg, t: None)
+    tr.set_device_client(1, "c")
+    tr.on_live(1, _dg(0, 0, 100, 0.0), 0)
+    tr.on_live(1, _dg(0, 5, 600, 5.0), S)             # seqs 1..4 missing
+    return tr
+
+
+def test_rerequests_after_reconnect():
+    # The control link dropped before the phone answered: the request went to a dead session.
+    sent = []
+    tr = _gap_tracker(sent)
+    asyncio.run(tr.tick(now_ns=2 * S + 1))
+    assert sent == [(1, 0, 1, 4)]
+    tr.set_device_client(2, "c")                        # same phone, new device id
+    asyncio.run(tr.tick(now_ns=2 * S + 2))
+    assert sent == [(1, 0, 1, 4), (2, 0, 1, 4)]         # asked the new session at once
+
+
+def test_rerequests_when_no_reply_arrives():
+    sent = []
+    tr = _gap_tracker(sent)
+    asyncio.run(tr.tick(now_ns=2 * S + 1))
+    asyncio.run(tr.tick(now_ns=11 * S))                 # waiting for the reply
+    assert sent == [(1, 0, 1, 4)]
+    asyncio.run(tr.tick(now_ns=13 * S))                 # nothing came back: ask again
+    assert sent == [(1, 0, 1, 4), (1, 0, 1, 4)]
+
+
+def test_remainder_not_rerequested_while_later_chunks_are_in_transit():
+    # Backfill replies come in chunks: after the first chunk the rest of the range is still missing
+    # but already requested.
+    sent = []
+    tr = _gap_tracker(sent)
+    asyncio.run(tr.tick(now_ns=2 * S + 1))
+    frames = [p.encode_frame_b64(p.encode_datagram(_dg(0, s, 100 * (s + 1), float(s)))) for s in (1, 2)]
+    tr.on_backfill(1, 0, frames)                        # first chunk: seqs 1, 2
+    asyncio.run(tr.tick(now_ns=3 * S))
+    assert sent == [(1, 0, 1, 4)]                       # 3..4 are on their way
+    asyncio.run(tr.tick(now_ns=13 * S))                 # ...but never came: ask for just those
+    assert sent == [(1, 0, 1, 4), (1, 0, 3, 4)]
